@@ -2,28 +2,42 @@ import { describe, expect, it } from "vitest";
 
 import {
   SUBTITLE_EXPORT_ROOT,
+  buildCollectionShortUrl,
+  buildLibraryRenderNodes,
   buildSubtitleExportIndexPath,
   buildSubtitleExportRelativePath,
+  buildUpFolderLabel,
   describeSubtitleExport,
   parseExportIndexMd,
   renderExportIndexMd,
+  resolveExportFolderName,
   resolvePartLabel,
   resolveSeriesTitle,
   resolveSubtitleFileStem,
   safePathSegment,
+  setGroupSelection,
+  upsertCollectionExportIndex,
   upsertExportIndexMap,
+  upsertIndexForExportItem,
 } from "@subbatch/core";
 
 describe("subtitle export layout", () => {
   const blenderPart = {
     bvid: "BV14u41147YH",
     page: 33,
+    author: "Kurt",
+    groupType: "selection" as const,
+    videoTitle: "【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
+    groupFolder: buildUpFolderLabel(
+      "Kurt",
+      "【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
+    ),
     title:
       "【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结) - P33【【动画篇】6.5 头部跟随动画 - 物体约束】",
     part: "【动画篇】6.5 头部跟随动画 - 物体约束",
   };
 
-  it("derives series folder and short P* part file names", () => {
+  it("derives series folder and short P* part file names for 视频选集", () => {
     expect(resolveSeriesTitle(blenderPart)).toBe(
       "【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
     );
@@ -33,16 +47,50 @@ describe("subtitle export layout", () => {
     expect(resolveSubtitleFileStem(blenderPart)).toBe(
       "P33【动画篇】6.5 头部跟随动画 - 物体约束",
     );
+    expect(resolveExportFolderName(blenderPart)).toBe(
+      "Kurt 【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
+    );
 
     const path = buildSubtitleExportRelativePath(blenderPart, "txt");
     expect(path.startsWith(`${SUBTITLE_EXPORT_ROOT}/`)).toBe(true);
     expect(path).toContain("/P33【动画篇】6.5 头部跟随动画 - 物体约束.txt");
     expect(path).not.toContain("BV14u41147YH_P");
-    // Folder must not embed the full multipage suffix.
     expect(path).not.toMatch(/- P33【/);
-    // Pipe is sanitized for filesystem paths.
     expect(path).toContain("｜");
     expect(path.split("/")).toHaveLength(3);
+  });
+
+  it("uses UP + 合集名 as folder and video title as file for 合集", () => {
+    const shortUrl = buildCollectionShortUrl("12345", "67890");
+    const item = {
+      bvid: "BV1qmsXztEde",
+      page: 1,
+      author: "示例UP",
+      title: "合集内第 3 集：实战演示",
+      groupType: "collection" as const,
+      collectionName: "从入门到精通合集",
+      collectionMid: "12345",
+      collectionSid: "67890",
+      collectionShortUrl: shortUrl,
+      groupFolder: buildUpFolderLabel("示例UP", "从入门到精通合集"),
+    };
+    expect(resolveExportFolderName(item)).toBe("示例UP 从入门到精通合集");
+    expect(resolveSubtitleFileStem(item)).toBe("合集内第 3 集：实战演示");
+    expect(buildSubtitleExportRelativePath(item, "txt")).toBe(
+      `${SUBTITLE_EXPORT_ROOT}/${safePathSegment("示例UP 从入门到精通合集")}/${safePathSegment("合集内第 3 集：实战演示")}.txt`,
+    );
+
+    let map = upsertIndexForExportItem({}, item);
+    map = upsertIndexForExportItem(map, {
+      ...item,
+      collectionName: "从入门到精通合集（完结）",
+      groupFolder: buildUpFolderLabel("示例UP", "从入门到精通合集（完结）"),
+    });
+    const md = renderExportIndexMd(map);
+    expect(md).toContain(`示例UP ${shortUrl} 从入门到精通合集（完结）`);
+    expect(md).not.toContain("BV1qmsXztEde");
+    expect(md).not.toContain("从入门到精通合集）\n"); // old name fully replaced
+    expect(md.match(new RegExp(shortUrl.replace(/\./g, "\\."), "g"))?.length).toBe(1);
   });
 
   it("parses multipage title when part field is missing", () => {
@@ -78,34 +126,128 @@ describe("subtitle export layout", () => {
     map = upsertExportIndexMap(
       map,
       "BV14u41147YH",
-      "【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
+      "Kurt 【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
     );
-    map = upsertExportIndexMap(map, "BV1OTHER0001", "另一个合集");
+    map = upsertExportIndexMap(map, "BV1OTHER0001", "另一个视频");
 
     const md = renderExportIndexMd(map);
     expect(md).toContain(
-      "BV14u41147YH 【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
+      "BV14u41147YH Kurt 【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
     );
     expect(md).not.toContain("旧标题");
-    expect(md).toContain("BV1OTHER0001 另一个合集");
+    expect(md).toContain("BV1OTHER0001 另一个视频");
     expect(buildSubtitleExportIndexPath()).toBe(
       `${SUBTITLE_EXPORT_ROOT}/index.md`,
     );
 
     const parsed = parseExportIndexMd(md);
     expect(parsed.BV14u41147YH).toBe(
-      "【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
+      "Kurt 【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
     );
+  });
+
+  it("round-trips collection index lines by short URL", () => {
+    const shortUrl = buildCollectionShortUrl("99", "88");
+    let map = upsertCollectionExportIndex({}, "UP甲", shortUrl, "合集A");
+    map = upsertCollectionExportIndex(map, "UP甲", shortUrl, "合集A改名");
+    const md = renderExportIndexMd(map);
+    expect(md).toBe(`UP甲 ${shortUrl} 合集A改名\n`);
+    const parsed = parseExportIndexMd(md);
+    expect(parsed[`collection:${shortUrl}`]).toEqual({
+      kind: "collection",
+      author: "UP甲",
+      shortUrl,
+      name: "合集A改名",
+    });
   });
 
   it("describeSubtitleExport returns a complete layout descriptor", () => {
     const desc = describeSubtitleExport(blenderPart, "txt");
     expect(desc.bvid).toBe("BV14u41147YH");
     expect(desc.seriesTitle).toBe(
-      "【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
+      "Kurt 【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
     );
     expect(desc.fileStem).toBe("P33【动画篇】6.5 头部跟随动画 - 物体约束");
     expect(desc.relativePath).toBe(buildSubtitleExportRelativePath(blenderPart, "txt"));
     expect(desc.indexPath).toBe("loop-bilibili-subbatch/index.md");
+    expect(desc.groupType).toBe("selection");
+  });
+});
+
+describe("library folder groups", () => {
+  it("groups 选集/合集 and computes parent checkbox state", () => {
+    const selection = [1, 2, 3].map((page, index) => ({
+      item: {
+        bvid: "BV14u41147YH",
+        page,
+        author: "Kurt",
+        groupType: "selection" as const,
+        groupKey: "selection:BV14u41147YH",
+        groupFolder: "Kurt Blender教程",
+        title: `P${page}`,
+        selected: page !== 2,
+      },
+      index,
+    }));
+    const nodes = buildLibraryRenderNodes(selection, {});
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0].type).toBe("folder");
+    if (nodes[0].type !== "folder") return;
+    expect(nodes[0].folderLabel).toBe("Kurt Blender教程");
+    expect(nodes[0].checkState).toBe("partial");
+    expect(nodes[0].total).toBe(3);
+
+    const items = selection.map((e) => e.item);
+    setGroupSelection(items, "selection:BV14u41147YH", true);
+    expect(items.every((i) => i.selected)).toBe(true);
+    const allNodes = buildLibraryRenderNodes(
+      items.map((item, index) => ({ item, index })),
+      { "selection:BV14u41147YH": true },
+    );
+    expect(allNodes[0].type === "folder" && allNodes[0].collapsed).toBe(true);
+    expect(allNodes[0].type === "folder" && allNodes[0].checkState).toBe("all");
+  });
+
+  it("keeps single videos flat outside folders", () => {
+    const entries = [
+      {
+        item: { bvid: "BV1AAA", page: 1, title: "单集", author: "A", groupType: "single" as const },
+        index: 0,
+      },
+      {
+        item: {
+          bvid: "BV1BBB",
+          page: 1,
+          title: "合集视频1",
+          author: "B",
+          groupType: "collection" as const,
+          groupKey: "collection:1/2",
+          groupFolder: "B 合集X",
+          collectionName: "合集X",
+          selected: true,
+        },
+        index: 1,
+      },
+      {
+        item: {
+          bvid: "BV1CCC",
+          page: 1,
+          title: "合集视频2",
+          author: "B",
+          groupType: "collection" as const,
+          groupKey: "collection:1/2",
+          groupFolder: "B 合集X",
+          collectionName: "合集X",
+          selected: false,
+        },
+        index: 2,
+      },
+    ];
+    const nodes = buildLibraryRenderNodes(entries, {});
+    expect(nodes.map((n) => n.type)).toEqual(["item", "folder"]);
+    if (nodes[1].type === "folder") {
+      expect(nodes[1].children).toHaveLength(2);
+      expect(nodes[1].checkState).toBe("partial");
+    }
   });
 });

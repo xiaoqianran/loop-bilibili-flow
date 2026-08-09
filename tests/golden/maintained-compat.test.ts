@@ -111,12 +111,15 @@ describe("Maintained full-feature compatibility source", () => {
     expect(maintainedSource).toContain("function buildSubtitleExportRelativePath(");
     expect(maintainedSource).toContain("function downloadSubtitleExportBatch(");
     expect(maintainedSource).toContain("function renderExportIndexMd(");
+    expect(maintainedSource).toContain("function attachCollectionGroupMeta(");
+    expect(maintainedSource).toContain("function buildLibraryRenderNodes(");
+    expect(maintainedSource).toContain("folder-expand-all");
     expect(maintainedSource).toContain("GM_download");
     expect(maintainedSource).toContain("buildSubtitleExportIndexPath()");
 
     const batch = extractFunctionSource(maintainedSource, "downloadSubtitleExportBatch");
     expect(batch).toContain("buildSubtitleExportRelativePath(it, ext)");
-    expect(batch).toContain("upsertExportIndexMap");
+    expect(batch).toContain("upsertIndexForExportItem");
     expect(batch).toContain("buildSubtitleExportIndexPath()");
 
     // Shipped product path must call the batch exporter (not flat BV_Pn_title files).
@@ -125,10 +128,6 @@ describe("Maintained full-feature compatibility source", () => {
     expect(doBatch).not.toContain('`${it.bvid}${it.page > 1 ? "_P"');
 
     // Drive the real maintained source functions (not a re-implementation).
-    const resolveSeries = sourceFunction<UnknownFunction>(
-      maintainedSource,
-      "resolveSeriesTitle",
-    );
     const resolveStem = sourceFunction<UnknownFunction>(
       maintainedSource,
       "resolveSubtitleFileStem",
@@ -137,9 +136,9 @@ describe("Maintained full-feature compatibility source", () => {
       maintainedSource,
       "buildSubtitleExportRelativePath",
     );
-    const upsert = sourceFunction<UnknownFunction>(
+    const upsertIndex = sourceFunction<UnknownFunction>(
       maintainedSource,
-      "upsertExportIndexMap",
+      "upsertIndexForExportItem",
     );
     const renderIndex = sourceFunction<UnknownFunction>(
       maintainedSource,
@@ -148,26 +147,40 @@ describe("Maintained full-feature compatibility source", () => {
     const item = {
       bvid: "BV14u41147YH",
       page: 33,
+      author: "Kurt",
+      groupType: "selection",
+      videoTitle: "【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
+      groupFolder: "Kurt 【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
       title:
         "【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结) - P33【【动画篇】6.5 头部跟随动画 - 物体约束】",
       part: "【动画篇】6.5 头部跟随动画 - 物体约束",
     };
-    expect(resolveSeries(item)).toBe(
-      "【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
-    );
     expect(resolveStem(item)).toBe("P33【动画篇】6.5 头部跟随动画 - 物体约束");
     expect(buildPath(item, "txt")).toMatch(
       /^loop-bilibili-subbatch\/.+\/P33【动画篇】6\.5 头部跟随动画 - 物体约束\.txt$/,
     );
-    const map = upsert(
-      upsert({}, "BV14u41147YH", "旧标题"),
-      "BV14u41147YH",
-      resolveSeries(item),
+    const map = upsertIndex(
+      upsertIndex({}, { ...item, bvid: "BV14u41147YH" }),
+      item,
     );
-    expect(renderIndex(map)).toContain(
-      "BV14u41147YH 【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
-    );
-    expect(renderIndex(map)).not.toContain("旧标题");
+    expect(renderIndex(map)).toContain("BV14u41147YH");
+    expect(renderIndex(map)).toContain("Kurt");
+
+    const collectionItem = {
+      bvid: "BV1qmsXztEde",
+      author: "示例UP",
+      title: "合集内某一集",
+      groupType: "collection",
+      collectionName: "测试合集",
+      collectionMid: "1",
+      collectionSid: "2",
+      collectionShortUrl: "space.bilibili.com/1/lists/2",
+      groupFolder: "示例UP 测试合集",
+    };
+    const colMap = upsertIndex({}, collectionItem);
+    const colMd = renderIndex(colMap);
+    expect(colMd).toContain("示例UP space.bilibili.com/1/lists/2 测试合集");
+    expect(colMd).not.toContain("BV1qmsXztEde");
   });
 
   it("uses two-pane Knowledge Workspace (Navigator | Reader)", () => {
