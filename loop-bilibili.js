@@ -32,6 +32,7 @@
 // ==/UserScript==
 
 /**
+ * v6.5.1 — 自动抓取后联动采集模式下拉：多分P 切「视频选集」，ugc 合集切「合集」，减少手动点选。
  * v6.5.0 — 架构收敛：字幕导出/选集合集分组/index 规则仅存在 packages/core；产品体只做 monorepo bridge + IO，消除双轨实现。
  * v6.4.1 — 合集与视频选集一样在字幕库自动建文件夹：扫描/打开合集内视频识别 ugc_season 并分组；自动模式扫合集页拉全列表。
  * v6.4.0 — index.md 视频选集/单视频改为「作者 + www.bilibili.com/video/BV + 标题」，与合集「作者 + 短地址 + 名称」对齐。
@@ -1306,6 +1307,46 @@
 
   function mergeGroupFields(target, source) {
     return coreCall("mergeGroupFields", target, source);
+  }
+
+  function suggestCaptureMode(item) {
+    return coreCall("suggestCaptureMode", item);
+  }
+
+  /**
+   * 自动抓取后联动采集模式下拉：多分P → 视频选集，ugc 合集 → 合集。
+   * 不覆盖用户显式选择的 单个视频 / 个人主页 / 收藏夹 / 搜索。
+   */
+  function syncCaptureModeFromItem(item, { silent = true } = {}) {
+    const locked = new Set(["video", "user", "favorite", "search"]);
+    if (locked.has(state.mode)) return state.mode;
+
+    let next = "auto";
+    try {
+      next = suggestCaptureMode(item) || "auto";
+    } catch (_) {
+      const pageCount = Array.isArray(item?.pages) ? item.pages.length : 0;
+      if (item?.groupType === "collection" || item?.collectionSid) next = "collection";
+      else if (item?.groupType === "selection" || pageCount > 1) next = "selection";
+    }
+
+    // 单集普通视频：若仍停在 选集/合集，收回 auto，避免扫错范围。
+    if (next === "auto" && state.mode !== "selection" && state.mode !== "collection") {
+      return state.mode;
+    }
+    if (next === state.mode) return state.mode;
+
+    state.mode = next;
+    const root = document.getElementById(PANEL_ID);
+    const modeSel = root?.querySelector('[data-role="mode"]');
+    if (modeSel) modeSel.value = next;
+    try {
+      refreshContextUI();
+    } catch (_) { /* panel may not exist yet */ }
+    if (!silent) {
+      setStatus(`采集模式已自动切换为「${TYPE_LABEL[next] || next}」`, "ok");
+    }
+    return next;
   }
 
   /** IO only — blob download with optional overwrite (GM_download). */
@@ -14108,6 +14149,10 @@
       author: item.author,
       source: item.source,
     };
+    // 联动采集模式：多分P → 视频选集；合集 → 合集（便于一点「扫描/抓取所选」）
+    const liveItem =
+      state.items.find((x) => routeVideoKey(x.bvid, x.page || 1) === captureKey) || item;
+    const modeSwitched = syncCaptureModeFromItem(liveItem, { silent: true });
     renderList();
     bindTranscriptVideoEvents();
     // 自动抓取可能在 AI 画布首次渲染之后才完成；同步刷新，避免状态显示
@@ -14118,7 +14163,16 @@
       if (state.autoEnablePlayerSubtitle) {
         window.setTimeout(() => enablePlayerSubtitle(item).catch(() => {}), 280);
       }
-      setStatus(`已自动抓取 ${item.cue_count} 条字幕 · ${item.cachePath || item.cacheLevel || item.source}`, "ok");
+      const modeHint =
+        modeSwitched === "selection"
+          ? " · 模式→视频选集"
+          : modeSwitched === "collection"
+            ? " · 模式→合集"
+            : "";
+      setStatus(
+        `已自动抓取 ${item.cue_count} 条字幕 · ${item.cachePath || item.cacheLevel || item.source}${modeHint}`,
+        "ok",
+      );
       // 静默的 stale-while-revalidate 只更新字幕缓存，不重复消耗一次 AI 请求。
       if (!options.silent && reason !== "stale-revalidate") {
         scheduleAutoAnalyze(item, captureKey, reason);

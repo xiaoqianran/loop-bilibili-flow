@@ -226,3 +226,28 @@ export function refreshGroupFolder<T extends LibraryGroupItem>(item: T): T {
   if (folder && !/^未知UP\b/.test(folder)) return item;
   return { ...item, groupFolder: resolveLibraryFolderLabel(item) };
 }
+
+/**
+ * Suggest capture-panel mode from a library / view item.
+ * - 合集 (ugc_season fields) → "collection"
+ * - 多分P 视频选集 → "selection"
+ * - otherwise → "auto" (caller may only apply when leaving selection/collection)
+ */
+export function suggestCaptureMode(
+  item: LibraryGroupItem | null | undefined,
+): "collection" | "selection" | "auto" {
+  if (!item) return "auto";
+  if (
+    item.groupType === "collection"
+    || item.collectionSid
+    || item.collectionShortUrl
+    || item.collectionName
+  ) {
+    return "collection";
+  }
+  const pageCount = Array.isArray(item.pages) ? item.pages.length : 0;
+  if (item.groupType === "selection" || pageCount > 1) {
+    return "selection";
+  }
+  return "auto";
+}

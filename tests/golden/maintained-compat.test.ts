@@ -117,12 +117,15 @@ describe("Maintained full-feature compatibility source", () => {
     expect(maintainedSource).toContain('coreCall("attachCollectionGroupMeta"');
     expect(maintainedSource).toContain('coreCall("applyUgcSeasonToItems"');
     expect(maintainedSource).toContain('coreCall("normalizeExportItem"');
+    expect(maintainedSource).toContain('coreCall("suggestCaptureMode"');
+    expect(maintainedSource).toContain("function syncCaptureModeFromItem(");
     expect(maintainedSource).toContain("function downloadSubtitleExportBatch(");
     expect(maintainedSource).toContain("function stampUgcSeasonGroupMeta(");
     expect(maintainedSource).toContain("auto_promoted_ugc_season");
     expect(maintainedSource).toContain("folder-expand-all");
     expect(maintainedSource).toContain("GM_download");
     expect(maintainedSource).toContain("conflictAction");
+    expect(maintainedSource).toContain("syncCaptureModeFromItem(liveItem");
     // Must NOT re-implement sanitize / index rules inline (architecture guard).
     expect(maintainedSource).not.toContain(".replace(/\\./g, \"·\")");
     expect(maintainedSource).not.toContain("kind: \"video\"");

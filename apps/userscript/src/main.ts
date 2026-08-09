@@ -25,7 +25,7 @@ const runtime = createUserscriptRuntime(host);
  * Product body must call `SubBatch.SubBatchMonorepo.core.*` (or top-level aliases).
  */
 const SubBatchMonorepo = {
-  version: "6.5.0",
+  version: "6.5.1",
   runtime,
   host,
   /** Entire pure core namespace — preferred bridge target. */
@@ -73,6 +73,7 @@ const SubBatchMonorepo = {
   applyGroupMetaPatchToItems: core.applyGroupMetaPatchToItems,
   mergeGroupFields: core.mergeGroupFields,
   setGroupSelection: core.setGroupSelection,
+  suggestCaptureMode: core.suggestCaptureMode,
   shortcutCommands: core.SHORTCUT_COMMANDS,
   shouldIgnoreShortcutEvent: core.shouldIgnoreShortcutEvent,
 };

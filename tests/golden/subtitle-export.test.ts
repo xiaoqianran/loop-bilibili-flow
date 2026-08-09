@@ -25,6 +25,7 @@ import {
   buildGroupMetaPatches,
   applyGroupMetaPatchToItems,
   mergeGroupFields,
+  suggestCaptureMode,
   buildVideoShortUrl,
   upsertCollectionExportIndex,
   upsertExportIndexMap,
@@ -458,6 +459,39 @@ describe("library folder groups", () => {
     );
     expect(merged.groupType).toBe("collection");
     expect(merged.groupKey).toBe("collection:1/2");
+  });
+
+  it("suggestCaptureMode: multipage → selection, ugc → collection", () => {
+    expect(
+      suggestCaptureMode({
+        bvid: "BV14",
+        pages: [{}, {}, {}],
+        title: "教程",
+      }),
+    ).toBe("selection");
+    expect(
+      suggestCaptureMode({
+        bvid: "BV14",
+        groupType: "selection",
+        pages: [{}, {}],
+      }),
+    ).toBe("selection");
+    expect(
+      suggestCaptureMode({
+        bvid: "BV1q",
+        groupType: "collection",
+        collectionSid: "6622988",
+        collectionName: "分布式教程",
+      }),
+    ).toBe("collection");
+    expect(
+      suggestCaptureMode({
+        bvid: "BV1q",
+        collectionMid: "1",
+        collectionSid: "2",
+      }),
+    ).toBe("collection");
+    expect(suggestCaptureMode({ bvid: "BV1", page: 1, title: "单集" })).toBe("auto");
   });
 
   it("keeps single videos flat outside folders", () => {
