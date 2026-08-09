@@ -3,9 +3,10 @@
  *
  * Downloads land under the browser download directory as:
  *   loop-bilibili-subbatch/<UP 视频名|合集名>/<file>.{ext}
- * plus a root index.md mapping:
- *   - 视频选集: BV1xxx <folder label>
- *   - 合集: <UP> <shortUrl> <合集名>  (keyed by shortUrl; name updates in place)
+ * plus a root index.md mapping (same shape for 选集 / 合集):
+ *   - 视频选集/单视频: <UP> www.bilibili.com/video/BVxxx <视频标题>
+ *   - 合集: <UP> space.bilibili.com/{mid}/lists/{sid} <合集名>
+ * Same BV / 合集短地址 upsert 覆盖名称与作者。
  *
  * Folder labels MUST match the 字幕 panel (resolveLibraryFolderLabel).
  */
@@ -28,16 +29,41 @@ export interface SubtitleExportItem extends LibraryGroupItem {
   pages?: Array<{ part?: string } | null | undefined> | null;
 }
 
-/** BV entries are plain strings; collection entries are structured. */
+/** @deprecated legacy string values keyed by BV (pre-6.4). */
 export type ExportIndexBvValue = string;
+/** 视频选集 / 单视频：作者 + 短链 + 标题 */
+export type ExportIndexVideoValue = {
+  kind: "video";
+  author: string;
+  shortUrl: string;
+  bvid: string;
+  name: string;
+};
 export type ExportIndexCollectionValue = {
   kind: "collection";
   author: string;
   shortUrl: string;
   name: string;
 };
-export type ExportIndexValue = ExportIndexBvValue | ExportIndexCollectionValue;
+export type ExportIndexValue =
+  | ExportIndexBvValue
+  | ExportIndexVideoValue
+  | ExportIndexCollectionValue;
 export type SubtitleExportIndexMap = Record<string, ExportIndexValue>;
+
+/** Short watch URL for index.md (parallel to collection short address). */
+export function buildVideoShortUrl(bvid: string | null | undefined): string {
+  const id = String(bvid || "").trim();
+  if (!id) return "";
+  const normalized = /^bv/i.test(id) ? `BV${id.slice(2)}` : id;
+  return `www.bilibili.com/video/${normalized}`;
+}
+
+export function videoIndexKey(bvid: string | null | undefined): string {
+  const id = String(bvid || "").trim();
+  if (!id) return "";
+  return /^bv/i.test(id) ? `BV${id.slice(2)}` : id;
+}
 
 /**
  * Sanitize one path segment for browser Downloads / Windows FS.
@@ -147,7 +173,7 @@ export function collectionIndexKey(shortUrl: string): string {
   return `collection:${String(shortUrl || "").trim()}`;
 }
 
-/** Parse index.md: BV lines and "UP shortUrl 合集名" collection lines. */
+/** Parse index.md: video lines and collection lines (plus legacy `BV title`). */
 export function parseExportIndexMd(content: string | null | undefined): SubtitleExportIndexMap {
   const map: SubtitleExportIndexMap = {};
   for (const rawLine of String(content || "").split(/\r?\n/)) {
@@ -170,27 +196,84 @@ export function parseExportIndexMd(content: string | null | undefined): Subtitle
       continue;
     }
 
+    // New: author www.bilibili.com/video/BVxxx 标题
+    // Also accept missing author: www.bilibili.com/video/BVxxx 标题
+    const vid = line.match(
+      /^(?:(.+?)\s+)?((?:www\.)?bilibili\.com\/video\/(BV[\w]+))\s+(.+)$/i,
+    );
+    if (vid) {
+      const author = String(vid[1] || "").trim();
+      const bare = String(vid[2] || "").replace(/^https?:\/\//i, "");
+      const short = bare.startsWith("www.")
+        ? bare
+        : bare.toLowerCase().startsWith("bilibili.com")
+          ? `www.${bare}`
+          : bare;
+      const bvid = videoIndexKey(vid[3]);
+      const name = vid[4].trim();
+      map[bvid] = {
+        kind: "video",
+        author,
+        shortUrl: short || buildVideoShortUrl(bvid),
+        bvid,
+        name,
+      };
+      continue;
+    }
+
+    // Legacy: BV14u41147YH 标题…
     const m = line.match(/^(BV[\w]+)\s+(.+)$/i);
     if (!m) continue;
-    const normalized = /^bv/i.test(m[1]) ? `BV${m[1].slice(2)}` : m[1];
-    map[normalized] = m[2].trim();
+    const normalized = videoIndexKey(m[1]);
+    const legacyName = m[2].trim();
+    map[normalized] = {
+      kind: "video",
+      author: "",
+      shortUrl: buildVideoShortUrl(normalized),
+      bvid: normalized,
+      name: legacyName,
+    };
   }
   return map;
 }
 
-/** Upsert BV → folder/title. Same BV replaces the name. */
+/**
+ * Upsert 视频选集/单视频 index: author + shortUrl + title (keyed by BV).
+ * Same BV replaces author/title when metadata changes.
+ */
+export function upsertVideoExportIndex(
+  map: SubtitleExportIndexMap | null | undefined,
+  author: string | null | undefined,
+  bvid: string | null | undefined,
+  videoTitle: string | null | undefined,
+): SubtitleExportIndexMap {
+  const next: SubtitleExportIndexMap = { ...(map || {}) };
+  const id = videoIndexKey(bvid);
+  if (!id) return next;
+  const up = String(author || "").trim();
+  const name = String(videoTitle || "").trim() || id;
+  const shortUrl = buildVideoShortUrl(id);
+  next[id] = {
+    kind: "video",
+    author: up,
+    shortUrl,
+    bvid: id,
+    name,
+  };
+  return next;
+}
+
+/**
+ * @deprecated Prefer upsertVideoExportIndex. Kept for callers that only have BV + title.
+ * Writes structured video entries when possible.
+ */
 export function upsertExportIndexMap(
   map: SubtitleExportIndexMap | null | undefined,
   bvid: string | null | undefined,
   seriesTitle: string | null | undefined,
+  author?: string | null,
 ): SubtitleExportIndexMap {
-  const next: SubtitleExportIndexMap = { ...(map || {}) };
-  const id = String(bvid || "").trim();
-  if (!id) return next;
-  const normalized = /^bv/i.test(id) ? `BV${id.slice(2)}` : id;
-  const name = String(seriesTitle || "").trim() || normalized;
-  next[normalized] = name;
-  return next;
+  return upsertVideoExportIndex(map, author, bvid, seriesTitle);
 }
 
 /**
@@ -206,7 +289,7 @@ export function upsertCollectionExportIndex(
   const next: SubtitleExportIndexMap = { ...(map || {}) };
   const url = String(shortUrl || "").trim();
   if (!url) return next;
-  const up = String(author || "").trim() || "未知UP";
+  const up = String(author || "").trim();
   const name = String(collectionName || "").trim() || "未命名合集";
   next[collectionIndexKey(url)] = {
     kind: "collection",
@@ -218,21 +301,32 @@ export function upsertCollectionExportIndex(
 }
 
 export function renderExportIndexMd(map: SubtitleExportIndexMap | null | undefined): string {
-  const bvLines: string[] = [];
+  const videoLines: string[] = [];
   const colLines: string[] = [];
   for (const [key, value] of Object.entries(map || {})) {
     if (!value) continue;
     if (typeof value === "string") {
-      if (key && value) bvLines.push(`${key} ${value}`);
+      // Legacy storage: BV → title only → upgrade on render with empty author omitted carefully.
+      // Keep BV shortUrl so line is still discoverable: "www.bilibili.com/video/BV … title"
+      const bvid = videoIndexKey(key);
+      const shortUrl = buildVideoShortUrl(bvid);
+      if (bvid && value) videoLines.push(`${shortUrl} ${value}`);
+      continue;
+    }
+    if (value.kind === "video" && value.bvid && value.name) {
+      const shortUrl = value.shortUrl || buildVideoShortUrl(value.bvid);
+      const up = String(value.author || "").trim();
+      videoLines.push(up ? `${up} ${shortUrl} ${value.name}` : `${shortUrl} ${value.name}`);
       continue;
     }
     if (value.kind === "collection" && value.shortUrl && value.name) {
-      colLines.push(`${value.author || "未知UP"} ${value.shortUrl} ${value.name}`);
+      const up = String(value.author || "").trim();
+      colLines.push(up ? `${up} ${value.shortUrl} ${value.name}` : `${value.shortUrl} ${value.name}`);
     }
   }
-  bvLines.sort((a, b) => a.localeCompare(b, "en"));
+  videoLines.sort((a, b) => a.localeCompare(b, "en"));
   colLines.sort((a, b) => a.localeCompare(b, "zh"));
-  const lines = [...bvLines, ...colLines];
+  const lines = [...videoLines, ...colLines];
   if (!lines.length) return "";
   return `${lines.join("\n")}\n`;
 }
@@ -271,28 +365,38 @@ export function normalizeExportItem(
   return base;
 }
 
-/** Apply index upsert for one export item (BV for 选集, shortUrl for 合集). */
+/** Pure video title for index (no UP prefix; UP is a separate field). */
+export function resolveIndexVideoTitle(item: SubtitleExportItem | null | undefined): string {
+  const videoTitle = String(item?.videoTitle || "").trim();
+  if (videoTitle) return videoTitle;
+  return resolveSeriesTitle(item);
+}
+
+/** Apply index upsert for one export item (video 选集 / collection 合集). */
 export function upsertIndexForExportItem(
   map: SubtitleExportIndexMap | null | undefined,
   item: SubtitleExportItem | null | undefined,
 ): SubtitleExportIndexMap {
   const normalized = normalizeExportItem(item, item ? [item] : []);
-  let next: SubtitleExportIndexMap = { ...(map || {}) };
   const kind = inferLibraryGroupType(normalized);
   if (kind === "collection") {
     const shortUrl =
       normalized.collectionShortUrl
       || buildCollectionShortUrl(normalized.collectionMid, normalized.collectionSid);
     return upsertCollectionExportIndex(
-      next,
+      map,
       normalized.author,
       shortUrl,
-      normalized.collectionName || resolveExportFolderName(normalized),
+      normalized.collectionName || resolveSeriesTitle(normalized),
     );
   }
-  const folder = resolveExportFolderName(normalized);
-  if (normalized.bvid) next = upsertExportIndexMap(next, normalized.bvid, folder);
-  return next;
+  // 视频选集 / 单视频：作者 + www.bilibili.com/video/BV + 标题
+  return upsertVideoExportIndex(
+    map,
+    normalized.author,
+    normalized.bvid,
+    resolveIndexVideoTitle(normalized),
+  );
 }
 
 export function describeSubtitleExport(item: SubtitleExportItem | null | undefined, ext = "txt") {

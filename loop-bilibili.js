@@ -32,6 +32,7 @@
 // ==/UserScript==
 
 /**
+ * v6.4.0 — index.md 视频选集/单视频改为「作者 + www.bilibili.com/video/BV + 标题」，与合集「作者 + 短地址 + 名称」对齐。
  * v6.2.1 — 修复：下载后缀 -txt、选集未成文件夹、index.md 叠成 (1)(2)、合集下载未知UP；字幕面板与下载共用文件夹标签；GM_download overwrite。
  * v6.2.0 — 字幕库文件夹：视频选集按「UP+视频名」、合集按「UP+合集名」分组；支持全部展开/收起与文件夹全选勾选。合集 index.md 存 UP+短地址+合集名（按合集地址更新名称，不存 BV）。
  * v6.1.9 — 字幕批量下载落到 Downloads/loop-bilibili-subbatch/<视频名>/P{n}{分P名}.{ext}；根目录 index.md 维护 BV → 视频名映射，同 BV 更新名称。
@@ -1407,17 +1408,42 @@
     return map || {};
   }
 
-  function upsertExportIndexMap(map, bvid, seriesTitle) {
+  function buildVideoShortUrl(bvid) {
     try {
-      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.upsertExportIndexMap : null;
-      if (typeof pure === "function") return pure(map, bvid, seriesTitle);
+      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.buildVideoShortUrl : null;
+      if (typeof pure === "function") return pure(bvid);
+    } catch (_) { /* local fallback */ }
+    const id = String(bvid || "").trim();
+    if (!id) return "";
+    const normalized = /^bv/i.test(id) ? `BV${id.slice(2)}` : id;
+    return `www.bilibili.com/video/${normalized}`;
+  }
+
+  function upsertVideoExportIndex(map, author, bvid, videoTitle) {
+    try {
+      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.upsertVideoExportIndex : null;
+      if (typeof pure === "function") return pure(map, author, bvid, videoTitle);
     } catch (_) { /* local fallback */ }
     const next = { ...(map || {}) };
     const id = String(bvid || "").trim();
     if (!id) return next;
     const normalized = /^bv/i.test(id) ? `BV${id.slice(2)}` : id;
-    next[normalized] = String(seriesTitle || "").trim() || normalized;
+    next[normalized] = {
+      kind: "video",
+      author: String(author || "").trim(),
+      shortUrl: buildVideoShortUrl(normalized),
+      bvid: normalized,
+      name: String(videoTitle || "").trim() || normalized,
+    };
     return next;
+  }
+
+  function upsertExportIndexMap(map, bvid, seriesTitle, author) {
+    try {
+      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.upsertExportIndexMap : null;
+      if (typeof pure === "function") return pure(map, bvid, seriesTitle, author);
+    } catch (_) { /* local fallback */ }
+    return upsertVideoExportIndex(map, author, bvid, seriesTitle);
   }
 
   function upsertCollectionExportIndex(map, author, shortUrl, collectionName) {
@@ -1430,7 +1456,7 @@
     if (!url) return next;
     next[`collection:${url}`] = {
       kind: "collection",
-      author: String(author || "").trim() || "未知UP",
+      author: String(author || "").trim(),
       shortUrl: url,
       name: String(collectionName || "").trim() || "未命名合集",
     };
@@ -1442,7 +1468,7 @@
       const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.upsertIndexForExportItem : null;
       if (typeof pure === "function") return pure(map, item);
     } catch (_) { /* local fallback */ }
-    // Self-contained collection / BV index upsert for extractable tests.
+    // Self-contained: collection → UP shortUrl 合集名; video → UP shortUrl 标题
     if (item?.groupType === "collection" || item?.collectionSid || item?.collectionShortUrl) {
       const next = { ...(map || {}) };
       let url = String(item.collectionShortUrl || "").trim();
@@ -1454,23 +1480,30 @@
       if (!url) return next;
       next[`collection:${url}`] = {
         kind: "collection",
-        author: String(item.author || "").trim() || "未知UP",
+        author: String(item.author || "").trim(),
         shortUrl: url,
         name: String(item.collectionName || "").trim() || "未命名合集",
       };
       return next;
     }
-    const next = { ...(map || {}) };
     const id = String(item?.bvid || "").trim();
-    if (!id) return next;
+    if (!id) return map || {};
     const normalized = /^bv/i.test(id) ? `BV${id.slice(2)}` : id;
-    let folder = String(item?.groupFolder || "").trim();
-    if (!folder) {
-      const up = String(item?.author || "").trim() || "未知UP";
-      const series = String(item?.videoTitle || item?.title || id).trim();
-      folder = item?.author ? `${up} ${series}` : series;
+    let title = String(item?.videoTitle || "").trim();
+    if (!title) {
+      const raw = String(item?.title || "").trim();
+      const multi = raw.match(/^(.*)\s-\sP(\d+)【([\s\S]*)】\s*$/);
+      title = multi?.[1]?.trim() || raw || normalized;
     }
-    next[normalized] = folder;
+    // Inline video index entry (extractable unit tests cannot call sibling helpers).
+    const next = { ...(map || {}) };
+    next[normalized] = {
+      kind: "video",
+      author: String(item?.author || "").trim(),
+      shortUrl: `www.bilibili.com/video/${normalized}`,
+      bvid: normalized,
+      name: title,
+    };
     return next;
   }
 
@@ -1479,21 +1512,29 @@
       const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.renderExportIndexMd : null;
       if (typeof pure === "function") return pure(map);
     } catch (_) { /* local fallback */ }
-    const bvLines = [];
+    const videoLines = [];
     const colLines = [];
     for (const [key, value] of Object.entries(map || {})) {
       if (!value) continue;
       if (typeof value === "string") {
-        bvLines.push(`${key} ${value}`);
+        const bvid = /^bv/i.test(key) ? `BV${key.slice(2)}` : key;
+        videoLines.push(`www.bilibili.com/video/${bvid} ${value}`);
+        continue;
+      }
+      if (value.kind === "video" && value.bvid && value.name) {
+        const shortUrl = value.shortUrl || `www.bilibili.com/video/${value.bvid}`;
+        const up = String(value.author || "").trim();
+        videoLines.push(up ? `${up} ${shortUrl} ${value.name}` : `${shortUrl} ${value.name}`);
         continue;
       }
       if (value.kind === "collection" && value.shortUrl && value.name) {
-        colLines.push(`${value.author || "未知UP"} ${value.shortUrl} ${value.name}`);
+        const up = String(value.author || "").trim();
+        colLines.push(up ? `${up} ${value.shortUrl} ${value.name}` : `${value.shortUrl} ${value.name}`);
       }
     }
-    bvLines.sort((a, b) => a.localeCompare(b, "en"));
+    videoLines.sort((a, b) => a.localeCompare(b, "en"));
     colLines.sort((a, b) => a.localeCompare(b, "zh"));
-    const lines = [...bvLines, ...colLines];
+    const lines = [...videoLines, ...colLines];
     return lines.length ? `${lines.join("\n")}\n` : "";
   }
 

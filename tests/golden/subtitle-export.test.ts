@@ -18,9 +18,11 @@ import {
   resolveSubtitleFileStem,
   safePathSegment,
   setGroupSelection,
+  buildVideoShortUrl,
   upsertCollectionExportIndex,
   upsertExportIndexMap,
   upsertIndexForExportItem,
+  upsertVideoExportIndex,
 } from "@subbatch/core";
 
 describe("subtitle export layout", () => {
@@ -173,29 +175,47 @@ describe("subtitle export layout", () => {
     );
   });
 
-  it("upserts index.md BV → title and replaces same BV name", () => {
-    let map = upsertExportIndexMap({}, "BV14u41147YH", "旧标题");
-    map = upsertExportIndexMap(
-      map,
+  it("index.md video lines are author + shortUrl + title (like 合集)", () => {
+    let map = upsertVideoExportIndex(
+      {},
+      "KurTips",
       "BV14u41147YH",
-      "Kurt 【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
+      "旧标题",
     );
-    map = upsertExportIndexMap(map, "BV1OTHER0001", "另一个视频");
+    map = upsertVideoExportIndex(
+      map,
+      "KurTips",
+      "BV14u41147YH",
+      "【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
+    );
+    map = upsertIndexForExportItem(map, {
+      bvid: "BV1OTHER0001",
+      author: "UP乙",
+      videoTitle: "另一个视频",
+      groupType: "selection",
+    });
 
     const md = renderExportIndexMd(map);
+    const short = buildVideoShortUrl("BV14u41147YH");
     expect(md).toContain(
-      "BV14u41147YH Kurt 【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
+      `KurTips ${short} 【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)`,
     );
     expect(md).not.toContain("旧标题");
-    expect(md).toContain("BV1OTHER0001 另一个视频");
+    // Not the old bare "BV …" only form as the primary shape.
+    expect(md).not.toMatch(/^BV14u41147YH /m);
+    expect(md).toContain(`UP乙 ${buildVideoShortUrl("BV1OTHER0001")} 另一个视频`);
     expect(buildSubtitleExportIndexPath()).toBe(
       `${SUBTITLE_EXPORT_ROOT}/index.md`,
     );
 
     const parsed = parseExportIndexMd(md);
-    expect(parsed.BV14u41147YH).toBe(
-      "Kurt 【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
-    );
+    expect(parsed.BV14u41147YH).toEqual({
+      kind: "video",
+      author: "KurTips",
+      shortUrl: short,
+      bvid: "BV14u41147YH",
+      name: "【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
+    });
   });
 
   it("round-trips collection index lines by short URL", () => {
@@ -210,6 +230,18 @@ describe("subtitle export layout", () => {
       author: "UP甲",
       shortUrl,
       name: "合集A改名",
+    });
+  });
+
+  it("upgrades legacy BV title lines when parsing index.md", () => {
+    const parsed = parseExportIndexMd(
+      "BV14u41147YH 【Kurt】Blender零基础入门教程\n",
+    );
+    expect(parsed.BV14u41147YH).toMatchObject({
+      kind: "video",
+      bvid: "BV14u41147YH",
+      name: "【Kurt】Blender零基础入门教程",
+      shortUrl: buildVideoShortUrl("BV14u41147YH"),
     });
   });
 

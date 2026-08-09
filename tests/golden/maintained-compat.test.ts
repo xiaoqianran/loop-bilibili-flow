@@ -169,8 +169,12 @@ describe("Maintained full-feature compatibility source", () => {
       upsertIndex({}, { ...item, bvid: "BV14u41147YH" }),
       item,
     );
-    expect(renderIndex(map)).toContain("BV14u41147YH");
-    expect(renderIndex(map)).toContain("Kurt");
+    const md = renderIndex(map);
+    expect(md).toContain("Kurt");
+    expect(md).toContain("www.bilibili.com/video/BV14u41147YH");
+    expect(md).toContain("【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)");
+    // New index shape: author + shortUrl + title (not bare "BV title")
+    expect(md).toMatch(/Kurt\s+www\.bilibili\.com\/video\/BV14u41147YH\s+/);
 
     const collectionItem = {
       bvid: "BV1qmsXztEde",
