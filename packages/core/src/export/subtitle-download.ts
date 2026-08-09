@@ -6,12 +6,15 @@
  * plus a root index.md mapping:
  *   - 视频选集: BV1xxx <folder label>
  *   - 合集: <UP> <shortUrl> <合集名>  (keyed by shortUrl; name updates in place)
+ *
+ * Folder labels MUST match the 字幕 panel (resolveLibraryFolderLabel).
  */
 
 import {
   buildCollectionShortUrl,
   buildUpFolderLabel,
   inferLibraryGroupType,
+  resolveLibraryFolderLabel,
   type LibraryGroupItem,
 } from "../library/groups";
 
@@ -36,16 +39,37 @@ export type ExportIndexCollectionValue = {
 export type ExportIndexValue = ExportIndexBvValue | ExportIndexCollectionValue;
 export type SubtitleExportIndexMap = Record<string, ExportIndexValue>;
 
-/** Sanitize one path segment for browser Downloads / Windows FS. */
+/**
+ * Sanitize one path segment for browser Downloads / Windows FS.
+ * - Never keep ASCII `.` inside the segment (avoids Chrome turning `name.txt` stems
+ *   into `name-txt` when it rewrites multi-dot names).
+ * - Strip trailing dots/spaces (Windows).
+ */
 export function safePathSegment(name: string | null | undefined, maxLen = 120): string {
   const cleaned = String(name || "untitled")
     .replace(/\|/g, "｜")
+    // ASCII dots → middle dot so the only `.` left is our real extension.
+    .replace(/\./g, "·")
     .replace(/[\\/:*?"<>]+/g, "_")
+    // Fullwidth / odd marks browsers often rewrite aggressively
+    .replace(/[？?！!]+/g, "＿")
     .replace(/\s+/g, " ")
     .trim()
     .replace(/^\.+/, "")
-    .slice(0, Math.max(1, maxLen));
+    .replace(/[.\s]+$/g, "")
+    .slice(0, Math.max(1, maxLen))
+    .replace(/[.\s]+$/g, "");
   return cleaned || "untitled";
+}
+
+/** Join stem + ext so extension is always a real `.{ext}`. */
+export function joinFileName(stem: string, ext: string): string {
+  const cleanExt = String(ext || "txt").replace(/^\./, "").trim().toLowerCase() || "txt";
+  let base = safePathSegment(stem, 160);
+  // Defensive: strip accidental extension tails from stem after sanitize.
+  base = base.replace(new RegExp(`[·._-]+${cleanExt}$`, "i"), "");
+  if (!base) base = "untitled";
+  return `${base}.${cleanExt}`;
 }
 
 export function resolveSeriesTitle(item: SubtitleExportItem | null | undefined): string {
@@ -95,19 +119,15 @@ export function resolveSubtitleFileStem(item: SubtitleExportItem | null | undefi
   return part ? `P${page}${part}` : `P${page}`;
 }
 
-/** Folder under loop-bilibili-subbatch: "UP 视频名" or "UP 合集名". */
+/**
+ * Folder under loop-bilibili-subbatch — same rule as 字幕 panel folder label.
+ * Prefer non-未知UP groupFolder; otherwise recompute from author + name.
+ */
 export function resolveExportFolderName(item: SubtitleExportItem | null | undefined): string {
-  if (item?.groupFolder) return String(item.groupFolder).trim();
-  const kind = inferLibraryGroupType(item);
-  if (kind === "collection") {
-    return buildUpFolderLabel(item?.author, item?.collectionName || "未命名合集");
-  }
-  if (kind === "selection") {
-    return buildUpFolderLabel(item?.author, resolveSeriesTitle(item));
-  }
-  // single: still UP + title for consistency when author present
-  if (item?.author) return buildUpFolderLabel(item.author, resolveSeriesTitle(item));
-  return resolveSeriesTitle(item);
+  const folder = String(item?.groupFolder || "").trim();
+  if (folder && !/^未知UP\b/.test(folder)) return folder;
+  // Keep UI and disk names aligned.
+  return resolveLibraryFolderLabel(item);
 }
 
 export function buildSubtitleExportRelativePath(
@@ -115,9 +135,8 @@ export function buildSubtitleExportRelativePath(
   ext: string,
 ): string {
   const series = safePathSegment(resolveExportFolderName(item));
-  const stem = safePathSegment(resolveSubtitleFileStem(item), 160);
-  const cleanExt = String(ext || "txt").replace(/^\./, "").trim() || "txt";
-  return `${SUBTITLE_EXPORT_ROOT}/${series}/${stem}.${cleanExt}`;
+  const fileName = joinFileName(resolveSubtitleFileStem(item), ext);
+  return `${SUBTITLE_EXPORT_ROOT}/${series}/${fileName}`;
 }
 
 export function buildSubtitleExportIndexPath(): string {
@@ -135,7 +154,6 @@ export function parseExportIndexMd(content: string | null | undefined): Subtitle
     const line = rawLine.trim();
     if (!line || line.startsWith("#")) continue;
 
-    // Collection: author shortUrl name…  (shortUrl contains space.bilibili.com/…/lists/…)
     const col = line.match(
       /^(.+?)\s+(space\.bilibili\.com\/\d+\/lists\/\d+)\s+(.+)$/i,
     );
@@ -219,41 +237,77 @@ export function renderExportIndexMd(map: SubtitleExportIndexMap | null | undefin
   return `${lines.join("\n")}\n`;
 }
 
+/**
+ * Fill author / groupFolder from sibling items so download matches 字幕 panel.
+ * Fixes 未知UP when list API omitted upper name but peers (or UI folder) already know it.
+ */
+export function normalizeExportItem(
+  item: SubtitleExportItem | null | undefined,
+  peers: SubtitleExportItem[] | null | undefined = [],
+): SubtitleExportItem {
+  const base = { ...(item || {}) } as SubtitleExportItem;
+  const list = peers || [];
+  const key = String(base.groupKey || "");
+  const sameGroup = key
+    ? list.filter((p) => String(p?.groupKey || "") === key)
+    : list.filter((p) => String(p?.bvid || "") === String(base.bvid || "") && base.bvid);
+
+  const peerAuthor = sameGroup.map((p) => String(p?.author || "").trim()).find((a) => a && a !== "未知UP");
+  const author = String(base.author || "").trim() && base.author !== "未知UP"
+    ? String(base.author).trim()
+    : peerAuthor || String(base.author || "").trim();
+
+  if (author) base.author = author;
+
+  const peerFolder = sameGroup
+    .map((p) => String(p?.groupFolder || "").trim())
+    .find((f) => f && !/^未知UP\b/.test(f));
+
+  if (peerFolder) base.groupFolder = peerFolder;
+  else if (!base.groupFolder || /^未知UP\b/.test(String(base.groupFolder))) {
+    base.groupFolder = resolveLibraryFolderLabel(base);
+  }
+
+  return base;
+}
+
 /** Apply index upsert for one export item (BV for 选集, shortUrl for 合集). */
 export function upsertIndexForExportItem(
   map: SubtitleExportIndexMap | null | undefined,
   item: SubtitleExportItem | null | undefined,
 ): SubtitleExportIndexMap {
+  const normalized = normalizeExportItem(item, item ? [item] : []);
   let next: SubtitleExportIndexMap = { ...(map || {}) };
-  const kind = inferLibraryGroupType(item);
+  const kind = inferLibraryGroupType(normalized);
   if (kind === "collection") {
     const shortUrl =
-      item?.collectionShortUrl
-      || buildCollectionShortUrl(item?.collectionMid, item?.collectionSid);
+      normalized.collectionShortUrl
+      || buildCollectionShortUrl(normalized.collectionMid, normalized.collectionSid);
     return upsertCollectionExportIndex(
       next,
-      item?.author,
+      normalized.author,
       shortUrl,
-      item?.collectionName || resolveExportFolderName(item),
+      normalized.collectionName || resolveExportFolderName(normalized),
     );
   }
-  const folder = resolveExportFolderName(item);
-  if (item?.bvid) next = upsertExportIndexMap(next, item.bvid, folder);
+  const folder = resolveExportFolderName(normalized);
+  if (normalized.bvid) next = upsertExportIndexMap(next, normalized.bvid, folder);
   return next;
 }
 
 export function describeSubtitleExport(item: SubtitleExportItem | null | undefined, ext = "txt") {
-  const seriesTitle = resolveExportFolderName(item);
-  const fileStem = resolveSubtitleFileStem(item);
+  const normalized = normalizeExportItem(item, item ? [item] : []);
+  const seriesTitle = resolveExportFolderName(normalized);
+  const fileStem = resolveSubtitleFileStem(normalized);
   return {
-    bvid: String(item?.bvid || "").trim(),
+    bvid: String(normalized.bvid || "").trim(),
     seriesTitle,
     fileStem,
     folderSegment: safePathSegment(seriesTitle),
     fileSegment: safePathSegment(fileStem, 160),
-    relativePath: buildSubtitleExportRelativePath(item, ext),
+    relativePath: buildSubtitleExportRelativePath(normalized, ext),
     indexPath: buildSubtitleExportIndexPath(),
-    groupType: inferLibraryGroupType(item),
+    groupType: inferLibraryGroupType(normalized),
   };
 }
 

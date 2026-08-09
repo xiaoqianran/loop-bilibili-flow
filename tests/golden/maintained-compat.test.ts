@@ -121,6 +121,10 @@ describe("Maintained full-feature compatibility source", () => {
     expect(batch).toContain("buildSubtitleExportRelativePath(it, ext)");
     expect(batch).toContain("upsertIndexForExportItem");
     expect(batch).toContain("buildSubtitleExportIndexPath()");
+    expect(batch).toContain("normalizeExportItem");
+    expect(batch).toContain('overwrite: true');
+    expect(maintainedSource).toContain("conflictAction");
+    expect(maintainedSource).toContain("function joinFileName(");
 
     // Shipped product path must call the batch exporter (not flat BV_Pn_title files).
     const doBatch = extractFunctionSource(maintainedSource, "doBatch");
@@ -157,8 +161,10 @@ describe("Maintained full-feature compatibility source", () => {
     };
     expect(resolveStem(item)).toBe("P33【动画篇】6.5 头部跟随动画 - 物体约束");
     expect(buildPath(item, "txt")).toMatch(
-      /^loop-bilibili-subbatch\/.+\/P33【动画篇】6\.5 头部跟随动画 - 物体约束\.txt$/,
+      /^loop-bilibili-subbatch\/.+\/P33【动画篇】6·5 头部跟随动画 - 物体约束\.txt$/,
     );
+    expect(buildPath(item, "txt")).toMatch(/\.txt$/);
+    expect(buildPath(item, "txt")).not.toMatch(/-txt$/);
     const map = upsertIndex(
       upsertIndex({}, { ...item, bvid: "BV14u41147YH" }),
       item,

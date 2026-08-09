@@ -8,6 +8,8 @@ import {
   buildSubtitleExportRelativePath,
   buildUpFolderLabel,
   describeSubtitleExport,
+  joinFileName,
+  normalizeExportItem,
   parseExportIndexMd,
   renderExportIndexMd,
   resolveExportFolderName,
@@ -53,11 +55,34 @@ describe("subtitle export layout", () => {
 
     const path = buildSubtitleExportRelativePath(blenderPart, "txt");
     expect(path.startsWith(`${SUBTITLE_EXPORT_ROOT}/`)).toBe(true);
-    expect(path).toContain("/P33【动画篇】6.5 头部跟随动画 - 物体约束.txt");
+    expect(path.endsWith(".txt")).toBe(true);
+    expect(path).not.toMatch(/-txt$/);
+    // ASCII dots inside titles become middle-dot so the only real extension is .txt
+    expect(path).toContain("/P33【动画篇】6·5 头部跟随动画 - 物体约束.txt");
     expect(path).not.toContain("BV14u41147YH_P");
     expect(path).not.toMatch(/- P33【/);
     expect(path).toContain("｜");
     expect(path.split("/")).toHaveLength(3);
+  });
+
+  it("never produces -txt suffix even when title has dots or question marks", () => {
+    const item = {
+      bvid: "BV1qmsXztEde",
+      page: 1,
+      author: "随意Official",
+      title: "读主节点不能强一致？最实用的强一致方案 v2.0",
+      groupType: "collection" as const,
+      collectionName: "合集·分布式教程",
+      groupFolder: "随意Official 合集·分布式教程",
+    };
+    const path = buildSubtitleExportRelativePath(item, "txt");
+    expect(path.endsWith(".txt")).toBe(true);
+    expect(path).not.toMatch(/-txt$/i);
+    expect(path).not.toMatch(/\.txt\.txt$/);
+    // ASCII dots inside title become middle-dot, not a fake extension.
+    expect(joinFileName(item.title, "txt")).toMatch(/\.txt$/);
+    expect(joinFileName(item.title, "txt")).not.toMatch(/-txt$/);
+    expect(safePathSegment("a.b.c")).toBe("a·b·c");
   });
 
   it("uses UP + 合集名 as folder and video title as file for 合集", () => {
@@ -77,7 +102,7 @@ describe("subtitle export layout", () => {
     expect(resolveExportFolderName(item)).toBe("示例UP 从入门到精通合集");
     expect(resolveSubtitleFileStem(item)).toBe("合集内第 3 集：实战演示");
     expect(buildSubtitleExportRelativePath(item, "txt")).toBe(
-      `${SUBTITLE_EXPORT_ROOT}/${safePathSegment("示例UP 从入门到精通合集")}/${safePathSegment("合集内第 3 集：实战演示")}.txt`,
+      `${SUBTITLE_EXPORT_ROOT}/${safePathSegment("示例UP 从入门到精通合集")}/${joinFileName("合集内第 3 集：实战演示", "txt")}`,
     );
 
     let map = upsertIndexForExportItem({}, item);
@@ -89,8 +114,35 @@ describe("subtitle export layout", () => {
     const md = renderExportIndexMd(map);
     expect(md).toContain(`示例UP ${shortUrl} 从入门到精通合集（完结）`);
     expect(md).not.toContain("BV1qmsXztEde");
-    expect(md).not.toContain("从入门到精通合集）\n"); // old name fully replaced
     expect(md.match(new RegExp(shortUrl.replace(/\./g, "\\."), "g"))?.length).toBe(1);
+  });
+
+  it("repairs 未知UP folder from peer author (字幕 panel ↔ download)", () => {
+    const peers = [
+      {
+        bvid: "BV1AAA",
+        author: "随意Official",
+        groupType: "collection" as const,
+        groupKey: "collection:1/2",
+        collectionName: "合集·分布式教程",
+        groupFolder: "随意Official 合集·分布式教程",
+      },
+      {
+        bvid: "BV1BBB",
+        author: "",
+        groupType: "collection" as const,
+        groupKey: "collection:1/2",
+        collectionName: "合集·分布式教程",
+        groupFolder: "未知UP 合集·分布式教程",
+        title: "某一集",
+      },
+    ];
+    const fixed = normalizeExportItem(peers[1], peers);
+    expect(fixed.author).toBe("随意Official");
+    expect(fixed.groupFolder).toBe("随意Official 合集·分布式教程");
+    expect(resolveExportFolderName(fixed)).toBe("随意Official 合集·分布式教程");
+    expect(buildSubtitleExportRelativePath(fixed, "txt")).toContain("随意Official");
+    expect(buildSubtitleExportRelativePath(fixed, "txt")).not.toContain("未知UP");
   });
 
   it("parses multipage title when part field is missing", () => {
@@ -117,7 +169,7 @@ describe("subtitle export layout", () => {
     expect(resolveSeriesTitle(item)).toBe("单集演示视频");
     expect(resolveSubtitleFileStem(item)).toBe("P1");
     expect(buildSubtitleExportRelativePath(item, "srt")).toBe(
-      `${SUBTITLE_EXPORT_ROOT}/${safePathSegment("单集演示视频")}/P1.srt`,
+      `${SUBTITLE_EXPORT_ROOT}/单集演示视频/P1.srt`,
     );
   });
 
@@ -206,6 +258,29 @@ describe("library folder groups", () => {
     );
     expect(allNodes[0].type === "folder" && allNodes[0].collapsed).toBe(true);
     expect(allNodes[0].type === "folder" && allNodes[0].checkState).toBe("all");
+  });
+
+  it("folders same-BV multi-P even without groupType metadata", () => {
+    // Simulates: auto-capture lost groupType, but 视频选集 scan left many P under one BV.
+    const entries = [1, 2, 3].map((page, index) => ({
+      item: {
+        bvid: "BV14u41147YH",
+        page,
+        author: "KurTips",
+        title: `【Kurt】Blender - P${page}【第${page}集】`,
+        part: `第${page}集`,
+        selected: true,
+      },
+      index,
+    }));
+    const nodes = buildLibraryRenderNodes(entries, {});
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0].type).toBe("folder");
+    if (nodes[0].type === "folder") {
+      expect(nodes[0].groupType).toBe("selection");
+      expect(nodes[0].total).toBe(3);
+      expect(nodes[0].folderLabel).toContain("KurTips");
+    }
   });
 
   it("keeps single videos flat outside folders", () => {

@@ -21,7 +21,7 @@ const runtime = createUserscriptRuntime(host);
 
 /** Public monorepo API surface for pure bundle + production body bridge. */
 const SubBatchMonorepo = {
-  version: "6.2.0",
+  version: "6.2.1",
   runtime,
   host,
   core,
@@ -39,6 +39,7 @@ const SubBatchMonorepo = {
   stitchPreprocessChunks: core.stitchPreprocessChunks,
   preprocessCacheKey: core.preprocessCacheKey,
   safePathSegment: core.safePathSegment,
+  joinFileName: core.joinFileName,
   resolveSeriesTitle: core.resolveSeriesTitle,
   resolvePartLabel: core.resolvePartLabel,
   resolveSubtitleFileStem: core.resolveSubtitleFileStem,
@@ -47,11 +48,13 @@ const SubBatchMonorepo = {
   upsertExportIndexMap: core.upsertExportIndexMap,
   upsertCollectionExportIndex: core.upsertCollectionExportIndex,
   upsertIndexForExportItem: core.upsertIndexForExportItem,
+  normalizeExportItem: core.normalizeExportItem,
   renderExportIndexMd: core.renderExportIndexMd,
   buildUpFolderLabel: core.buildUpFolderLabel,
   buildCollectionShortUrl: core.buildCollectionShortUrl,
   buildLibraryRenderNodes: core.buildLibraryRenderNodes,
   resolveLibraryGroupKey: core.resolveLibraryGroupKey,
+  resolveLibraryFolderLabel: core.resolveLibraryFolderLabel,
   shortcutCommands: core.SHORTCUT_COMMANDS,
   shouldIgnoreShortcutEvent: core.shouldIgnoreShortcutEvent,
 };

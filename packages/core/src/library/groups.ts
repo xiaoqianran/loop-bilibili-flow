@@ -50,13 +50,14 @@ export type LibraryRenderNode = LibraryFolderGroup | LibraryFlatItem;
 
 const MULTI_PART_TITLE_RE = /^(.*)\s-\sP(\d+)【([\s\S]*)】\s*$/;
 
-/** "UP名称 标题/合集名" */
+/** "UP名称 标题/合集名"；无 UP 时只保留名称（避免下载落到「未知UP …」）。 */
 export function buildUpFolderLabel(
   author: string | null | undefined,
   name: string | null | undefined,
 ): string {
-  const up = String(author || "").trim() || "未知UP";
+  const up = String(author || "").trim();
   const n = String(name || "").trim() || "未命名";
+  if (!up || up === "未知UP") return n;
   return `${up} ${n}`;
 }
 
@@ -104,7 +105,9 @@ export function resolveLibraryGroupKey(item: LibraryGroupItem | null | undefined
 }
 
 export function resolveLibraryFolderLabel(item: LibraryGroupItem | null | undefined): string {
-  if (item?.groupFolder) return String(item.groupFolder).trim();
+  const existing = String(item?.groupFolder || "").trim();
+  // Keep a real UP-named folder; ignore stale "未知UP …" so download can recompute.
+  if (existing && !/^未知UP\b/.test(existing)) return existing;
   const kind = inferLibraryGroupType(item);
   const author = item?.author;
   if (kind === "collection") {
@@ -121,6 +124,54 @@ export function resolveLibraryFolderLabel(item: LibraryGroupItem | null | undefi
 }
 
 /**
+ * Same BV appears more than once (different P) → treat as 视频选集 folder even if
+ * groupType metadata was lost (e.g. auto-capture then scan merge).
+ */
+function bvidMultiPageKeys(entries: LibraryEntry[]): Set<string> {
+  const counts = new Map<string, number>();
+  for (const entry of entries) {
+    const bvid = String(entry.item?.bvid || "").trim();
+    if (!bvid) continue;
+    counts.set(bvid, (counts.get(bvid) || 0) + 1);
+  }
+  const multi = new Set<string>();
+  for (const [bvid, n] of counts) {
+    if (n > 1) multi.add(bvid);
+  }
+  return multi;
+}
+
+function effectiveGroupType(
+  item: LibraryGroupItem | null | undefined,
+  multiBvids: Set<string>,
+): LibraryGroupType {
+  const kind = inferLibraryGroupType(item);
+  if (kind !== "single") return kind;
+  const bvid = String(item?.bvid || "").trim();
+  if (bvid && multiBvids.has(bvid)) return "selection";
+  return "single";
+}
+
+function effectiveGroupKey(
+  item: LibraryGroupItem | null | undefined,
+  multiBvids: Set<string>,
+): string {
+  if (item?.groupKey) return String(item.groupKey);
+  const kind = effectiveGroupType(item, multiBvids);
+  if (kind === "collection") {
+    const mid = item?.collectionMid;
+    const sid = item?.collectionSid;
+    if (mid && sid) return `collection:${mid}/${sid}`;
+    if (item?.collectionShortUrl) return `collection:${item.collectionShortUrl}`;
+  }
+  if (kind === "selection") {
+    const bvid = String(item?.bvid || "").trim();
+    if (bvid) return `selection:${bvid}`;
+  }
+  return resolveLibraryGroupKey(item);
+}
+
+/**
  * Group filtered library entries into folders (selection/collection) + flat singles.
  * Folder order follows first appearance of each groupKey.
  */
@@ -129,40 +180,29 @@ export function buildLibraryRenderNodes(
   collapsedMap: Record<string, boolean> | null | undefined = {},
 ): LibraryRenderNode[] {
   const collapsed = collapsedMap || {};
+  const multiBvids = bvidMultiPageKeys(entries);
   const folderBuckets = new Map<string, LibraryEntry[]>();
-  const order: string[] = [];
-  const singles: LibraryEntry[] = [];
 
   for (const entry of entries) {
-    const kind = inferLibraryGroupType(entry.item);
-    if (kind === "single") {
-      singles.push(entry);
-      continue;
-    }
-    const key = resolveLibraryGroupKey(entry.item);
-    if (!folderBuckets.has(key)) {
-      folderBuckets.set(key, []);
-      order.push(key);
-    }
+    const kind = effectiveGroupType(entry.item, multiBvids);
+    if (kind === "single") continue;
+    const key = effectiveGroupKey(entry.item, multiBvids);
+    if (!folderBuckets.has(key)) folderBuckets.set(key, []);
     folderBuckets.get(key)!.push(entry);
   }
 
   const nodes: LibraryRenderNode[] = [];
-  const emittedSingles = new Set<number>();
+  const emittedFolders = new Set<string>();
 
   // Interleave: walk original entries order, emit folder once when first child appears,
   // emit singles in place.
-  const emittedFolders = new Set<string>();
   for (const entry of entries) {
-    const kind = inferLibraryGroupType(entry.item);
+    const kind = effectiveGroupType(entry.item, multiBvids);
     if (kind === "single") {
-      if (!emittedSingles.has(entry.index)) {
-        nodes.push({ type: "item", entry });
-        emittedSingles.add(entry.index);
-      }
+      nodes.push({ type: "item", entry });
       continue;
     }
-    const key = resolveLibraryGroupKey(entry.item);
+    const key = effectiveGroupKey(entry.item, multiBvids);
     if (emittedFolders.has(key)) continue;
     emittedFolders.add(key);
     const children = folderBuckets.get(key) || [entry];
@@ -172,12 +212,16 @@ export function buildLibraryRenderNodes(
     if (selectedCount === 0) checkState = "none";
     else if (selectedCount === total) checkState = "all";
     else checkState = "partial";
-    const first = children[0]?.item;
+    // Prefer a child that already has a good folder label / author (avoid 未知UP).
+    const labeled =
+      children.map((c) => c.item).find((it) => it.groupFolder && !/^未知UP\b/.test(String(it.groupFolder)))
+      || children.map((c) => c.item).find((it) => String(it.author || "").trim() && it.author !== "未知UP")
+      || children[0]?.item;
     nodes.push({
       type: "folder",
       groupKey: key,
       groupType: kind,
-      folderLabel: resolveLibraryFolderLabel(first),
+      folderLabel: resolveLibraryFolderLabel(labeled),
       collapsed: !!collapsed[key],
       selectedCount,
       total,

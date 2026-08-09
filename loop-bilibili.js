@@ -32,6 +32,7 @@
 // ==/UserScript==
 
 /**
+ * v6.2.1 — 修复：下载后缀 -txt、选集未成文件夹、index.md 叠成 (1)(2)、合集下载未知UP；字幕面板与下载共用文件夹标签；GM_download overwrite。
  * v6.2.0 — 字幕库文件夹：视频选集按「UP+视频名」、合集按「UP+合集名」分组；支持全部展开/收起与文件夹全选勾选。合集 index.md 存 UP+短地址+合集名（按合集地址更新名称，不存 BV）。
  * v6.1.9 — 字幕批量下载落到 Downloads/loop-bilibili-subbatch/<视频名>/P{n}{分P名}.{ext}；根目录 index.md 维护 BV → 视频名映射，同 BV 更新名称。
  * v6.0.2 — 快捷键微调：主召唤/隐藏默认键改为 Ctrl+B；旧版仍使用默认 Ctrl+Alt+B 的配置自动迁移，用户自定义键位保持不变。
@@ -1188,11 +1189,15 @@
     } catch (_) { /* local fallback */ }
     const cleaned = String(name || "untitled")
       .replace(/\|/g, "｜")
+      .replace(/\./g, "·")
       .replace(/[\\/:*?"<>]+/g, "_")
+      .replace(/[？?！!]+/g, "＿")
       .replace(/\s+/g, " ")
       .trim()
       .replace(/^\.+/, "")
-      .slice(0, Math.max(1, maxLen));
+      .replace(/[.\s]+$/g, "")
+      .slice(0, Math.max(1, maxLen))
+      .replace(/[.\s]+$/g, "");
     return cleaned || "untitled";
   }
 
@@ -1201,8 +1206,9 @@
       const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.buildUpFolderLabel : null;
       if (typeof pure === "function") return pure(author, name);
     } catch (_) { /* local fallback */ }
-    const up = String(author || "").trim() || "未知UP";
+    const up = String(author || "").trim();
     const n = String(name || "").trim() || "未命名";
+    if (!up || up === "未知UP") return n;
     return `${up} ${n}`;
   }
 
@@ -1291,6 +1297,29 @@
     return series;
   }
 
+  function joinFileName(stem, ext) {
+    try {
+      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.joinFileName : null;
+      if (typeof pure === "function") return pure(stem, ext);
+    } catch (_) { /* local fallback */ }
+    const cleanExt = String(ext || "txt").replace(/^\./, "").trim().toLowerCase() || "txt";
+    // Inline sanitize — extractable unit tests cannot call sibling safePathSegment.
+    let base = String(stem || "untitled")
+      .replace(/\|/g, "｜")
+      .replace(/\./g, "·")
+      .replace(/[\\/:*?"<>]+/g, "_")
+      .replace(/[？?！!]+/g, "＿")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/^\.+/, "")
+      .replace(/[.\s]+$/g, "")
+      .slice(0, 160)
+      .replace(/[.\s]+$/g, "") || "untitled";
+    base = base.replace(new RegExp(`[·._-]+${cleanExt}$`, "i"), "");
+    if (!base) base = "untitled";
+    return `${base}.${cleanExt}`;
+  }
+
   function buildSubtitleExportRelativePath(item, ext) {
     try {
       const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.buildSubtitleExportRelativePath : null;
@@ -1298,10 +1327,11 @@
     } catch (_) { /* local fallback */ }
     // Fully inlined so extractable tests do not need sibling helpers.
     let folder = String(item?.groupFolder || "").trim();
-    if (!folder) {
-      const up = String(item?.author || "").trim() || "未知UP";
+    if (!folder || /^未知UP\b/.test(folder)) {
+      const up = String(item?.author || "").trim();
       if (item?.groupType === "collection" || item?.collectionName) {
-        folder = `${up} ${String(item?.collectionName || "未命名合集").trim()}`;
+        const n = String(item?.collectionName || "未命名合集").trim();
+        folder = up && up !== "未知UP" ? `${up} ${n}` : n;
       } else {
         let series = String(item?.videoTitle || "").trim();
         if (!series) {
@@ -1309,7 +1339,7 @@
           const multi = title.match(/^(.*)\s-\sP(\d+)【([\s\S]*)】\s*$/);
           series = multi?.[1]?.trim() || title || String(item?.bvid || "untitled");
         }
-        folder = item?.author ? `${up} ${series}` : series;
+        folder = up && up !== "未知UP" ? `${up} ${series}` : series;
       }
     }
     let stem = "";
@@ -1325,18 +1355,33 @@
       }
       stem = part ? `P${page}${part}` : `P${page}`;
     }
-    const sanitize = (name, maxLen = 120) => {
-      const cleaned = String(name || "untitled")
-        .replace(/\|/g, "｜")
-        .replace(/[\\/:*?"<>]+/g, "_")
-        .replace(/\s+/g, " ")
-        .trim()
-        .replace(/^\.+/, "")
-        .slice(0, Math.max(1, maxLen));
-      return cleaned || "untitled";
-    };
-    const cleanExt = String(ext || "txt").replace(/^\./, "").trim() || "txt";
-    return `loop-bilibili-subbatch/${sanitize(folder)}/${sanitize(stem, 160)}.${cleanExt}`;
+    const folderSeg = String(folder || "untitled")
+      .replace(/\|/g, "｜")
+      .replace(/\./g, "·")
+      .replace(/[\\/:*?"<>]+/g, "_")
+      .replace(/[？?！!]+/g, "＿")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/^\.+/, "")
+      .replace(/[.\s]+$/g, "")
+      .slice(0, 120)
+      .replace(/[.\s]+$/g, "") || "untitled";
+    // Inline joinFileName to stay extractable.
+    const cleanExt = String(ext || "txt").replace(/^\./, "").trim().toLowerCase() || "txt";
+    let base = String(stem || "untitled")
+      .replace(/\|/g, "｜")
+      .replace(/\./g, "·")
+      .replace(/[\\/:*?"<>]+/g, "_")
+      .replace(/[？?！!]+/g, "＿")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/^\.+/, "")
+      .replace(/[.\s]+$/g, "")
+      .slice(0, 160)
+      .replace(/[.\s]+$/g, "") || "untitled";
+    base = base.replace(new RegExp(`[·._-]+${cleanExt}$`, "i"), "");
+    if (!base) base = "untitled";
+    return `loop-bilibili-subbatch/${folderSeg}/${base}.${cleanExt}`;
   }
 
   function buildSubtitleExportIndexPath() {
@@ -1472,13 +1517,18 @@
     const mid = meta.mid || ctx.mid || "";
     const sid = meta.season_id || ctx.season_id || "";
     const shortUrl = buildCollectionShortUrl(mid, sid);
-    const collectionName = meta.name || meta.title || "未命名合集";
-    const author = meta.author || items[0]?.author || "";
+    const collectionName = meta.name || meta.title || ctx.collectionTitleHint || "未命名合集";
+    // Prefer real UP: meta → scan hint → first archive author (never bake 未知UP early if hint exists).
+    const author =
+      String(meta.author || "").trim()
+      || String(ctx.authorHint || "").trim()
+      || String(items[0]?.author || "").trim()
+      || "";
     const groupKey = mid && sid ? `collection:${mid}/${sid}` : `collection:${shortUrl || collectionName}`;
     const groupFolder = buildUpFolderLabel(author, collectionName);
     return (items || []).map((it) => ({
       ...it,
-      author: it.author || author,
+      author: String(it.author || "").trim() || author,
       groupType: "collection",
       groupKey,
       groupFolder,
@@ -1487,6 +1537,38 @@
       collectionSid: sid,
       collectionShortUrl: shortUrl,
     }));
+  }
+
+  /** Align download folder/author with 字幕 panel folder (peers in pool + library). */
+  function normalizeExportItem(item, peers = []) {
+    try {
+      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.normalizeExportItem : null;
+      if (typeof pure === "function") {
+        const combined = [...(peers || []), ...(state.items || [])];
+        return pure(item, combined);
+      }
+    } catch (_) { /* local fallback */ }
+    const base = { ...(item || {}) };
+    const key = String(base.groupKey || "");
+    const pool = [...(peers || []), ...(state.items || [])];
+    const same = key
+      ? pool.filter((p) => String(p?.groupKey || "") === key)
+      : pool.filter((p) => p?.bvid && p.bvid === base.bvid);
+    const peerAuthor = same.map((p) => String(p?.author || "").trim()).find((a) => a && a !== "未知UP");
+    if ((!base.author || base.author === "未知UP") && peerAuthor) base.author = peerAuthor;
+    const peerFolder = same
+      .map((p) => String(p?.groupFolder || "").trim())
+      .find((f) => f && !/^未知UP\b/.test(f));
+    if (peerFolder) base.groupFolder = peerFolder;
+    else if (!base.groupFolder || /^未知UP\b/.test(String(base.groupFolder || ""))) {
+      const up = String(base.author || "").trim() || "未知UP";
+      if (base.groupType === "collection" || base.collectionName) {
+        base.groupFolder = `${up} ${String(base.collectionName || "未命名合集").trim()}`;
+      } else if (base.groupType === "selection" || base.videoTitle) {
+        base.groupFolder = `${up} ${String(base.videoTitle || resolveSeriesTitle(base)).trim()}`;
+      }
+    }
+    return base;
   }
 
   function resolveLibraryGroupKey(item) {
@@ -1511,40 +1593,68 @@
       const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.buildLibraryRenderNodes : null;
       if (typeof pure === "function") return pure(entries, collapsedMap);
     } catch (_) { /* local fallback */ }
-    // Local fallback: group selection/collection when monorepo pure is unavailable.
+    // Local fallback: same BV multi-P → 视频选集 folder; collection meta → 合集 folder.
     const collapsed = collapsedMap || {};
-    const folderBuckets = new Map();
-    const nodes = [];
-    const emitted = new Set();
-    for (const entry of entries || []) {
-      const item = entry.item;
-      const isFolder = item?.groupType === "selection" || item?.groupType === "collection"
-        || item?.collectionSid || Number(item?.page) > 1 || item?.part;
-      if (!isFolder) {
-        nodes.push({ type: "item", entry });
+    const list = entries || [];
+    const bvidCount = new Map();
+    for (const entry of list) {
+      const b = String(entry.item?.bvid || "").trim();
+      if (b) bvidCount.set(b, (bvidCount.get(b) || 0) + 1);
+    }
+    const isFolderItem = (item) => {
+      if (item?.groupType === "selection" || item?.groupType === "collection") return true;
+      if (item?.collectionSid || item?.collectionName) return true;
+      if (Number(item?.page) > 1 || item?.part) return true;
+      const b = String(item?.bvid || "").trim();
+      return !!(b && (bvidCount.get(b) || 0) > 1);
+    };
+    const groupKeyOf = (item) => {
+      if (item?.groupKey) return String(item.groupKey);
+      if (item?.groupType === "collection" || item?.collectionSid) {
+        if (item.collectionMid && item.collectionSid) return `collection:${item.collectionMid}/${item.collectionSid}`;
+      }
+      const b = String(item?.bvid || "").trim();
+      if (b && isFolderItem(item)) return `selection:${b}`;
+      return `single:${b}:P${Math.max(1, Number(item?.page) || 1)}`;
+    };
+    const buckets = new Map();
+    for (const entry of list) {
+      if (!isFolderItem(entry.item)) continue;
+      const key = groupKeyOf(entry.item);
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(entry);
+    }
+    const out = [];
+    const seen = new Set();
+    for (const entry of list) {
+      if (!isFolderItem(entry.item)) {
+        out.push({ type: "item", entry });
         continue;
       }
-      const key = resolveLibraryGroupKey(item);
-      if (!folderBuckets.has(key)) folderBuckets.set(key, []);
-      folderBuckets.get(key).push(entry);
-    }
-    for (const entry of entries || []) {
-      const item = entry.item;
-      const isFolder = item?.groupType === "selection" || item?.groupType === "collection"
-        || item?.collectionSid || Number(item?.page) > 1 || item?.part;
-      if (!isFolder) continue;
-      const key = resolveLibraryGroupKey(item);
-      if (emitted.has(key)) continue;
-      emitted.add(key);
-      const children = folderBuckets.get(key) || [entry];
+      const key = groupKeyOf(entry.item);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const children = buckets.get(key) || [entry];
       const selectedCount = children.filter((c) => c.item.selected).length;
       const total = children.length;
       const checkState = selectedCount === 0 ? "none" : selectedCount === total ? "all" : "partial";
-      nodes.push({
+      const labeled =
+        children.map((c) => c.item).find((it) => it.groupFolder && !/^未知UP\b/.test(String(it.groupFolder)))
+        || children.map((c) => c.item).find((it) => String(it.author || "").trim() && it.author !== "未知UP")
+        || children[0]?.item;
+      const groupType = labeled?.groupType === "collection" || labeled?.collectionSid ? "collection" : "selection";
+      out.push({
         type: "folder",
         groupKey: key,
-        groupType: item.groupType === "collection" || item.collectionSid ? "collection" : "selection",
-        folderLabel: item.groupFolder || item.collectionName || item.videoTitle || item.title || key,
+        groupType,
+        folderLabel:
+          (labeled?.groupFolder && !/^未知UP\b/.test(String(labeled.groupFolder)) && labeled.groupFolder)
+          || buildUpFolderLabel(
+            labeled?.author,
+            groupType === "collection"
+              ? (labeled?.collectionName || "未命名合集")
+              : (labeled?.videoTitle || resolveSeriesTitle(labeled)),
+          ),
         collapsed: !!collapsed[key],
         selectedCount,
         total,
@@ -1552,29 +1662,15 @@
         children,
       });
     }
-    // Re-emit singles in original order mixed with folders: rebuild properly
-    const out = [];
-    const seenFolder = new Set();
-    for (const entry of entries || []) {
-      const item = entry.item;
-      const isFolder = item?.groupType === "selection" || item?.groupType === "collection"
-        || item?.collectionSid || Number(item?.page) > 1 || item?.part;
-      if (!isFolder) {
-        out.push({ type: "item", entry });
-        continue;
-      }
-      const key = resolveLibraryGroupKey(item);
-      if (seenFolder.has(key)) continue;
-      seenFolder.add(key);
-      out.push(nodes.find((n) => n.type === "folder" && n.groupKey === key));
-    }
-    return out.filter(Boolean);
+    return out;
   }
 
-  function downloadText(filename, text) {
+  function downloadText(filename, text, { overwrite = false } = {}) {
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
-    const name = String(filename || "download.txt").replace(/\\/g, "/");
+    // Normalize path separators; keep a single real extension (no name-txt).
+    let name = String(filename || "download.txt").replace(/\\/g, "/");
+    name = name.replace(/\/{2,}/g, "/");
 
     const revokeLater = () => {
       setTimeout(() => {
@@ -1585,6 +1681,7 @@
     const anchorFallback = () => {
       const a = document.createElement("a");
       a.href = url;
+      // Anchor download cannot overwrite; still use basename path for best effort.
       a.download = name;
       a.style.display = "none";
       document.body.appendChild(a);
@@ -1596,16 +1693,19 @@
     };
 
     // GM_download preserves nested paths under the browser Downloads folder.
+    // conflictAction: overwrite — avoid index (1).md / index (2).md stacking.
     if (typeof GM_download === "function") {
       try {
-        GM_download({
+        const opts = {
           url,
           name,
           saveAs: false,
           onload: revokeLater,
           onerror: anchorFallback,
           ontimeout: anchorFallback,
-        });
+        };
+        if (overwrite) opts.conflictAction = "overwrite";
+        GM_download(opts);
         return;
       } catch (_) {
         /* fall through to anchor */
@@ -1618,22 +1718,36 @@
    * Batch-export subtitles into:
    *   Downloads/loop-bilibili-subbatch/<UP 视频名|合集名>/…
    * index.md: BV lines for 选集; UP + shortUrl + 合集名 for 合集.
+   * Always rewrites index.md (overwrite) so it does not stack as index (n).md.
    */
   async function downloadSubtitleExportBatch(pool, ext, convert) {
     let indexMap = loadExportIndexMap();
+    const peerPool = [...pool, ...(state.items || [])];
     for (let i = 0; i < pool.length; i++) {
-      const it = pool[i];
+      const it = normalizeExportItem(pool[i], peerPool);
+      // Keep library items in sync so 字幕 panel and download share one folder label.
+      if (it.groupKey) {
+        state.items.forEach((row) => {
+          if (String(row.groupKey || "") !== String(it.groupKey)) return;
+          if (it.author && (!row.author || row.author === "未知UP")) row.author = it.author;
+          if (it.groupFolder && (!row.groupFolder || /^未知UP\b/.test(String(row.groupFolder)))) {
+            row.groupFolder = it.groupFolder;
+          }
+        });
+      }
       indexMap = upsertIndexForExportItem(indexMap, it);
       const relativePath = buildSubtitleExportRelativePath(it, ext);
-      downloadText(relativePath, convert(it.data));
+      downloadText(relativePath, convert(it.data), { overwrite: true });
       if (pool.length > 1) await sleep(220);
     }
     saveExportIndexMap(indexMap);
     const indexMd = renderExportIndexMd(indexMap);
     if (indexMd) {
       await sleep(pool.length ? 260 : 0);
-      downloadText(buildSubtitleExportIndexPath(), indexMd);
+      // Critical: always overwrite the same index.md path (no index (1).md).
+      downloadText(buildSubtitleExportIndexPath(), indexMd, { overwrite: true });
     }
+    renderList({ renderTranscript: false });
     return { count: pool.length, indexEntries: Object.keys(indexMap).length };
   }
 
@@ -13849,7 +13963,18 @@
         if (ctx.type === "collection") {
           if (!meta.author && ctx.authorHint) meta.author = ctx.authorHint;
           if (!meta.name && ctx.collectionTitleHint) meta.name = ctx.collectionTitleHint;
+          // List API often omits upper; authorHint from ugc_season/view fills UP name.
           items = attachCollectionGroupMeta(items, meta, ctx);
+          // If still 未知UP, one more pass after ensuring hints applied.
+          if (items.some((it) => !it.author || /^未知UP\b/.test(String(it.groupFolder || "")))) {
+            if (ctx.authorHint) {
+              items = items.map((it) => ({
+                ...it,
+                author: it.author || ctx.authorHint,
+                groupFolder: buildUpFolderLabel(it.author || ctx.authorHint, it.collectionName || meta.name || "未命名合集"),
+              }));
+            }
+          }
         }
       } else {
         const fromDom = harvestBvidsFromDom();
