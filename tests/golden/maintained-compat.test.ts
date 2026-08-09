@@ -113,6 +113,8 @@ describe("Maintained full-feature compatibility source", () => {
     expect(maintainedSource).toContain("function renderExportIndexMd(");
     expect(maintainedSource).toContain("function attachCollectionGroupMeta(");
     expect(maintainedSource).toContain("function buildLibraryRenderNodes(");
+    expect(maintainedSource).toContain("function stampUgcSeasonGroupMeta(");
+    expect(maintainedSource).toContain("auto_promoted_ugc_season");
     expect(maintainedSource).toContain("folder-expand-all");
     expect(maintainedSource).toContain("GM_download");
     expect(maintainedSource).toContain("buildSubtitleExportIndexPath()");

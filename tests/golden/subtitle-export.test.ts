@@ -315,6 +315,76 @@ describe("library folder groups", () => {
     }
   });
 
+  it("folders 合集 even for a single episode with collection meta", () => {
+    // Opening one video inside a 合集 should still show a folder (auto), like multi-P 选集.
+    const entries = [
+      {
+        item: {
+          bvid: "BV1qmsXztEde",
+          page: 1,
+          author: "随意Official",
+          title: "读主节点不能强一致？最实用的强一致方案",
+          groupType: "collection" as const,
+          groupKey: "collection:79356601/6622988",
+          collectionName: "分布式教程",
+          collectionMid: "79356601",
+          collectionSid: "6622988",
+          groupFolder: "随意Official 分布式教程",
+          selected: true,
+        },
+        index: 0,
+      },
+    ];
+    const nodes = buildLibraryRenderNodes(entries, {});
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0].type).toBe("folder");
+    if (nodes[0].type === "folder") {
+      expect(nodes[0].groupType).toBe("collection");
+      expect(nodes[0].total).toBe(1);
+      expect(nodes[0].folderLabel).toBe("随意Official 分布式教程");
+    }
+  });
+
+  it("folders multiple 合集 episodes sharing collectionSid without groupType", () => {
+    const entries = [
+      {
+        item: {
+          bvid: "BV1AAA",
+          page: 1,
+          author: "随意Official",
+          title: "第1集",
+          collectionMid: "79356601",
+          collectionSid: "6622988",
+          collectionName: "分布式教程",
+          selected: true,
+        },
+        index: 0,
+      },
+      {
+        item: {
+          bvid: "BV1BBB",
+          page: 1,
+          author: "随意Official",
+          title: "第2集",
+          collectionMid: "79356601",
+          collectionSid: "6622988",
+          collectionName: "分布式教程",
+          selected: false,
+        },
+        index: 1,
+      },
+    ];
+    const nodes = buildLibraryRenderNodes(entries, {});
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0].type).toBe("folder");
+    if (nodes[0].type === "folder") {
+      expect(nodes[0].groupType).toBe("collection");
+      expect(nodes[0].total).toBe(2);
+      expect(nodes[0].checkState).toBe("partial");
+      expect(nodes[0].folderLabel).toContain("分布式教程");
+    }
+  });
+
   it("keeps single videos flat outside folders", () => {
     const entries = [
       {

@@ -32,6 +32,7 @@
 // ==/UserScript==
 
 /**
+ * v6.4.1 — 合集与视频选集一样在字幕库自动建文件夹：扫描/打开合集内视频识别 ugc_season 并分组；自动模式扫合集页拉全列表。
  * v6.4.0 — index.md 视频选集/单视频改为「作者 + www.bilibili.com/video/BV + 标题」，与合集「作者 + 短地址 + 名称」对齐。
  * v6.2.1 — 修复：下载后缀 -txt、选集未成文件夹、index.md 叠成 (1)(2)、合集下载未知UP；字幕面板与下载共用文件夹标签；GM_download overwrite。
  * v6.2.0 — 字幕库文件夹：视频选集按「UP+视频名」、合集按「UP+合集名」分组；支持全部展开/收起与文件夹全选勾选。合集 index.md 存 UP+短地址+合集名（按合集地址更新名称，不存 BV）。
@@ -13900,6 +13901,50 @@
     return ctx;
   }
 
+  /**
+   * Stamp ugc_season group fields onto item(s) so 字幕库 shows a 合集 folder
+   * (same idea as multi-P 视频选集 folders).
+   */
+  function applyUgcSeasonToItem(item, view) {
+    if (!item || !view) return item;
+    const season = view.ugc_season || {};
+    const mid = season.mid || view.owner?.mid;
+    const sid = season.id;
+    if (!mid || !sid) return item;
+    const author = String(item.author || view.owner?.name || "").trim();
+    const collectionName = String(season.title || item.collectionName || "未命名合集").trim();
+    const shortUrl = buildCollectionShortUrl(mid, sid);
+    const groupKey = `collection:${mid}/${sid}`;
+    const groupFolder = buildUpFolderLabel(author, collectionName);
+    return {
+      ...item,
+      author: author || item.author,
+      groupType: "collection",
+      groupKey,
+      groupFolder,
+      collectionName,
+      collectionMid: String(mid),
+      collectionSid: String(sid),
+      collectionShortUrl: shortUrl,
+    };
+  }
+
+  async function stampUgcSeasonGroupMeta(items, bvid) {
+    const list = items || [];
+    if (!list.length) return list;
+    const id = bvid || list[0]?.bvid;
+    if (!id) return list;
+    try {
+      const detail = await viewDetail(id);
+      const view = (detail && detail.data && detail.data.View) || {};
+      if (!view.ugc_season?.id) return list;
+      return list.map((it) => applyUgcSeasonToItem(it, view));
+    } catch (error) {
+      console.warn("[bili-subbatch] stampUgcSeasonGroupMeta", error?.message || error);
+      return list;
+    }
+  }
+
   async function doScan() {
     if (state.scanBusy) {
       state.cancelScan = true;
@@ -13938,6 +13983,23 @@
         ctx = await ensureCollectionContext(ctx);
         state.ctx = ctx;
       }
+
+      // 合集内视频页（自动/含 ugc_season）扫描时，自动拉全合集并建文件夹
+      // （对齐：视频选集扫全部分P → 自动文件夹）。显式「单个视频」模式不提升。
+      if (
+        ctx.type === "video"
+        && state.mode !== "video"
+        && state.mode !== "selection"
+      ) {
+        setStatus("检测合集信息…");
+        const promoted = await ensureCollectionContext({ ...ctx, type: "collection" });
+        if (promoted.mid && promoted.season_id) {
+          ctx = { ...promoted, type: "collection", note: "auto_promoted_ugc_season" };
+          state.ctx = ctx;
+          setStatus(`识别到合集 · 将加载全列表并建立文件夹…`);
+        }
+      }
+
       validateCtxForScan(ctx);
 
       let items = [];
@@ -13976,6 +14038,8 @@
           } else {
             items = loaded.items.map((it) => ({ ...it, page: page || 1 }));
           }
+          // 单条视频若仍属于 ugc 合集，打上合集分组元数据 → 字幕库显示文件夹
+          items = await stampUgcSeasonGroupMeta(items, bvid);
         } else {
           items = attachSelectionGroupMeta(loaded.items, loaded.meta || {});
         }
@@ -14439,7 +14503,7 @@
     if (epoch !== state.autoCaptureEpoch || controller.signal.aborted) return;
     if (currentRouteVideoKey() !== captureKey) return;
 
-    const item = {
+    let item = {
       ...placeholder,
       bvid: result?.bvid || bvid,
       aid: result?.aid || null,
@@ -14463,6 +14527,11 @@
       source: result?.source || (fastError ? "fast_failed" : "fast"),
       autoCaptured: true,
     };
+    // 合集内视频：自动打上 collection 分组，字幕库显示合集文件夹（与选集多 P 对齐）。
+    try {
+      const stamped = await stampUgcSeasonGroupMeta([item], item.bvid);
+      if (stamped[0]) item = stamped[0];
+    } catch (_) { /* ignore season stamp */ }
     rememberTranscriptItem(item);
     const sameIndex = state.items.findIndex(
       (entry) => routeVideoKey(entry.bvid, entry.page || 1) === captureKey,
@@ -14474,6 +14543,13 @@
       target.aid = item.aid ?? target.aid;
       target.cid = item.cid ?? target.cid;
       target.pages = item.pages || target.pages;
+      if (item.groupType) target.groupType = item.groupType;
+      if (item.groupKey) target.groupKey = item.groupKey;
+      if (item.groupFolder) target.groupFolder = item.groupFolder;
+      if (item.collectionName) target.collectionName = item.collectionName;
+      if (item.collectionMid) target.collectionMid = item.collectionMid;
+      if (item.collectionSid) target.collectionSid = item.collectionSid;
+      if (item.collectionShortUrl) target.collectionShortUrl = item.collectionShortUrl;
       target.sources = Array.from(new Set([...(target.sources || []), "打开视频"].filter(Boolean)));
       copySubtitleState(target, item);
       state.transcriptItem = target;

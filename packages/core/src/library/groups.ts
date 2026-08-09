@@ -124,7 +124,7 @@ export function resolveLibraryFolderLabel(item: LibraryGroupItem | null | undefi
 }
 
 /**
- * Same BV appears more than once (different P) → treat as 视频选集 folder even if
+ * Same BV appears more than once (different P) → 视频选集 folder even if
  * groupType metadata was lost (e.g. auto-capture then scan merge).
  */
 function bvidMultiPageKeys(entries: LibraryEntry[]): Set<string> {
@@ -141,12 +141,62 @@ function bvidMultiPageKeys(entries: LibraryEntry[]): Set<string> {
   return multi;
 }
 
+/**
+ * Shared 合集 identity across different BVs → always folder.
+ * Keys: collection:mid/sid | collection:shortUrl | collection:name|author
+ */
+function collectionIdentityKey(item: LibraryGroupItem | null | undefined): string {
+  if (!item) return "";
+  if (item.groupKey && String(item.groupKey).startsWith("collection:")) {
+    return String(item.groupKey);
+  }
+  const mid = item.collectionMid;
+  const sid = item.collectionSid;
+  if (mid && sid) return `collection:${mid}/${sid}`;
+  if (item.collectionShortUrl) return `collection:${item.collectionShortUrl}`;
+  const name = String(item.collectionName || "").trim();
+  if (name) {
+    const author = String(item.author || "").trim();
+    return `collection:name:${author}|${name}`;
+  }
+  return "";
+}
+
+/** Identities that appear on ≥1 collection-tagged item (even a single video in a 合集). */
+function collectionFolderKeys(entries: LibraryEntry[]): Set<string> {
+  const keys = new Set<string>();
+  for (const entry of entries) {
+    const item = entry.item;
+    const kind = inferLibraryGroupType(item);
+    const id = collectionIdentityKey(item);
+    // Explicit collection meta → folder even if only one video is in the library.
+    if (id && (kind === "collection" || item?.collectionSid || item?.collectionName || item?.collectionShortUrl)) {
+      keys.add(id);
+    }
+  }
+  // Also: 2+ items sharing the same collection identity without explicit groupType.
+  const counts = new Map<string, number>();
+  for (const entry of entries) {
+    const id = collectionIdentityKey(entry.item);
+    if (!id) continue;
+    counts.set(id, (counts.get(id) || 0) + 1);
+  }
+  for (const [id, n] of counts) {
+    if (n > 1) keys.add(id);
+  }
+  return keys;
+}
+
 function effectiveGroupType(
   item: LibraryGroupItem | null | undefined,
   multiBvids: Set<string>,
+  collectionKeys: Set<string>,
 ): LibraryGroupType {
   const kind = inferLibraryGroupType(item);
-  if (kind !== "single") return kind;
+  if (kind === "collection") return "collection";
+  if (kind === "selection") return "selection";
+  const colId = collectionIdentityKey(item);
+  if (colId && collectionKeys.has(colId)) return "collection";
   const bvid = String(item?.bvid || "").trim();
   if (bvid && multiBvids.has(bvid)) return "selection";
   return "single";
@@ -155,14 +205,13 @@ function effectiveGroupType(
 function effectiveGroupKey(
   item: LibraryGroupItem | null | undefined,
   multiBvids: Set<string>,
+  collectionKeys: Set<string>,
 ): string {
   if (item?.groupKey) return String(item.groupKey);
-  const kind = effectiveGroupType(item, multiBvids);
+  const kind = effectiveGroupType(item, multiBvids, collectionKeys);
   if (kind === "collection") {
-    const mid = item?.collectionMid;
-    const sid = item?.collectionSid;
-    if (mid && sid) return `collection:${mid}/${sid}`;
-    if (item?.collectionShortUrl) return `collection:${item.collectionShortUrl}`;
+    const id = collectionIdentityKey(item);
+    if (id) return id;
   }
   if (kind === "selection") {
     const bvid = String(item?.bvid || "").trim();
@@ -174,6 +223,9 @@ function effectiveGroupKey(
 /**
  * Group filtered library entries into folders (selection/collection) + flat singles.
  * Folder order follows first appearance of each groupKey.
+ *
+ * - 视频选集: multi-P same BV (or groupType=selection)
+ * - 合集: groupType/collectionSid/… (even a single captured episode) auto-folders
  */
 export function buildLibraryRenderNodes(
   entries: LibraryEntry[],
@@ -181,12 +233,13 @@ export function buildLibraryRenderNodes(
 ): LibraryRenderNode[] {
   const collapsed = collapsedMap || {};
   const multiBvids = bvidMultiPageKeys(entries);
+  const collectionKeys = collectionFolderKeys(entries);
   const folderBuckets = new Map<string, LibraryEntry[]>();
 
   for (const entry of entries) {
-    const kind = effectiveGroupType(entry.item, multiBvids);
+    const kind = effectiveGroupType(entry.item, multiBvids, collectionKeys);
     if (kind === "single") continue;
-    const key = effectiveGroupKey(entry.item, multiBvids);
+    const key = effectiveGroupKey(entry.item, multiBvids, collectionKeys);
     if (!folderBuckets.has(key)) folderBuckets.set(key, []);
     folderBuckets.get(key)!.push(entry);
   }
@@ -197,12 +250,12 @@ export function buildLibraryRenderNodes(
   // Interleave: walk original entries order, emit folder once when first child appears,
   // emit singles in place.
   for (const entry of entries) {
-    const kind = effectiveGroupType(entry.item, multiBvids);
+    const kind = effectiveGroupType(entry.item, multiBvids, collectionKeys);
     if (kind === "single") {
       nodes.push({ type: "item", entry });
       continue;
     }
-    const key = effectiveGroupKey(entry.item, multiBvids);
+    const key = effectiveGroupKey(entry.item, multiBvids, collectionKeys);
     if (emittedFolders.has(key)) continue;
     emittedFolders.add(key);
     const children = folderBuckets.get(key) || [entry];
