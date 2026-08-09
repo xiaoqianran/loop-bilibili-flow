@@ -25,7 +25,7 @@ const runtime = createUserscriptRuntime(host);
  * Product body must call `SubBatch.SubBatchMonorepo.core.*` (or top-level aliases).
  */
 const SubBatchMonorepo = {
-  version: "6.6.0",
+  version: "6.6.1",
   runtime,
   host,
   /** Entire pure core namespace — preferred bridge target. */
@@ -68,6 +68,8 @@ const SubBatchMonorepo = {
   attachSelectionGroupMeta: core.attachSelectionGroupMeta,
   attachCollectionGroupMeta: core.attachCollectionGroupMeta,
   attachUserSpaceGroupMeta: core.attachUserSpaceGroupMeta,
+  applySpaceCollectionMembership: core.applySpaceCollectionMembership,
+  countSpaceCollectionMatches: core.countSpaceCollectionMatches,
   applyUgcSeasonToItem: core.applyUgcSeasonToItem,
   applyUgcSeasonToItems: core.applyUgcSeasonToItems,
   buildGroupMetaPatches: core.buildGroupMetaPatches,

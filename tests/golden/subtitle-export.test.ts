@@ -21,6 +21,8 @@ import {
   attachCollectionGroupMeta,
   attachSelectionGroupMeta,
   attachUserSpaceGroupMeta,
+  applySpaceCollectionMembership,
+  countSpaceCollectionMatches,
   applyUgcSeasonToItem,
   applyUgcSeasonToItems,
   buildGroupMetaPatches,
@@ -641,5 +643,64 @@ describe("library folder groups", () => {
     );
     expect(stamped[0].parentFolder).toBe("KurTips");
     expect(stamped[0].spaceMid).toBe("1");
+  });
+
+  it("applySpaceCollectionMembership migrates matching BVs into 合集 under UP", () => {
+    const space = attachUserSpaceGroupMeta(
+      [
+        { bvid: "BV1INCOL", page: 1, title: "合集里的视频", author: "示例UP" },
+        { bvid: "BV1ALONE", page: 1, title: "散视频", author: "示例UP" },
+        { bvid: "bv1alsoin", page: 1, title: "另一集", author: "示例UP" },
+      ],
+      { author: "示例UP", mid: "12345" },
+    );
+    const collections = [
+      {
+        mid: "12345",
+        season_id: "99",
+        name: "进阶合集",
+        author: "示例UP",
+        bvids: ["BV1INCOL", "BV1ALSOIN"], // casing normalized
+      },
+    ];
+    const stats = countSpaceCollectionMatches(space, collections);
+    expect(stats).toEqual({ matched: 2, collectionCount: 1 });
+
+    const migrated = applySpaceCollectionMembership(space, collections);
+    expect(migrated[0].groupType).toBe("collection");
+    expect(migrated[0].collectionName).toBe("进阶合集");
+    expect(migrated[0].collectionSid).toBe("99");
+    expect(migrated[0].collectionShortUrl).toBe("space.bilibili.com/12345/lists/99");
+    expect(migrated[0].parentFolder).toBe("示例UP");
+    expect(migrated[0].groupFolder).toBe("进阶合集");
+    expect(resolveFolderSegments(migrated[0])).toEqual(["示例UP", "进阶合集"]);
+    expect(buildSubtitleExportRelativePath(migrated[0], "txt")).toBe(
+      `${SUBTITLE_EXPORT_ROOT}/${safePathSegment("示例UP")}/${safePathSegment("进阶合集")}/${joinFileName("合集里的视频", "txt")}`,
+    );
+
+    // 未命中的散视频仍只在 UP 下
+    expect(migrated[1].groupType == null || migrated[1].groupType === "single").toBe(true);
+    expect(migrated[1].collectionSid).toBeFalsy();
+    expect(resolveFolderSegments(migrated[1])).toEqual(["示例UP"]);
+
+    expect(migrated[2].groupType).toBe("collection");
+    expect(migrated[2].collectionShortUrl).toContain("/lists/99");
+
+    const nodes = buildLibraryRenderNodes(
+      migrated.map((item, index) => ({ item, index })),
+      {},
+    );
+    expect(nodes).toHaveLength(1);
+    if (nodes[0].type !== "folder") return;
+    expect(nodes[0].groupType).toBe("space");
+    const nested = nodes[0].nodes || [];
+    // 散视频 item + 合集 folder
+    expect(nested.some((n) => n.type === "item")).toBe(true);
+    const colFolder = nested.find((n) => n.type === "folder" && n.groupType === "collection");
+    expect(colFolder).toBeTruthy();
+    if (colFolder && colFolder.type === "folder") {
+      expect(colFolder.folderLabel).toBe("进阶合集");
+      expect(colFolder.children).toHaveLength(2);
+    }
   });
 });

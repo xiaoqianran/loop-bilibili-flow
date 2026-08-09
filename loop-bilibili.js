@@ -32,6 +32,7 @@
 // ==/UserScript==
 
 /**
+ * v6.6.1 — 个人主页扫描后拉取该 UP 全部合集（名称+短地址），按 BV 把成员视频迁入 合集 文件夹（路径 UP/合集名/…）。
  * v6.6.0 — 个人主页嵌套文件夹：顶层 = UP 名；其下单视频 / 视频选集 / 合集分层；下载路径同步为 loop-bilibili-subbatch/UP/…。
  * v6.5.1 — 自动抓取后联动采集模式下拉：多分P 切「视频选集」，ugc 合集切「合集」，减少手动点选。
  * v6.5.0 — 架构收敛：字幕导出/选集合集分组/index 规则仅存在 packages/core；产品体只做 monorepo bridge + IO，消除双轨实现。
@@ -1279,6 +1280,14 @@
 
   function attachUserSpaceGroupMeta(items, meta = {}) {
     return coreCall("attachUserSpaceGroupMeta", items, meta);
+  }
+
+  function applySpaceCollectionMembership(items, collections) {
+    return coreCall("applySpaceCollectionMembership", items, collections);
+  }
+
+  function countSpaceCollectionMatches(items, collections) {
+    return coreCall("countSpaceCollectionMatches", items, collections);
   }
 
   function setGroupSelection(items, groupKey, selected) {
@@ -2538,6 +2547,110 @@
       }
     }
     return { items: all, meta, pagesFetched: Math.min(page, maxPages), truncated: hasMore };
+  }
+
+  /**
+   * 个人主页：拉取该 UP 的全部 合集（名称 + season_id → 短地址 + 成员 BV）。
+   * 列表接口可能只带 recent archives，total 更大时再拉 seasons_archives_list 补全。
+   */
+  async function loadUserSpaceSeasons(mid, {
+    maxPages = 30,
+    pageSize = 20,
+    onProgress,
+    delayMs = 280,
+    shouldCancel,
+    maxSeasonArchivePages = 40,
+  } = {}) {
+    const midStr = String(mid || "").trim();
+    if (!midStr) return [];
+    const canceled = () => typeof shouldCancel === "function" && shouldCancel();
+    const throwIfCanceled = () => {
+      if (!canceled()) return;
+      const error = new Error("扫描已取消");
+      error.name = "AbortError";
+      throw error;
+    };
+
+    const seasons = [];
+    let page = 1;
+    let hasMore = true;
+    while (hasMore && page <= maxPages) {
+      throwIfCanceled();
+      if (onProgress) onProgress(`拉取合集列表 ${page}/${maxPages}…（已 ${seasons.length} 个）`);
+      const result = await httpJson(
+        `https://api.bilibili.com/x/polymer/web-space/seasons_series_list?mid=${encodeURIComponent(midStr)}&page_num=${page}&page_size=${pageSize}&web_location=333.1387`,
+        {
+          Referer: `https://space.bilibili.com/${midStr}`,
+          Origin: "https://space.bilibili.com",
+        },
+      );
+      throwIfCanceled();
+      if (result.code !== 0) {
+        throw new Error(result.message || `seasons_series_list code=${result.code}`);
+      }
+      const lists = (result.data && result.data.items_lists) || {};
+      const seasonsList = lists.seasons_list || [];
+      const pageInfo = lists.page || {};
+      for (const entry of seasonsList) {
+        const metaBlock = (entry && entry.meta) || {};
+        const sid = metaBlock.season_id;
+        if (sid == null || sid === "") continue;
+        const archives = (entry && entry.archives) || [];
+        let bvids = archives.map((a) => a && a.bvid).filter(Boolean);
+        const total = Number(metaBlock.total) || bvids.length;
+        // 列表页往往只给 recent；成员不全时按合集拉全量 archives。
+        if (total > bvids.length) {
+          if (onProgress) {
+            onProgress(`补全合集「${metaBlock.name || sid}」成员 ${bvids.length}/${total}…`);
+          }
+          try {
+            const full = await loadAllListItems(
+              { type: "collection", mid: midStr, season_id: String(sid) },
+              {
+                maxPages: maxSeasonArchivePages,
+                pageSize: 30,
+                delayMs,
+                onProgress: (t) => {
+                  if (onProgress) onProgress(`合集 ${metaBlock.name || sid} · ${t}`);
+                },
+                shouldCancel,
+              },
+            );
+            const fullBvids = full.items.map((it) => it.bvid).filter(Boolean);
+            if (fullBvids.length > bvids.length) bvids = fullBvids;
+          } catch (err) {
+            if (err?.name === "AbortError") throw err;
+            console.warn(
+              "[bili-subbatch] loadUserSpaceSeasons archives",
+              sid,
+              err?.message || err,
+            );
+          }
+        }
+        seasons.push({
+          mid: String(metaBlock.mid || midStr),
+          season_id: String(sid),
+          name: String(metaBlock.name || metaBlock.title || "未命名合集").trim() || "未命名合集",
+          bvids,
+          shortUrl: buildCollectionShortUrl(metaBlock.mid || midStr, sid),
+        });
+      }
+      const totalHint = pageInfo.total != null ? Number(pageInfo.total) : null;
+      if (totalHint != null && Number.isFinite(totalHint) && totalHint > 0) {
+        // API total 多为 seasons+series 条目总数（非页数）
+        hasMore = page * pageSize < totalHint;
+      } else {
+        hasMore = seasonsList.length >= pageSize
+          || ((lists.series_list || []).length >= pageSize);
+      }
+      if (!hasMore) break;
+      page += 1;
+      if (page <= maxPages) {
+        await sleep(delayMs || 280);
+        throwIfCanceled();
+      }
+    }
+    return seasons;
   }
 
   async function loadVideoAsItems(bvid, expandAllParts) {
@@ -13699,13 +13812,56 @@
         meta = res.meta || {};
         if (res.truncated) meta.truncated = true;
         if (ctx.type === "user") {
-          // 个人主页：顶层文件夹 = UP 名；单视频 / 后续选集·合集会嵌套其下。
+          // 个人主页：顶层 = UP 名；再拉合集列表（名称+短地址），把成员视频迁入合集文件夹。
           const author =
             String(meta.author || "").trim()
             || String(items.find((it) => String(it?.author || "").trim())?.author || "").trim()
             || "";
           items = attachUserSpaceGroupMeta(items, { author, mid: ctx.mid });
           if (author) meta.author = author;
+          try {
+            setStatus("拉取合集列表（名称+地址）…");
+            const seasons = await loadUserSpaceSeasons(ctx.mid, {
+              maxPages: Math.max(5, Math.min(Number(state.maxPages) || 20, 40)),
+              pageSize: 20,
+              delayMs: Math.min(state.delayMs, 400),
+              onProgress: (t) => setStatus(t),
+              shouldCancel: () => state.cancelScan || scanId !== state.scanSeq,
+            });
+            if (state.cancelScan || scanId !== state.scanSeq) {
+              const error = new Error("扫描已取消");
+              error.name = "AbortError";
+              throw error;
+            }
+            if (seasons.length) {
+              const descriptors = seasons.map((s) => ({
+                mid: s.mid,
+                season_id: s.season_id,
+                name: s.name,
+                author,
+                bvids: s.bvids,
+              }));
+              const stats = countSpaceCollectionMatches(items, descriptors);
+              items = applySpaceCollectionMembership(items, descriptors);
+              meta.collections = seasons.map((s) => ({
+                name: s.name,
+                season_id: s.season_id,
+                shortUrl: s.shortUrl || buildCollectionShortUrl(s.mid, s.season_id),
+                memberCount: (s.bvids || []).length,
+              }));
+              meta.collectionMatched = stats.matched;
+              meta.collectionCount = stats.collectionCount;
+              if (stats.matched > 0) {
+                meta.hint = `已归入 ${stats.matched} 条到 ${stats.collectionCount} 个合集`;
+              } else if (stats.collectionCount > 0) {
+                meta.hint = `发现 ${stats.collectionCount} 个合集（当前页视频未命中成员，可调大「最多页」）`;
+              }
+            }
+          } catch (err) {
+            if (err?.name === "AbortError") throw err;
+            console.warn("[bili-subbatch] loadUserSpaceSeasons", err?.message || err);
+            meta.collectionError = String(err?.message || err || "合集列表失败");
+          }
         }
         if (ctx.type === "collection") {
           if (!meta.author && ctx.authorHint) meta.author = ctx.authorHint;

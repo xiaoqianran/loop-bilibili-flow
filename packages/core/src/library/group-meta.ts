@@ -225,6 +225,91 @@ export function applyUgcSeasonToItems<T extends LibraryGroupItem>(
 }
 
 /**
+ * One UP 合集 discovered on 个人主页 (name + mid/sid → shortUrl + member bvids).
+ * Product fetches seasons_series_list / seasons_archives_list; pure only maps.
+ */
+export interface SpaceCollectionDescriptor {
+  mid?: string | number;
+  season_id?: string | number;
+  name?: string;
+  title?: string;
+  author?: string;
+  /** Member BVids (any casing). */
+  bvids?: Array<string | null | undefined> | null;
+}
+
+function normalizeBvidKey(bvid: string | null | undefined): string {
+  const id = String(bvid || "").trim();
+  if (!id) return "";
+  // Full uppercase so bv1xxx / BV1XXX match (B站 BV 大小写不敏感)。
+  const body = /^bv/i.test(id) ? id.slice(2) : id;
+  return `BV${body.toUpperCase()}`;
+}
+
+/**
+ * Migrate 个人主页 videos into 合集 folders when their BV belongs to a season.
+ * Preserves parentFolder (UP) so path is UP/合集名/….
+ * First matching collection wins if a BV appears in multiple seasons.
+ */
+export function applySpaceCollectionMembership<T extends LibraryGroupItem>(
+  items: T[] | null | undefined,
+  collections: SpaceCollectionDescriptor[] | null | undefined,
+): T[] {
+  const list = items || [];
+  const cols = collections || [];
+  if (!list.length || !cols.length) return list.map((it) => ({ ...it }));
+
+  const byBvid = new Map<string, SpaceCollectionDescriptor>();
+  for (const col of cols) {
+    const sid = String(col?.season_id || "").trim();
+    if (!sid) continue;
+    for (const raw of col.bvids || []) {
+      const key = normalizeBvidKey(raw);
+      if (!key || byBvid.has(key)) continue;
+      byBvid.set(key, col);
+    }
+  }
+  if (!byBvid.size) return list.map((it) => ({ ...it }));
+
+  return list.map((it) => {
+    const key = normalizeBvidKey(it.bvid);
+    const col = key ? byBvid.get(key) : undefined;
+    if (!col) return { ...it };
+    const stamped = attachCollectionGroupMeta([it], {
+      mid: col.mid,
+      season_id: col.season_id,
+      name: col.name || col.title || "未命名合集",
+      author: col.author || it.author,
+      parentFolder: it.parentFolder,
+    });
+    return stamped[0] || { ...it };
+  });
+}
+
+/** Count how many library items were assigned to a collection by membership map. */
+export function countSpaceCollectionMatches(
+  items: LibraryGroupItem[] | null | undefined,
+  collections: SpaceCollectionDescriptor[] | null | undefined,
+): { matched: number; collectionCount: number } {
+  const list = items || [];
+  const cols = (collections || []).filter((c) => String(c?.season_id || "").trim());
+  if (!list.length || !cols.length) return { matched: 0, collectionCount: cols.length };
+  const memberKeys = new Set<string>();
+  for (const col of cols) {
+    for (const raw of col.bvids || []) {
+      const key = normalizeBvidKey(raw);
+      if (key) memberKeys.add(key);
+    }
+  }
+  let matched = 0;
+  for (const it of list) {
+    const key = normalizeBvidKey(it.bvid);
+    if (key && memberKeys.has(key)) matched += 1;
+  }
+  return { matched, collectionCount: cols.length };
+}
+
+/**
  * Author/folder patches to apply to library rows after export normalize.
  * Pure — product applies patches to state.
  */
