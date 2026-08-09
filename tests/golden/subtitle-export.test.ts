@@ -18,6 +18,13 @@ import {
   resolveSubtitleFileStem,
   safePathSegment,
   setGroupSelection,
+  attachCollectionGroupMeta,
+  attachSelectionGroupMeta,
+  applyUgcSeasonToItem,
+  applyUgcSeasonToItems,
+  buildGroupMetaPatches,
+  applyGroupMetaPatchToItems,
+  mergeGroupFields,
   buildVideoShortUrl,
   upsertCollectionExportIndex,
   upsertExportIndexMap,
@@ -383,6 +390,74 @@ describe("library folder groups", () => {
       expect(nodes[0].checkState).toBe("partial");
       expect(nodes[0].folderLabel).toContain("分布式教程");
     }
+  });
+
+  it("attachSelection / attachCollection / ugc_season are pure and reusable", () => {
+    const sel = attachSelectionGroupMeta(
+      [
+        { bvid: "BV14u41147YH", page: 1, part: "开场", title: "x - P1【开场】" },
+        { bvid: "BV14u41147YH", page: 2, part: "续", title: "x - P2【续】" },
+      ],
+      { author: "KurTips", title: "【Kurt】教程" },
+    );
+    expect(sel).toHaveLength(2);
+    expect(sel[0].groupType).toBe("selection");
+    expect(sel[0].groupKey).toBe("selection:BV14u41147YH");
+    expect(sel[0].groupFolder).toBe("KurTips 【Kurt】教程");
+    expect(sel[1].videoTitle).toBe("【Kurt】教程");
+
+    const col = attachCollectionGroupMeta(
+      [
+        { bvid: "BV1AAA", title: "第1集", author: "" },
+        { bvid: "BV1BBB", title: "第2集", author: "" },
+      ],
+      { mid: "1", season_id: "2", name: "分布式教程", author: "" },
+      { authorHint: "随意Official" },
+    );
+    expect(col[0].groupType).toBe("collection");
+    expect(col[0].groupKey).toBe("collection:1/2");
+    expect(col[0].author).toBe("随意Official");
+    expect(col[0].groupFolder).toBe("随意Official 分布式教程");
+
+    const stamped = applyUgcSeasonToItem(
+      { bvid: "BV1qms", title: "某一集", author: "" },
+      {
+        ugc_season: { id: 6622988, mid: 79356601, title: "分布式教程" },
+        owner: { name: "随意Official", mid: 79356601 },
+      },
+    );
+    expect(stamped.groupType).toBe("collection");
+    expect(stamped.collectionSid).toBe("6622988");
+    expect(stamped.groupFolder).toContain("随意Official");
+
+    const multi = applyUgcSeasonToItems(
+      [{ bvid: "A" }, { bvid: "B" }],
+      { ugc_season: { id: 1, mid: 2, title: "合" }, owner: { name: "U" } },
+    );
+    expect(multi.every((x) => x.groupKey === "collection:2/1")).toBe(true);
+
+    const patch = buildGroupMetaPatches({
+      groupKey: "collection:1/2",
+      author: "随意Official",
+      groupFolder: "随意Official 分布式教程",
+    });
+    const patched = applyGroupMetaPatchToItems(
+      [
+        { bvid: "A", groupKey: "collection:1/2", author: "", groupFolder: "未知UP 分布式教程" },
+        { bvid: "Z", groupKey: "other", author: "X" },
+      ],
+      patch,
+    );
+    expect(patched[0].author).toBe("随意Official");
+    expect(patched[0].groupFolder).toBe("随意Official 分布式教程");
+    expect(patched[1].author).toBe("X");
+
+    const merged = mergeGroupFields(
+      { bvid: "A", title: "t" },
+      { groupType: "collection", groupKey: "collection:1/2", collectionName: "合" },
+    );
+    expect(merged.groupType).toBe("collection");
+    expect(merged.groupKey).toBe("collection:1/2");
   });
 
   it("keeps single videos flat outside folders", () => {

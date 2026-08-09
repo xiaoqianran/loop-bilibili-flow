@@ -32,6 +32,7 @@
 // ==/UserScript==
 
 /**
+ * v6.5.0 — 架构收敛：字幕导出/选集合集分组/index 规则仅存在 packages/core；产品体只做 monorepo bridge + IO，消除双轨实现。
  * v6.4.1 — 合集与视频选集一样在字幕库自动建文件夹：扫描/打开合集内视频识别 ugc_season 并分组；自动模式扫合集页拉全列表。
  * v6.4.0 — index.md 视频选集/单视频改为「作者 + www.bilibili.com/video/BV + 标题」，与合集「作者 + 短地址 + 名称」对齐。
  * v6.2.1 — 修复：下载后缀 -txt、选集未成文件夹、index.md 叠成 (1)(2)、合集下载未知UP；字幕面板与下载共用文件夹标签；GM_download overwrite。
@@ -1179,214 +1180,63 @@
       .trim();
   }
 
-  function safeFilename(name) {
-    return safePathSegment(name, 120);
+  /**
+   * ─── Subtitle export / library groups (architecture v6.5) ───────────────
+   * Single source of truth: packages/core (SubBatch.SubBatchMonorepo.core).
+   * This file only does IO (GM_download / storage / DOM) and thin bridges.
+   * Do NOT re-implement path/index/group rules here — edit pure core instead.
+   */
+  function subbatchCore() {
+    try {
+      return typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core || null : null;
+    } catch (_) {
+      return null;
+    }
   }
 
-  /** One path segment safe for Downloads / Windows FS. */
+  function coreFn(name) {
+    const api = subbatchCore();
+    const fn = api && api[name];
+    return typeof fn === "function" ? fn : null;
+  }
+
+  function coreCall(name, ...args) {
+    const fn = coreFn(name);
+    if (!fn) {
+      throw new Error(
+        `[bili-subbatch] monorepo core missing "${name}" — install/update script so SubBatch.SubBatchMonorepo.core is present`,
+      );
+    }
+    return fn(...args);
+  }
+
+  function safeFilename(name) {
+    return coreCall("safePathSegment", name, 120);
+  }
+
   function safePathSegment(name, maxLen = 120) {
-    try {
-      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.safePathSegment : null;
-      if (typeof pure === "function") return pure(name, maxLen);
-    } catch (_) { /* local fallback */ }
-    const cleaned = String(name || "untitled")
-      .replace(/\|/g, "｜")
-      .replace(/\./g, "·")
-      .replace(/[\\/:*?"<>]+/g, "_")
-      .replace(/[？?！!]+/g, "＿")
-      .replace(/\s+/g, " ")
-      .trim()
-      .replace(/^\.+/, "")
-      .replace(/[.\s]+$/g, "")
-      .slice(0, Math.max(1, maxLen))
-      .replace(/[.\s]+$/g, "");
-    return cleaned || "untitled";
+    return coreCall("safePathSegment", name, maxLen);
   }
 
   function buildUpFolderLabel(author, name) {
-    try {
-      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.buildUpFolderLabel : null;
-      if (typeof pure === "function") return pure(author, name);
-    } catch (_) { /* local fallback */ }
-    const up = String(author || "").trim();
-    const n = String(name || "").trim() || "未命名";
-    if (!up || up === "未知UP") return n;
-    return `${up} ${n}`;
+    return coreCall("buildUpFolderLabel", author, name);
   }
 
   function buildCollectionShortUrl(mid, seasonId) {
-    try {
-      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.buildCollectionShortUrl : null;
-      if (typeof pure === "function") return pure(mid, seasonId);
-    } catch (_) { /* local fallback */ }
-    const m = String(mid || "").trim();
-    const s = String(seasonId || "").trim();
-    if (!m || !s) return "";
-    return `space.bilibili.com/${m}/lists/${s}`;
+    return coreCall("buildCollectionShortUrl", mid, seasonId);
   }
 
   function resolveSeriesTitle(item) {
-    try {
-      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.resolveSeriesTitle : null;
-      if (typeof pure === "function") return pure(item);
-    } catch (_) { /* local fallback */ }
-    if (item?.videoTitle) return String(item.videoTitle).trim();
-    const title = String(item?.title || "").trim();
-    const multi = title.match(/^(.*)\s-\sP(\d+)【([\s\S]*)】\s*$/);
-    if (multi?.[1]?.trim()) return multi[1].trim();
-    const cut = title.search(/\s-\sP\d+【/);
-    if (cut > 0) return title.slice(0, cut).trim();
-    if (title) return title;
-    return String(item?.bvid || "untitled").trim() || "untitled";
-  }
-
-  function resolvePartLabel(item) {
-    try {
-      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.resolvePartLabel : null;
-      if (typeof pure === "function") return pure(item);
-    } catch (_) { /* local fallback */ }
-    const explicit = String(item?.part || "").trim();
-    if (explicit) return explicit;
-    const page = Math.max(1, Number(item?.page) || 1);
-    const pagePart = String(item?.pages?.[page - 1]?.part || "").trim();
-    if (pagePart) return pagePart;
-    const title = String(item?.title || "").trim();
-    const multi = title.match(/^(.*)\s-\sP(\d+)【([\s\S]*)】\s*$/);
-    if (multi?.[3] != null) return String(multi[3]).trim();
-    return "";
-  }
-
-  function resolveSubtitleFileStem(item) {
-    try {
-      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.resolveSubtitleFileStem : null;
-      if (typeof pure === "function") return pure(item);
-    } catch (_) { /* local fallback */ }
-    if (item?.groupType === "collection" || item?.collectionName || item?.collectionSid) {
-      return String(item?.title || item?.bvid || "video").trim() || "video";
-    }
-    const page = Math.max(1, Number(item?.page) || 1);
-    let part = String(item?.part || "").trim();
-    if (!part) part = String(item?.pages?.[page - 1]?.part || "").trim();
-    if (!part) {
-      const title = String(item?.title || "").trim();
-      const multi = title.match(/^(.*)\s-\sP(\d+)【([\s\S]*)】\s*$/);
-      if (multi?.[3] != null) part = String(multi[3]).trim();
-    }
-    return part ? `P${page}${part}` : `P${page}`;
-  }
-
-  function resolveExportFolderName(item) {
-    try {
-      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.resolveExportFolderName : null;
-      if (typeof pure === "function") return pure(item);
-    } catch (_) { /* local fallback */ }
-    // Self-contained for unit extraction tests.
-    if (item?.groupFolder) return String(item.groupFolder).trim();
-    const up = String(item?.author || "").trim() || "未知UP";
-    if (item?.groupType === "collection" || item?.collectionName) {
-      const n = String(item?.collectionName || "未命名合集").trim();
-      return `${up} ${n}`;
-    }
-    let series = String(item?.videoTitle || "").trim();
-    if (!series) {
-      const title = String(item?.title || "").trim();
-      const multi = title.match(/^(.*)\s-\sP(\d+)【([\s\S]*)】\s*$/);
-      series = multi?.[1]?.trim() || title || String(item?.bvid || "untitled");
-    }
-    if (item?.groupType === "selection" || item?.videoTitle || Number(item?.page) > 1 || item?.part || item?.author) {
-      return `${up} ${series}`.trim();
-    }
-    return series;
-  }
-
-  function joinFileName(stem, ext) {
-    try {
-      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.joinFileName : null;
-      if (typeof pure === "function") return pure(stem, ext);
-    } catch (_) { /* local fallback */ }
-    const cleanExt = String(ext || "txt").replace(/^\./, "").trim().toLowerCase() || "txt";
-    // Inline sanitize — extractable unit tests cannot call sibling safePathSegment.
-    let base = String(stem || "untitled")
-      .replace(/\|/g, "｜")
-      .replace(/\./g, "·")
-      .replace(/[\\/:*?"<>]+/g, "_")
-      .replace(/[？?！!]+/g, "＿")
-      .replace(/\s+/g, " ")
-      .trim()
-      .replace(/^\.+/, "")
-      .replace(/[.\s]+$/g, "")
-      .slice(0, 160)
-      .replace(/[.\s]+$/g, "") || "untitled";
-    base = base.replace(new RegExp(`[·._-]+${cleanExt}$`, "i"), "");
-    if (!base) base = "untitled";
-    return `${base}.${cleanExt}`;
+    return coreCall("resolveSeriesTitle", item);
   }
 
   function buildSubtitleExportRelativePath(item, ext) {
-    try {
-      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.buildSubtitleExportRelativePath : null;
-      if (typeof pure === "function") return pure(item, ext);
-    } catch (_) { /* local fallback */ }
-    // Fully inlined so extractable tests do not need sibling helpers.
-    let folder = String(item?.groupFolder || "").trim();
-    if (!folder || /^未知UP\b/.test(folder)) {
-      const up = String(item?.author || "").trim();
-      if (item?.groupType === "collection" || item?.collectionName) {
-        const n = String(item?.collectionName || "未命名合集").trim();
-        folder = up && up !== "未知UP" ? `${up} ${n}` : n;
-      } else {
-        let series = String(item?.videoTitle || "").trim();
-        if (!series) {
-          const title = String(item?.title || "").trim();
-          const multi = title.match(/^(.*)\s-\sP(\d+)【([\s\S]*)】\s*$/);
-          series = multi?.[1]?.trim() || title || String(item?.bvid || "untitled");
-        }
-        folder = up && up !== "未知UP" ? `${up} ${series}` : series;
-      }
-    }
-    let stem = "";
-    if (item?.groupType === "collection" || item?.collectionName || item?.collectionSid) {
-      stem = String(item?.title || item?.bvid || "video").trim() || "video";
-    } else {
-      const page = Math.max(1, Number(item?.page) || 1);
-      let part = String(item?.part || "").trim();
-      if (!part) {
-        const title = String(item?.title || "").trim();
-        const multi = title.match(/^(.*)\s-\sP(\d+)【([\s\S]*)】\s*$/);
-        if (multi?.[3] != null) part = String(multi[3]).trim();
-      }
-      stem = part ? `P${page}${part}` : `P${page}`;
-    }
-    const folderSeg = String(folder || "untitled")
-      .replace(/\|/g, "｜")
-      .replace(/\./g, "·")
-      .replace(/[\\/:*?"<>]+/g, "_")
-      .replace(/[？?！!]+/g, "＿")
-      .replace(/\s+/g, " ")
-      .trim()
-      .replace(/^\.+/, "")
-      .replace(/[.\s]+$/g, "")
-      .slice(0, 120)
-      .replace(/[.\s]+$/g, "") || "untitled";
-    // Inline joinFileName to stay extractable.
-    const cleanExt = String(ext || "txt").replace(/^\./, "").trim().toLowerCase() || "txt";
-    let base = String(stem || "untitled")
-      .replace(/\|/g, "｜")
-      .replace(/\./g, "·")
-      .replace(/[\\/:*?"<>]+/g, "_")
-      .replace(/[？?！!]+/g, "＿")
-      .replace(/\s+/g, " ")
-      .trim()
-      .replace(/^\.+/, "")
-      .replace(/[.\s]+$/g, "")
-      .slice(0, 160)
-      .replace(/[.\s]+$/g, "") || "untitled";
-    base = base.replace(new RegExp(`[·._-]+${cleanExt}$`, "i"), "");
-    if (!base) base = "untitled";
-    return `loop-bilibili-subbatch/${folderSeg}/${base}.${cleanExt}`;
+    return coreCall("buildSubtitleExportRelativePath", item, ext);
   }
 
   function buildSubtitleExportIndexPath() {
+    const fn = coreFn("buildSubtitleExportIndexPath");
+    if (fn) return fn();
     return `${SUBTITLE_EXPORT_ROOT}/${SUBTITLE_EXPORT_INDEX_NAME}`;
   }
 
@@ -1409,320 +1259,60 @@
     return map || {};
   }
 
-  function buildVideoShortUrl(bvid) {
-    try {
-      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.buildVideoShortUrl : null;
-      if (typeof pure === "function") return pure(bvid);
-    } catch (_) { /* local fallback */ }
-    const id = String(bvid || "").trim();
-    if (!id) return "";
-    const normalized = /^bv/i.test(id) ? `BV${id.slice(2)}` : id;
-    return `www.bilibili.com/video/${normalized}`;
-  }
-
-  function upsertVideoExportIndex(map, author, bvid, videoTitle) {
-    try {
-      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.upsertVideoExportIndex : null;
-      if (typeof pure === "function") return pure(map, author, bvid, videoTitle);
-    } catch (_) { /* local fallback */ }
-    const next = { ...(map || {}) };
-    const id = String(bvid || "").trim();
-    if (!id) return next;
-    const normalized = /^bv/i.test(id) ? `BV${id.slice(2)}` : id;
-    next[normalized] = {
-      kind: "video",
-      author: String(author || "").trim(),
-      shortUrl: buildVideoShortUrl(normalized),
-      bvid: normalized,
-      name: String(videoTitle || "").trim() || normalized,
-    };
-    return next;
-  }
-
-  function upsertExportIndexMap(map, bvid, seriesTitle, author) {
-    try {
-      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.upsertExportIndexMap : null;
-      if (typeof pure === "function") return pure(map, bvid, seriesTitle, author);
-    } catch (_) { /* local fallback */ }
-    return upsertVideoExportIndex(map, author, bvid, seriesTitle);
-  }
-
-  function upsertCollectionExportIndex(map, author, shortUrl, collectionName) {
-    try {
-      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.upsertCollectionExportIndex : null;
-      if (typeof pure === "function") return pure(map, author, shortUrl, collectionName);
-    } catch (_) { /* local fallback */ }
-    const next = { ...(map || {}) };
-    const url = String(shortUrl || "").trim();
-    if (!url) return next;
-    next[`collection:${url}`] = {
-      kind: "collection",
-      author: String(author || "").trim(),
-      shortUrl: url,
-      name: String(collectionName || "").trim() || "未命名合集",
-    };
-    return next;
-  }
-
   function upsertIndexForExportItem(map, item) {
-    try {
-      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.upsertIndexForExportItem : null;
-      if (typeof pure === "function") return pure(map, item);
-    } catch (_) { /* local fallback */ }
-    // Self-contained: collection → UP shortUrl 合集名; video → UP shortUrl 标题
-    if (item?.groupType === "collection" || item?.collectionSid || item?.collectionShortUrl) {
-      const next = { ...(map || {}) };
-      let url = String(item.collectionShortUrl || "").trim();
-      if (!url) {
-        const m = String(item.collectionMid || "").trim();
-        const s = String(item.collectionSid || "").trim();
-        if (m && s) url = `space.bilibili.com/${m}/lists/${s}`;
-      }
-      if (!url) return next;
-      next[`collection:${url}`] = {
-        kind: "collection",
-        author: String(item.author || "").trim(),
-        shortUrl: url,
-        name: String(item.collectionName || "").trim() || "未命名合集",
-      };
-      return next;
-    }
-    const id = String(item?.bvid || "").trim();
-    if (!id) return map || {};
-    const normalized = /^bv/i.test(id) ? `BV${id.slice(2)}` : id;
-    let title = String(item?.videoTitle || "").trim();
-    if (!title) {
-      const raw = String(item?.title || "").trim();
-      const multi = raw.match(/^(.*)\s-\sP(\d+)【([\s\S]*)】\s*$/);
-      title = multi?.[1]?.trim() || raw || normalized;
-    }
-    // Inline video index entry (extractable unit tests cannot call sibling helpers).
-    const next = { ...(map || {}) };
-    next[normalized] = {
-      kind: "video",
-      author: String(item?.author || "").trim(),
-      shortUrl: `www.bilibili.com/video/${normalized}`,
-      bvid: normalized,
-      name: title,
-    };
-    return next;
+    return coreCall("upsertIndexForExportItem", map, item);
   }
 
   function renderExportIndexMd(map) {
-    try {
-      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.renderExportIndexMd : null;
-      if (typeof pure === "function") return pure(map);
-    } catch (_) { /* local fallback */ }
-    const videoLines = [];
-    const colLines = [];
-    for (const [key, value] of Object.entries(map || {})) {
-      if (!value) continue;
-      if (typeof value === "string") {
-        const bvid = /^bv/i.test(key) ? `BV${key.slice(2)}` : key;
-        videoLines.push(`www.bilibili.com/video/${bvid} ${value}`);
-        continue;
-      }
-      if (value.kind === "video" && value.bvid && value.name) {
-        const shortUrl = value.shortUrl || `www.bilibili.com/video/${value.bvid}`;
-        const up = String(value.author || "").trim();
-        videoLines.push(up ? `${up} ${shortUrl} ${value.name}` : `${shortUrl} ${value.name}`);
-        continue;
-      }
-      if (value.kind === "collection" && value.shortUrl && value.name) {
-        const up = String(value.author || "").trim();
-        colLines.push(up ? `${up} ${value.shortUrl} ${value.name}` : `${value.shortUrl} ${value.name}`);
-      }
-    }
-    videoLines.sort((a, b) => a.localeCompare(b, "en"));
-    colLines.sort((a, b) => a.localeCompare(b, "zh"));
-    const lines = [...videoLines, ...colLines];
-    return lines.length ? `${lines.join("\n")}\n` : "";
+    return coreCall("renderExportIndexMd", map);
   }
 
   function attachSelectionGroupMeta(items, meta = {}) {
-    const author = meta.author || items[0]?.author || "";
-    const videoTitle = meta.title || resolveSeriesTitle(items[0]) || "";
-    const bvid = items[0]?.bvid || "";
-    const groupKey = `selection:${bvid}`;
-    const groupFolder = buildUpFolderLabel(author, videoTitle);
-    return (items || []).map((it) => ({
-      ...it,
-      author: it.author || author,
-      videoTitle,
-      groupType: "selection",
-      groupKey,
-      groupFolder,
-    }));
+    return coreCall("attachSelectionGroupMeta", items, meta);
   }
 
   function attachCollectionGroupMeta(items, meta = {}, ctx = {}) {
-    const mid = meta.mid || ctx.mid || "";
-    const sid = meta.season_id || ctx.season_id || "";
-    const shortUrl = buildCollectionShortUrl(mid, sid);
-    const collectionName = meta.name || meta.title || ctx.collectionTitleHint || "未命名合集";
-    // Prefer real UP: meta → scan hint → first archive author (never bake 未知UP early if hint exists).
-    const author =
-      String(meta.author || "").trim()
-      || String(ctx.authorHint || "").trim()
-      || String(items[0]?.author || "").trim()
-      || "";
-    const groupKey = mid && sid ? `collection:${mid}/${sid}` : `collection:${shortUrl || collectionName}`;
-    const groupFolder = buildUpFolderLabel(author, collectionName);
-    return (items || []).map((it) => ({
-      ...it,
-      author: String(it.author || "").trim() || author,
-      groupType: "collection",
-      groupKey,
-      groupFolder,
-      collectionName,
-      collectionMid: mid,
-      collectionSid: sid,
-      collectionShortUrl: shortUrl,
-    }));
+    return coreCall("attachCollectionGroupMeta", items, meta, ctx);
   }
 
-  /** Align download folder/author with 字幕 panel folder (peers in pool + library). */
   function normalizeExportItem(item, peers = []) {
-    try {
-      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.normalizeExportItem : null;
-      if (typeof pure === "function") {
-        const combined = [...(peers || []), ...(state.items || [])];
-        return pure(item, combined);
-      }
-    } catch (_) { /* local fallback */ }
-    const base = { ...(item || {}) };
-    const key = String(base.groupKey || "");
-    const pool = [...(peers || []), ...(state.items || [])];
-    const same = key
-      ? pool.filter((p) => String(p?.groupKey || "") === key)
-      : pool.filter((p) => p?.bvid && p.bvid === base.bvid);
-    const peerAuthor = same.map((p) => String(p?.author || "").trim()).find((a) => a && a !== "未知UP");
-    if ((!base.author || base.author === "未知UP") && peerAuthor) base.author = peerAuthor;
-    const peerFolder = same
-      .map((p) => String(p?.groupFolder || "").trim())
-      .find((f) => f && !/^未知UP\b/.test(f));
-    if (peerFolder) base.groupFolder = peerFolder;
-    else if (!base.groupFolder || /^未知UP\b/.test(String(base.groupFolder || ""))) {
-      const up = String(base.author || "").trim() || "未知UP";
-      if (base.groupType === "collection" || base.collectionName) {
-        base.groupFolder = `${up} ${String(base.collectionName || "未命名合集").trim()}`;
-      } else if (base.groupType === "selection" || base.videoTitle) {
-        base.groupFolder = `${up} ${String(base.videoTitle || resolveSeriesTitle(base)).trim()}`;
-      }
-    }
-    return base;
+    const combined = [...(peers || []), ...(state.items || [])];
+    return coreCall("normalizeExportItem", item, combined);
   }
 
   function resolveLibraryGroupKey(item) {
-    try {
-      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.resolveLibraryGroupKey : null;
-      if (typeof pure === "function") return pure(item);
-    } catch (_) { /* local fallback */ }
-    if (item?.groupKey) return String(item.groupKey);
-    if (item?.groupType === "collection" || item?.collectionSid) {
-      if (item.collectionMid && item.collectionSid) {
-        return `collection:${item.collectionMid}/${item.collectionSid}`;
-      }
-    }
-    if (item?.groupType === "selection" || Number(item?.page) > 1 || item?.part) {
-      return `selection:${item?.bvid || ""}`;
-    }
-    return `single:${item?.bvid || "unknown"}:P${Math.max(1, Number(item?.page) || 1)}`;
+    return coreCall("resolveLibraryGroupKey", item);
   }
 
   function buildLibraryRenderNodes(entries, collapsedMap) {
-    try {
-      const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.buildLibraryRenderNodes : null;
-      if (typeof pure === "function") return pure(entries, collapsedMap);
-    } catch (_) { /* local fallback */ }
-    // Local fallback: multi-P → 选集 folder; collection meta (even 1 item) → 合集 folder.
-    const collapsed = collapsedMap || {};
-    const list = entries || [];
-    const bvidCount = new Map();
-    for (const entry of list) {
-      const b = String(entry.item?.bvid || "").trim();
-      if (b) bvidCount.set(b, (bvidCount.get(b) || 0) + 1);
-    }
-    const collectionKeyOf = (item) => {
-      if (item?.groupKey && String(item.groupKey).startsWith("collection:")) return String(item.groupKey);
-      if (item?.collectionMid && item?.collectionSid) {
-        return `collection:${item.collectionMid}/${item.collectionSid}`;
-      }
-      if (item?.collectionShortUrl) return `collection:${item.collectionShortUrl}`;
-      if (item?.collectionName) {
-        return `collection:name:${String(item.author || "").trim()}|${item.collectionName}`;
-      }
-      return "";
-    };
-    const isFolderItem = (item) => {
-      if (item?.groupType === "selection" || item?.groupType === "collection") return true;
-      if (item?.collectionSid || item?.collectionName || item?.collectionShortUrl) return true;
-      if (Number(item?.page) > 1 || item?.part) return true;
-      const b = String(item?.bvid || "").trim();
-      return !!(b && (bvidCount.get(b) || 0) > 1);
-    };
-    const groupKeyOf = (item) => {
-      if (item?.groupKey) return String(item.groupKey);
-      const col = collectionKeyOf(item);
-      if (col) return col;
-      const b = String(item?.bvid || "").trim();
-      if (b && isFolderItem(item)) return `selection:${b}`;
-      return `single:${b}:P${Math.max(1, Number(item?.page) || 1)}`;
-    };
-    const buckets = new Map();
-    for (const entry of list) {
-      if (!isFolderItem(entry.item)) continue;
-      const key = groupKeyOf(entry.item);
-      if (!buckets.has(key)) buckets.set(key, []);
-      buckets.get(key).push(entry);
-    }
-    const out = [];
-    const seen = new Set();
-    for (const entry of list) {
-      if (!isFolderItem(entry.item)) {
-        out.push({ type: "item", entry });
-        continue;
-      }
-      const key = groupKeyOf(entry.item);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const children = buckets.get(key) || [entry];
-      const selectedCount = children.filter((c) => c.item.selected).length;
-      const total = children.length;
-      const checkState = selectedCount === 0 ? "none" : selectedCount === total ? "all" : "partial";
-      const labeled =
-        children.map((c) => c.item).find((it) => it.groupFolder && !/^未知UP\b/.test(String(it.groupFolder)))
-        || children.map((c) => c.item).find((it) => String(it.author || "").trim() && it.author !== "未知UP")
-        || children[0]?.item;
-      const groupType = labeled?.groupType === "collection" || labeled?.collectionSid ? "collection" : "selection";
-      out.push({
-        type: "folder",
-        groupKey: key,
-        groupType,
-        folderLabel:
-          (labeled?.groupFolder && !/^未知UP\b/.test(String(labeled.groupFolder)) && labeled.groupFolder)
-          || buildUpFolderLabel(
-            labeled?.author,
-            groupType === "collection"
-              ? (labeled?.collectionName || "未命名合集")
-              : (labeled?.videoTitle || resolveSeriesTitle(labeled)),
-          ),
-        collapsed: !!collapsed[key],
-        selectedCount,
-        total,
-        checkState,
-        children,
-      });
-    }
-    return out;
+    return coreCall("buildLibraryRenderNodes", entries, collapsedMap || {});
   }
 
+  function applyUgcSeasonToItem(item, view) {
+    return coreCall("applyUgcSeasonToItem", item, view);
+  }
+
+  function applyUgcSeasonToItems(items, view) {
+    return coreCall("applyUgcSeasonToItems", items, view);
+  }
+
+  function buildGroupMetaPatches(normalized) {
+    return coreCall("buildGroupMetaPatches", normalized);
+  }
+
+  function applyGroupMetaPatchToItems(items, patch) {
+    return coreCall("applyGroupMetaPatchToItems", items, patch);
+  }
+
+  function mergeGroupFields(target, source) {
+    return coreCall("mergeGroupFields", target, source);
+  }
+
+  /** IO only — blob download with optional overwrite (GM_download). */
   function downloadText(filename, text, { overwrite = false } = {}) {
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
-    // Normalize path separators; keep a single real extension (no name-txt).
-    let name = String(filename || "download.txt").replace(/\\/g, "/");
-    name = name.replace(/\/{2,}/g, "/");
+    let name = String(filename || "download.txt").replace(/\\/g, "/").replace(/\/{2,}/g, "/");
 
     const revokeLater = () => {
       setTimeout(() => {
@@ -1733,7 +1323,6 @@
     const anchorFallback = () => {
       const a = document.createElement("a");
       a.href = url;
-      // Anchor download cannot overwrite; still use basename path for best effort.
       a.download = name;
       a.style.display = "none";
       document.body.appendChild(a);
@@ -1744,8 +1333,6 @@
       }, 1500);
     };
 
-    // GM_download preserves nested paths under the browser Downloads folder.
-    // conflictAction: overwrite — avoid index (1).md / index (2).md stacking.
     if (typeof GM_download === "function") {
       try {
         const opts = {
@@ -1760,43 +1347,33 @@
         GM_download(opts);
         return;
       } catch (_) {
-        /* fall through to anchor */
+        /* fall through */
       }
     }
     anchorFallback();
   }
 
   /**
-   * Batch-export subtitles into:
-   *   Downloads/loop-bilibili-subbatch/<UP 视频名|合集名>/…
-   * index.md: BV lines for 选集; UP + shortUrl + 合集名 for 合集.
-   * Always rewrites index.md (overwrite) so it does not stack as index (n).md.
+   * Batch-export: pure core builds paths + index; this function only downloads.
+   * Group-meta patches returned by pure are applied to state (no inline rule logic).
    */
   async function downloadSubtitleExportBatch(pool, ext, convert) {
     let indexMap = loadExportIndexMap();
     const peerPool = [...pool, ...(state.items || [])];
+    let nextItems = state.items;
     for (let i = 0; i < pool.length; i++) {
       const it = normalizeExportItem(pool[i], peerPool);
-      // Keep library items in sync so 字幕 panel and download share one folder label.
-      if (it.groupKey) {
-        state.items.forEach((row) => {
-          if (String(row.groupKey || "") !== String(it.groupKey)) return;
-          if (it.author && (!row.author || row.author === "未知UP")) row.author = it.author;
-          if (it.groupFolder && (!row.groupFolder || /^未知UP\b/.test(String(row.groupFolder)))) {
-            row.groupFolder = it.groupFolder;
-          }
-        });
-      }
+      const patch = buildGroupMetaPatches(it);
+      if (patch) nextItems = applyGroupMetaPatchToItems(nextItems, patch);
       indexMap = upsertIndexForExportItem(indexMap, it);
-      const relativePath = buildSubtitleExportRelativePath(it, ext);
-      downloadText(relativePath, convert(it.data), { overwrite: true });
+      downloadText(buildSubtitleExportRelativePath(it, ext), convert(it.data), { overwrite: true });
       if (pool.length > 1) await sleep(220);
     }
+    state.items = nextItems;
     saveExportIndexMap(indexMap);
     const indexMd = renderExportIndexMd(indexMap);
     if (indexMd) {
       await sleep(pool.length ? 260 : 0);
-      // Critical: always overwrite the same index.md path (no index (1).md).
       downloadText(buildSubtitleExportIndexPath(), indexMd, { overwrite: true });
     }
     renderList({ renderTranscript: false });
@@ -2923,19 +2500,16 @@
     if (expandAllParts && pages.length > 1) {
       const videoTitle = r.title || bvid;
       const author = r.author || "";
+      const rawItems = pages.map((p, i) => ({
+        bvid: r.bvid || bvid,
+        aid: r.aid,
+        title: `${videoTitle} - P${i + 1}【${p.part || ""}】`,
+        author,
+        page: i + 1,
+        part: p.part || "",
+      }));
       return {
-        items: pages.map((p, i) => ({
-          bvid: r.bvid || bvid,
-          aid: r.aid,
-          title: `${videoTitle} - P${i + 1}【${p.part || ""}】`,
-          author,
-          page: i + 1,
-          part: p.part || "",
-          videoTitle,
-          groupType: "selection",
-          groupKey: `selection:${r.bvid || bvid}`,
-          groupFolder: buildUpFolderLabel(author, videoTitle),
-        })),
+        items: attachSelectionGroupMeta(rawItems, { author, title: videoTitle }),
         meta: { title: videoTitle, author, multip: true },
         pages,
       };
@@ -13911,34 +13485,7 @@
     return ctx;
   }
 
-  /**
-   * Stamp ugc_season group fields onto item(s) so 字幕库 shows a 合集 folder
-   * (same idea as multi-P 视频选集 folders).
-   */
-  function applyUgcSeasonToItem(item, view) {
-    if (!item || !view) return item;
-    const season = view.ugc_season || {};
-    const mid = season.mid || view.owner?.mid;
-    const sid = season.id;
-    if (!mid || !sid) return item;
-    const author = String(item.author || view.owner?.name || "").trim();
-    const collectionName = String(season.title || item.collectionName || "未命名合集").trim();
-    const shortUrl = buildCollectionShortUrl(mid, sid);
-    const groupKey = `collection:${mid}/${sid}`;
-    const groupFolder = buildUpFolderLabel(author, collectionName);
-    return {
-      ...item,
-      author: author || item.author,
-      groupType: "collection",
-      groupKey,
-      groupFolder,
-      collectionName,
-      collectionMid: String(mid),
-      collectionSid: String(sid),
-      collectionShortUrl: shortUrl,
-    };
-  }
-
+  /** IO: fetch view, then pure applyUgcSeasonToItems. */
   async function stampUgcSeasonGroupMeta(items, bvid) {
     const list = items || [];
     if (!list.length) return list;
@@ -13948,7 +13495,7 @@
       const detail = await viewDetail(id);
       const view = (detail && detail.data && detail.data.View) || {};
       if (!view.ugc_season?.id) return list;
-      return list.map((it) => applyUgcSeasonToItem(it, view));
+      return applyUgcSeasonToItems(list, view);
     } catch (error) {
       console.warn("[bili-subbatch] stampUgcSeasonGroupMeta", error?.message || error);
       return list;
@@ -14078,18 +13625,8 @@
         if (ctx.type === "collection") {
           if (!meta.author && ctx.authorHint) meta.author = ctx.authorHint;
           if (!meta.name && ctx.collectionTitleHint) meta.name = ctx.collectionTitleHint;
-          // List API often omits upper; authorHint from ugc_season/view fills UP name.
+          // Pure attach: authorHint / collectionTitleHint fill UP + folder label.
           items = attachCollectionGroupMeta(items, meta, ctx);
-          // If still 未知UP, one more pass after ensuring hints applied.
-          if (items.some((it) => !it.author || /^未知UP\b/.test(String(it.groupFolder || "")))) {
-            if (ctx.authorHint) {
-              items = items.map((it) => ({
-                ...it,
-                author: it.author || ctx.authorHint,
-                groupFolder: buildUpFolderLabel(it.author || ctx.authorHint, it.collectionName || meta.name || "未命名合集"),
-              }));
-            }
-          }
         }
       } else {
         const fromDom = harvestBvidsFromDom();
@@ -14547,19 +14084,15 @@
       (entry) => routeVideoKey(entry.bvid, entry.page || 1) === captureKey,
     );
     if (sameIndex >= 0) {
-      const target = state.items[sameIndex];
+      let target = state.items[sameIndex];
       target.title = item.title || target.title;
       target.author = item.author || target.author;
       target.aid = item.aid ?? target.aid;
       target.cid = item.cid ?? target.cid;
       target.pages = item.pages || target.pages;
-      if (item.groupType) target.groupType = item.groupType;
-      if (item.groupKey) target.groupKey = item.groupKey;
-      if (item.groupFolder) target.groupFolder = item.groupFolder;
-      if (item.collectionName) target.collectionName = item.collectionName;
-      if (item.collectionMid) target.collectionMid = item.collectionMid;
-      if (item.collectionSid) target.collectionSid = item.collectionSid;
-      if (item.collectionShortUrl) target.collectionShortUrl = item.collectionShortUrl;
+      target = mergeGroupFields(target, item);
+      Object.assign(state.items[sameIndex], target);
+      target = state.items[sameIndex];
       target.sources = Array.from(new Set([...(target.sources || []), "打开视频"].filter(Boolean)));
       copySubtitleState(target, item);
       state.transcriptItem = target;

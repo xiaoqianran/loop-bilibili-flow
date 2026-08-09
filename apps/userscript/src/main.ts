@@ -7,7 +7,7 @@
  *
  * Vite IIFE global: `SubBatch` with named exports
  * (`SubBatch.SubBatchMonorepo`, `SubBatch.runtime`, `SubBatch.host`).
- * The maintained body bridges pure cores via `SubBatch.SubBatchMonorepo`.
+ * The maintained body bridges pure cores via `SubBatch.SubBatchMonorepo.core`.
  */
 import * as bilibili from "@subbatch/bilibili";
 import * as core from "@subbatch/core";
@@ -19,15 +19,19 @@ import { createUserscriptHost } from "./userscript-host";
 const host = createUserscriptHost();
 const runtime = createUserscriptRuntime(host);
 
-/** Public monorepo API surface for pure bundle + production body bridge. */
+/**
+ * Public monorepo API surface.
+ * `core` is the single source of truth for export paths, index.md, and library groups.
+ * Product body must call `SubBatch.SubBatchMonorepo.core.*` (or top-level aliases).
+ */
 const SubBatchMonorepo = {
-  version: "6.4.1",
+  version: "6.5.0",
   runtime,
   host,
+  /** Entire pure core namespace — preferred bridge target. */
   core,
   bilibili,
   schemas,
-  /** Detect current page context using pure route core (URL-only unless hints given). */
   detectContext(href?: string, hints?: bilibili.BilibiliPageHints) {
     return bilibili.detectContext(href ?? runtime.page.href(), hints);
   },
@@ -38,6 +42,7 @@ const SubBatchMonorepo = {
   splitCuesForPreprocess: core.splitCuesForPreprocess,
   stitchPreprocessChunks: core.stitchPreprocessChunks,
   preprocessCacheKey: core.preprocessCacheKey,
+  // ── export + library (also on core.* ; aliases for clarity) ──
   safePathSegment: core.safePathSegment,
   joinFileName: core.joinFileName,
   resolveSeriesTitle: core.resolveSeriesTitle,
@@ -45,6 +50,7 @@ const SubBatchMonorepo = {
   resolveSubtitleFileStem: core.resolveSubtitleFileStem,
   resolveExportFolderName: core.resolveExportFolderName,
   buildSubtitleExportRelativePath: core.buildSubtitleExportRelativePath,
+  buildSubtitleExportIndexPath: core.buildSubtitleExportIndexPath,
   buildVideoShortUrl: core.buildVideoShortUrl,
   upsertVideoExportIndex: core.upsertVideoExportIndex,
   upsertExportIndexMap: core.upsertExportIndexMap,
@@ -53,11 +59,20 @@ const SubBatchMonorepo = {
   resolveIndexVideoTitle: core.resolveIndexVideoTitle,
   normalizeExportItem: core.normalizeExportItem,
   renderExportIndexMd: core.renderExportIndexMd,
+  parseExportIndexMd: core.parseExportIndexMd,
   buildUpFolderLabel: core.buildUpFolderLabel,
   buildCollectionShortUrl: core.buildCollectionShortUrl,
   buildLibraryRenderNodes: core.buildLibraryRenderNodes,
   resolveLibraryGroupKey: core.resolveLibraryGroupKey,
   resolveLibraryFolderLabel: core.resolveLibraryFolderLabel,
+  attachSelectionGroupMeta: core.attachSelectionGroupMeta,
+  attachCollectionGroupMeta: core.attachCollectionGroupMeta,
+  applyUgcSeasonToItem: core.applyUgcSeasonToItem,
+  applyUgcSeasonToItems: core.applyUgcSeasonToItems,
+  buildGroupMetaPatches: core.buildGroupMetaPatches,
+  applyGroupMetaPatchToItems: core.applyGroupMetaPatchToItems,
+  mergeGroupFields: core.mergeGroupFields,
+  setGroupSelection: core.setGroupSelection,
   shortcutCommands: core.SHORTCUT_COMMANDS,
   shouldIgnoreShortcutEvent: core.shouldIgnoreShortcutEvent,
 };
