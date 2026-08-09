@@ -8,7 +8,7 @@
  *   loop-bilibili-subbatch/<UP 视频名|合集名>/<file>.{ext}
  *
  * 个人主页 nested (parentFolder = UP 名):
- *   loop-bilibili-subbatch/<UP>/<file>.{ext}                 — 普通单视频
+ *   loop-bilibili-subbatch/<UP>/视频/<file>.{ext}            — 散视频（非合集）
  *   loop-bilibili-subbatch/<UP>/<选集名>/P*.{ext}            — 视频选集
  *   loop-bilibili-subbatch/<UP>/<合集名>/<单集标题>.{ext}    — 合集
  *

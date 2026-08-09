@@ -6,9 +6,12 @@
  */
 
 import {
+  SPACE_LOOSE_VIDEOS_FOLDER,
   buildCollectionShortUrl,
   buildUpFolderLabel,
+  inferLibraryGroupType,
   resolveLibraryFolderLabel,
+  resolveSpaceLooseVideosKey,
   type LibraryGroupItem,
 } from "./groups";
 
@@ -89,7 +92,8 @@ function resolveSeriesTitleLocal(item: LibraryGroupItem | null | undefined): str
 
 /**
  * Stamp 个人主页 nesting: top-level folder = UP name.
- * Singles sit under UP; later selection/collection meta nests one level deeper.
+ * Singles sit under UP/视频 after attachSpaceLooseVideosMeta;
+ * 合集/选集 nest one level deeper under UP.
  */
 export function attachUserSpaceGroupMeta<T extends LibraryGroupItem>(
   items: T[] | null | undefined,
@@ -110,6 +114,29 @@ export function attachUserSpaceGroupMeta<T extends LibraryGroupItem>(
       author: itemAuthor || it.author,
       parentFolder: parentFolder || it.parentFolder,
       spaceMid: mid || it.spaceMid,
+    };
+  });
+}
+
+/**
+ * 个人主页散视频 → 统一归入「视频」文件夹（UP/视频/…）。
+ * 跳过已是合集/选集的条目。应在 applySpaceCollectionMembership 之后调用。
+ */
+export function attachSpaceLooseVideosMeta<T extends LibraryGroupItem>(
+  items: T[] | null | undefined,
+): T[] {
+  const list = items || [];
+  return list.map((it) => {
+    const parent = cleanUpName(it.parentFolder);
+    if (!parent) return { ...it };
+    const kind = inferLibraryGroupType(it);
+    if (kind === "collection" || kind === "selection") return { ...it };
+    if (it.collectionSid || it.collectionName || it.collectionShortUrl) return { ...it };
+    return {
+      ...it,
+      groupType: "single" as const,
+      groupKey: resolveSpaceLooseVideosKey(it),
+      groupFolder: SPACE_LOOSE_VIDEOS_FOLDER,
     };
   });
 }

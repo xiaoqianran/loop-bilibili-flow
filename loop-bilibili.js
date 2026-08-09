@@ -32,6 +32,7 @@
 // ==/UserScript==
 
 /**
+ * v6.6.2 — 个人主页不属于合集的散视频统一归入「视频」文件夹（UP/视频/…）。
  * v6.6.1 — 个人主页扫描后拉取该 UP 全部合集（名称+短地址），按 BV 把成员视频迁入 合集 文件夹（路径 UP/合集名/…）。
  * v6.6.0 — 个人主页嵌套文件夹：顶层 = UP 名；其下单视频 / 视频选集 / 合集分层；下载路径同步为 loop-bilibili-subbatch/UP/…。
  * v6.5.1 — 自动抓取后联动采集模式下拉：多分P 切「视频选集」，ugc 合集切「合集」，减少手动点选。
@@ -1288,6 +1289,10 @@
 
   function countSpaceCollectionMatches(items, collections) {
     return coreCall("countSpaceCollectionMatches", items, collections);
+  }
+
+  function attachSpaceLooseVideosMeta(items) {
+    return coreCall("attachSpaceLooseVideosMeta", items);
   }
 
   function setGroupSelection(items, groupKey, selected) {
@@ -7671,10 +7676,12 @@
       </div>`;
   }
 
-  function libraryFolderKindLabel(groupType) {
+  function libraryFolderKindLabel(groupType, groupKey) {
+    if (String(groupKey || "").startsWith("space-videos:")) return "视频";
     if (groupType === "collection") return "合集";
     if (groupType === "selection") return "视频选集";
     if (groupType === "space") return "个人主页";
+    if (groupType === "single") return "视频";
     return "文件夹";
   }
 
@@ -7686,7 +7693,7 @@
         depth,
       });
     }
-    const kindLabel = libraryFolderKindLabel(node.groupType);
+    const kindLabel = libraryFolderKindLabel(node.groupType, node.groupKey);
     const checked = node.checkState === "all" ? "checked" : "";
     const partial = node.checkState === "partial" ? "1" : "0";
     const chevron = node.collapsed ? "▶" : "▼";
@@ -13862,6 +13869,8 @@
             console.warn("[bili-subbatch] loadUserSpaceSeasons", err?.message || err);
             meta.collectionError = String(err?.message || err || "合集列表失败");
           }
+          // 未进合集/选集的散视频统一进「视频」文件夹
+          items = attachSpaceLooseVideosMeta(items);
         }
         if (ctx.type === "collection") {
           if (!meta.author && ctx.authorHint) meta.author = ctx.authorHint;

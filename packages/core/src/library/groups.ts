@@ -153,6 +153,24 @@ export function resolveLibraryGroupKey(item: LibraryGroupItem | null | undefined
   return `single:${bvid}:P${page}`;
 }
 
+/** 个人主页下、不属于合集/选集的散视频统一文件夹名。 */
+export const SPACE_LOOSE_VIDEOS_FOLDER = "视频";
+
+/** Stable groupKey for the 个人主页「视频」bucket. */
+export function resolveSpaceLooseVideosKey(
+  item: LibraryGroupItem | null | undefined,
+): string {
+  const mid = String(item?.spaceMid || "").trim();
+  if (mid) return `space-videos:${mid}`;
+  const parent = cleanParent(item?.parentFolder);
+  if (parent) return `space-videos:${parent}`;
+  return "space-videos:unknown";
+}
+
+export function isSpaceLooseVideosKey(groupKey: string | null | undefined): boolean {
+  return String(groupKey || "").startsWith("space-videos:");
+}
+
 /**
  * Leaf folder label for UI (selection/collection name).
  * When under parentFolder, omits UP prefix (parent folder already shows UP).
@@ -183,8 +201,18 @@ export function resolveLibraryFolderLabel(item: LibraryGroupItem | null | undefi
       || "未命名视频";
     return parent ? title : buildUpFolderLabel(author, title);
   }
-  // single
-  if (parent) return parent;
+  // single under 个人主页 → leaf is「视频」(散视频桶)
+  if (parent) {
+    if (existing && !/^未知UP\b/.test(existing) && existing !== parent) {
+      if (existing.startsWith(`${parent} `)) {
+        const leaf = existing.slice(parent.length + 1).trim();
+        if (leaf) return leaf;
+      } else {
+        return existing;
+      }
+    }
+    return SPACE_LOOSE_VIDEOS_FOLDER;
+  }
   return buildUpFolderLabel(author, item?.title || item?.bvid || "未命名视频");
 }
 
@@ -192,7 +220,7 @@ export function resolveLibraryFolderLabel(item: LibraryGroupItem | null | undefi
  * Path segments under loop-bilibili-subbatch (not including root or file).
  *
  * 个人主页:
- *   single     → [UP]
+ *   single     → [UP, 视频]
  *   selection  → [UP, 选集名]
  *   collection → [UP, 合集名]
  * Flat (非主页):
@@ -222,8 +250,14 @@ export function resolveFolderSegments(item: LibraryGroupItem | null | undefined)
       const leaf = title.startsWith(`${parent} `) ? title.slice(parent.length + 1).trim() || title : title;
       return [parent, leaf || "未命名视频"];
     }
-    // single under UP — files sit directly in the UP folder
-    return [parent];
+    // single under UP → UP/视频
+    const loose =
+      String(item?.groupFolder || "").trim()
+      || SPACE_LOOSE_VIDEOS_FOLDER;
+    const leaf = loose.startsWith(`${parent} `)
+      ? loose.slice(parent.length + 1).trim() || SPACE_LOOSE_VIDEOS_FOLDER
+      : loose;
+    return [parent, leaf || SPACE_LOOSE_VIDEOS_FOLDER];
   }
 
   const label = resolveLibraryFolderLabel(item);
@@ -333,6 +367,41 @@ function folderCheckState(selectedCount: number, total: number): "all" | "none" 
   return "partial";
 }
 
+/** Whether this entry should render as a folder (选集/合集/个人主页「视频」桶). */
+function isFolderedEntry(
+  item: LibraryGroupItem | null | undefined,
+  multiBvids: Set<string>,
+  collectionKeys: Set<string>,
+): boolean {
+  const kind = effectiveGroupType(item, multiBvids, collectionKeys);
+  if (kind !== "single") return true;
+  // 散视频桶：groupKey=space-videos:… 即使 groupType=single 也建文件夹
+  if (isSpaceLooseVideosKey(item?.groupKey)) return true;
+  if (
+    cleanParent(item?.parentFolder)
+    && String(item?.groupFolder || "").trim() === SPACE_LOOSE_VIDEOS_FOLDER
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function leafFolderKey(
+  item: LibraryGroupItem | null | undefined,
+  multiBvids: Set<string>,
+  collectionKeys: Set<string>,
+): string {
+  if (isSpaceLooseVideosKey(item?.groupKey)) return String(item!.groupKey);
+  if (
+    cleanParent(item?.parentFolder)
+    && String(item?.groupFolder || "").trim() === SPACE_LOOSE_VIDEOS_FOLDER
+    && effectiveGroupType(item, multiBvids, collectionKeys) === "single"
+  ) {
+    return resolveSpaceLooseVideosKey(item);
+  }
+  return effectiveGroupKey(item, multiBvids, collectionKeys);
+}
+
 /**
  * Build flat folder/item nodes for a list that does NOT use space parent nesting
  * (or for entries already scoped under one parent).
@@ -347,9 +416,8 @@ function buildLeafRenderNodes(
   const folderBuckets = new Map<string, LibraryEntry[]>();
 
   for (const entry of entries) {
-    const kind = effectiveGroupType(entry.item, multiBvids, collectionKeys);
-    if (kind === "single") continue;
-    const key = effectiveGroupKey(entry.item, multiBvids, collectionKeys);
+    if (!isFolderedEntry(entry.item, multiBvids, collectionKeys)) continue;
+    const key = leafFolderKey(entry.item, multiBvids, collectionKeys);
     if (!folderBuckets.has(key)) folderBuckets.set(key, []);
     folderBuckets.get(key)!.push(entry);
   }
@@ -358,12 +426,11 @@ function buildLeafRenderNodes(
   const emittedFolders = new Set<string>();
 
   for (const entry of entries) {
-    const kind = effectiveGroupType(entry.item, multiBvids, collectionKeys);
-    if (kind === "single") {
+    if (!isFolderedEntry(entry.item, multiBvids, collectionKeys)) {
       nodes.push({ type: "item", entry, depth });
       continue;
     }
-    const key = effectiveGroupKey(entry.item, multiBvids, collectionKeys);
+    const key = leafFolderKey(entry.item, multiBvids, collectionKeys);
     if (emittedFolders.has(key)) continue;
     emittedFolders.add(key);
     const children = folderBuckets.get(key) || [entry];
@@ -374,6 +441,7 @@ function buildLeafRenderNodes(
       children.map((c) => c.item).find((it) => it.groupFolder && !/^未知UP\b/.test(String(it.groupFolder)))
       || children.map((c) => c.item).find((it) => String(it.author || "").trim() && it.author !== "未知UP")
       || children[0]?.item;
+    const kind = effectiveGroupType(labeled, multiBvids, collectionKeys);
     nodes.push({
       type: "folder",
       groupKey: key,
@@ -494,9 +562,22 @@ export function setGroupSelection(
   const key = String(groupKey || "").trim();
   if (!key) return;
 
-  if (key.startsWith("space:")) {
+  if (key.startsWith("space:") && !key.startsWith("space-videos:")) {
     for (const item of items) {
       if (resolveSpaceGroupKey(item) === key) item.selected = selected;
+    }
+    return;
+  }
+
+  if (isSpaceLooseVideosKey(key)) {
+    for (const item of items) {
+      if (String(item.groupKey || "") === key || resolveSpaceLooseVideosKey(item) === key) {
+        // Only loose singles under this bucket (not 合集/选集)
+        const kind = inferLibraryGroupType(item);
+        if (kind === "collection" || kind === "selection") continue;
+        if (item.collectionSid || item.collectionName) continue;
+        item.selected = selected;
+      }
     }
     return;
   }
