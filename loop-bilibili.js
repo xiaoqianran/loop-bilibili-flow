@@ -1635,7 +1635,7 @@
       const pure = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core?.buildLibraryRenderNodes : null;
       if (typeof pure === "function") return pure(entries, collapsedMap);
     } catch (_) { /* local fallback */ }
-    // Local fallback: same BV multi-P → 视频选集 folder; collection meta → 合集 folder.
+    // Local fallback: multi-P → 选集 folder; collection meta (even 1 item) → 合集 folder.
     const collapsed = collapsedMap || {};
     const list = entries || [];
     const bvidCount = new Map();
@@ -1643,18 +1643,28 @@
       const b = String(entry.item?.bvid || "").trim();
       if (b) bvidCount.set(b, (bvidCount.get(b) || 0) + 1);
     }
+    const collectionKeyOf = (item) => {
+      if (item?.groupKey && String(item.groupKey).startsWith("collection:")) return String(item.groupKey);
+      if (item?.collectionMid && item?.collectionSid) {
+        return `collection:${item.collectionMid}/${item.collectionSid}`;
+      }
+      if (item?.collectionShortUrl) return `collection:${item.collectionShortUrl}`;
+      if (item?.collectionName) {
+        return `collection:name:${String(item.author || "").trim()}|${item.collectionName}`;
+      }
+      return "";
+    };
     const isFolderItem = (item) => {
       if (item?.groupType === "selection" || item?.groupType === "collection") return true;
-      if (item?.collectionSid || item?.collectionName) return true;
+      if (item?.collectionSid || item?.collectionName || item?.collectionShortUrl) return true;
       if (Number(item?.page) > 1 || item?.part) return true;
       const b = String(item?.bvid || "").trim();
       return !!(b && (bvidCount.get(b) || 0) > 1);
     };
     const groupKeyOf = (item) => {
       if (item?.groupKey) return String(item.groupKey);
-      if (item?.groupType === "collection" || item?.collectionSid) {
-        if (item.collectionMid && item.collectionSid) return `collection:${item.collectionMid}/${item.collectionSid}`;
-      }
+      const col = collectionKeyOf(item);
+      if (col) return col;
       const b = String(item?.bvid || "").trim();
       if (b && isFolderItem(item)) return `selection:${b}`;
       return `single:${b}:P${Math.max(1, Number(item?.page) || 1)}`;
