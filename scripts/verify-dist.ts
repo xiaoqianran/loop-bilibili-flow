@@ -13,7 +13,7 @@ const outputPath = resolve(projectRoot, "dist/userscript/subbatch.user.js");
 const maintainedSourcePath = resolve(projectRoot, "loop-bilibili.js");
 
 const requiredMetadata = [
-  "// @version      6.1.8",
+  "// @version      6.1.9",
   "// @run-at       document-idle",
   "// @match        *://www.bilibili.com/video/*",
   "// @match        *://www.bilibili.com/list/*",
@@ -24,6 +24,7 @@ const requiredMetadata = [
   "// @grant        GM_setValue",
   "// @grant        GM_getValue",
   "// @grant        GM_deleteValue",
+  "// @grant        GM_download",
   "// @grant        unsafeWindow",
 ];
 
@@ -37,6 +38,8 @@ const requiredCapabilities = [
   "function renderAiResultTabs(",
   "function parseKnowledgeOutput(",
   "function bindGlobalShortcuts(",
+  "function downloadSubtitleExportBatch(",
+  "loop-bilibili-subbatch",
   "bili-subbatch-knowledge-v1",
 ] as const;
 

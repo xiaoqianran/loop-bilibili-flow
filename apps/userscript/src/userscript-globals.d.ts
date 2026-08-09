@@ -30,4 +30,14 @@ declare const GM_xmlhttpRequest:
   | undefined;
 declare const GM_setClipboard: ((text: string) => void) | undefined;
 declare const GM_addStyle: ((css: string) => void) | undefined;
+declare const GM_download:
+  | ((details: {
+      url: string;
+      name?: string;
+      saveAs?: boolean;
+      onload?: () => void;
+      onerror?: (error?: unknown) => void;
+      ontimeout?: () => void;
+    }) => void)
+  | undefined;
 declare const unsafeWindow: Window | undefined;

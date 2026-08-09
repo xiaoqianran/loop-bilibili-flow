@@ -15,7 +15,7 @@ export const userscriptMetadata: UserscriptMetadata = {
   // Keep the historical identity so Tampermonkey upgrades the installed v6.0.2.
   name: "Bili SubBatch (loop-bilibili)",
   namespace: "https://github.com/loop-bilibili/bili-subbatch",
-  version: "6.1.8",
+  version: "6.1.9",
   description:
     "B站知识阅读工作台：字幕预处理、多产物后处理、Anchor 局部追问树与持久 Knowledge Workspace",
   author: "loop-bilibili",
@@ -45,6 +45,7 @@ export const userscriptMetadata: UserscriptMetadata = {
     "GM_setValue",
     "GM_getValue",
     "GM_deleteValue",
+    "GM_download",
   ],
   runAt: "document-idle",
   license: "MIT",

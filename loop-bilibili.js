@@ -24,6 +24,7 @@
 // @grant        GM_info
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_download
 // @run-at       document-idle
 // @license      MIT
 // @downloadURL https://update.greasyfork.org/scripts/589638/Bili%20SubBatch%20%28loop-bilibili%29.user.js
@@ -31,6 +32,7 @@
 // ==/UserScript==
 
 /**
+ * v6.1.9 — 字幕批量下载落到 Downloads/loop-bilibili-subbatch/<视频名>/P{n}{分P名}.{ext}；根目录 index.md 维护 BV → 视频名映射，同 BV 更新名称。
  * v6.0.2 — 快捷键微调：主召唤/隐藏默认键改为 Ctrl+B；旧版仍使用默认 Ctrl+Alt+B 的配置自动迁移，用户自定义键位保持不变。
  * v6.0.1 — 全局快捷键 / Quick Summon：新增可编辑快捷键中心；支持快捷召唤/隐藏、AI 处理字幕直达、后处理上次模型直达、悬浮/靠边切换；召唤布局与默认内容可配置，并检测 Chrome / Bilibili 常见冲突。
  * v6.0.0 — Knowledge Drill-down：AI 处理字幕可选区创建 Anchor；右侧 Knowledge Rail 支持独立树状追问、Breadcrumb、建议追问与流式回答；Anchor/Thread 通过独立 IndexedDB 永久保存，并新增 Knowledge Workspace 检索与恢复。
@@ -137,6 +139,10 @@
   const CACHE_SESSION_PREFIX = "bsb:v2:";
   const MEMORY_CACHE_LIMIT = 32;
   const VIEW_CACHE_TTL_MS = 30 * 60_000;
+  /** Browser Downloads root folder for batch subtitle exports. */
+  const SUBTITLE_EXPORT_ROOT = "loop-bilibili-subbatch";
+  const SUBTITLE_EXPORT_INDEX_NAME = "index.md";
+  const SUBTITLE_EXPORT_INDEX_STORE_KEY = "bili-subbatch-export-index-v1";
   const TRACK_CACHE_TTL_MS = 10 * 60_000;
   const SUBTITLE_CACHE_TTL_MS = 30 * 24 * 60 * 60_000;
   const SUBTITLE_REVALIDATE_MS = 12 * 60 * 60_000;
@@ -1170,28 +1176,240 @@
   }
 
   function safeFilename(name) {
-    return (
-      String(name || "subtitle")
-        .replace(/[\\/:*?"<>|]+/g, "_")
+    return safePathSegment(name, 120);
+  }
+
+  /** One path segment safe for Downloads / Windows FS. */
+  function safePathSegment(name, maxLen = 120) {
+    try {
+      const pure = typeof SubBatch !== "undefined"
+        ? SubBatch?.SubBatchMonorepo?.core?.safePathSegment
+        : null;
+      if (typeof pure === "function") return pure(name, maxLen);
+    } catch (_) { /* local fallback */ }
+    const cleaned = String(name || "untitled")
+      .replace(/\|/g, "｜")
+      .replace(/[\\/:*?"<>]+/g, "_")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/^\.+/, "")
+      .slice(0, Math.max(1, maxLen));
+    return cleaned || "untitled";
+  }
+
+  function resolveSeriesTitle(item) {
+    try {
+      const pure = typeof SubBatch !== "undefined"
+        ? SubBatch?.SubBatchMonorepo?.core?.resolveSeriesTitle
+        : null;
+      if (typeof pure === "function") return pure(item);
+    } catch (_) { /* local fallback */ }
+    const title = String(item?.title || "").trim();
+    // Combined multipage title: "{series} - P{n}【{part}】"
+    const multi = title.match(/^(.*)\s-\sP(\d+)【([\s\S]*)】\s*$/);
+    if (multi?.[1]?.trim()) return multi[1].trim();
+    const cut = title.search(/\s-\sP\d+【/);
+    if (cut > 0) return title.slice(0, cut).trim();
+    if (title) return title;
+    return String(item?.bvid || "untitled").trim() || "untitled";
+  }
+
+  function resolvePartLabel(item) {
+    try {
+      const pure = typeof SubBatch !== "undefined"
+        ? SubBatch?.SubBatchMonorepo?.core?.resolvePartLabel
+        : null;
+      if (typeof pure === "function") return pure(item);
+    } catch (_) { /* local fallback */ }
+    const explicit = String(item?.part || "").trim();
+    if (explicit) return explicit;
+    const page = Math.max(1, Number(item?.page) || 1);
+    const pagePart = String(item?.pages?.[page - 1]?.part || "").trim();
+    if (pagePart) return pagePart;
+    const title = String(item?.title || "").trim();
+    const multi = title.match(/^(.*)\s-\sP(\d+)【([\s\S]*)】\s*$/);
+    if (multi?.[3] != null) return String(multi[3]).trim();
+    return "";
+  }
+
+  function resolveSubtitleFileStem(item) {
+    try {
+      const pure = typeof SubBatch !== "undefined"
+        ? SubBatch?.SubBatchMonorepo?.core?.resolveSubtitleFileStem
+        : null;
+      if (typeof pure === "function") return pure(item);
+    } catch (_) { /* local fallback */ }
+    const page = Math.max(1, Number(item?.page) || 1);
+    // Keep self-contained for extractable unit tests (no cross-function closure).
+    let part = String(item?.part || "").trim();
+    if (!part) part = String(item?.pages?.[page - 1]?.part || "").trim();
+    if (!part) {
+      const title = String(item?.title || "").trim();
+      const multi = title.match(/^(.*)\s-\sP(\d+)【([\s\S]*)】\s*$/);
+      if (multi?.[3] != null) part = String(multi[3]).trim();
+    }
+    return part ? `P${page}${part}` : `P${page}`;
+  }
+
+  function buildSubtitleExportRelativePath(item, ext) {
+    try {
+      const pure = typeof SubBatch !== "undefined"
+        ? SubBatch?.SubBatchMonorepo?.core?.buildSubtitleExportRelativePath
+        : null;
+      if (typeof pure === "function") return pure(item, ext);
+    } catch (_) { /* local fallback */ }
+    // Inline series/stem sanitization so this function is extractable standalone.
+    const title = String(item?.title || "").trim();
+    const multi = title.match(/^(.*)\s-\sP(\d+)【([\s\S]*)】\s*$/);
+    let seriesTitle = multi?.[1]?.trim() || "";
+    if (!seriesTitle) {
+      const cut = title.search(/\s-\sP\d+【/);
+      seriesTitle = cut > 0 ? title.slice(0, cut).trim() : title;
+    }
+    if (!seriesTitle) seriesTitle = String(item?.bvid || "untitled").trim() || "untitled";
+    const page = Math.max(1, Number(item?.page) || 1);
+    let part = String(item?.part || "").trim();
+    if (!part) part = String(item?.pages?.[page - 1]?.part || "").trim();
+    if (!part && multi?.[3] != null) part = String(multi[3]).trim();
+    const fileStem = part ? `P${page}${part}` : `P${page}`;
+    const sanitize = (name, maxLen = 120) => {
+      const cleaned = String(name || "untitled")
+        .replace(/\|/g, "｜")
+        .replace(/[\\/:*?"<>]+/g, "_")
         .replace(/\s+/g, " ")
         .trim()
-        .slice(0, 120) || "subtitle"
-    );
+        .replace(/^\.+/, "")
+        .slice(0, Math.max(1, maxLen));
+      return cleaned || "untitled";
+    };
+    const cleanExt = String(ext || "txt").replace(/^\./, "").trim() || "txt";
+    return `loop-bilibili-subbatch/${sanitize(seriesTitle)}/${sanitize(fileStem, 160)}.${cleanExt}`;
+  }
+
+  function buildSubtitleExportIndexPath() {
+    return `${SUBTITLE_EXPORT_ROOT}/${SUBTITLE_EXPORT_INDEX_NAME}`;
+  }
+
+  function loadExportIndexMap() {
+    try {
+      const raw = storageGet(SUBTITLE_EXPORT_INDEX_STORE_KEY, "");
+      if (!raw) return {};
+      const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+      const out = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        const bvid = String(k || "").trim();
+        const name = String(v || "").trim();
+        if (!bvid || !name) continue;
+        const normalized = /^bv/i.test(bvid) ? `BV${bvid.slice(2)}` : bvid;
+        out[normalized] = name;
+      }
+      return out;
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function saveExportIndexMap(map) {
+    try {
+      storageSet(SUBTITLE_EXPORT_INDEX_STORE_KEY, JSON.stringify(map || {}));
+    } catch (_) { /* ignore quota */ }
+    return map || {};
+  }
+
+  function upsertExportIndexMap(map, bvid, seriesTitle) {
+    try {
+      const pure = typeof SubBatch !== "undefined"
+        ? SubBatch?.SubBatchMonorepo?.core?.upsertExportIndexMap
+        : null;
+      if (typeof pure === "function") return pure(map, bvid, seriesTitle);
+    } catch (_) { /* local fallback */ }
+    const next = { ...(map || {}) };
+    const id = String(bvid || "").trim();
+    if (!id) return next;
+    const normalized = /^bv/i.test(id) ? `BV${id.slice(2)}` : id;
+    next[normalized] = String(seriesTitle || "").trim() || normalized;
+    return next;
+  }
+
+  function renderExportIndexMd(map) {
+    try {
+      const pure = typeof SubBatch !== "undefined"
+        ? SubBatch?.SubBatchMonorepo?.core?.renderExportIndexMd
+        : null;
+      if (typeof pure === "function") return pure(map);
+    } catch (_) { /* local fallback */ }
+    const entries = Object.entries(map || {}).filter(([bvid, name]) => bvid && name);
+    entries.sort(([a], [b]) => a.localeCompare(b, "en"));
+    if (!entries.length) return "";
+    return `${entries.map(([bvid, name]) => `${bvid} ${name}`).join("\n")}\n`;
   }
 
   function downloadText(filename, text) {
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-      URL.revokeObjectURL(url);
-      a.remove();
-    }, 1500);
+    const name = String(filename || "download.txt").replace(/\\/g, "/");
+
+    const revokeLater = () => {
+      setTimeout(() => {
+        try { URL.revokeObjectURL(url); } catch (_) { /* noop */ }
+      }, 60_000);
+    };
+
+    const anchorFallback = () => {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try { URL.revokeObjectURL(url); } catch (_) { /* noop */ }
+        a.remove();
+      }, 1500);
+    };
+
+    // GM_download preserves nested paths under the browser Downloads folder.
+    if (typeof GM_download === "function") {
+      try {
+        GM_download({
+          url,
+          name,
+          saveAs: false,
+          onload: revokeLater,
+          onerror: anchorFallback,
+          ontimeout: anchorFallback,
+        });
+        return;
+      } catch (_) {
+        /* fall through to anchor */
+      }
+    }
+    anchorFallback();
+  }
+
+  /**
+   * Batch-export subtitles into:
+   *   Downloads/loop-bilibili-subbatch/<series>/P{n}{part}.{ext}
+   * and refresh Downloads/loop-bilibili-subbatch/index.md (BV → series title).
+   */
+  async function downloadSubtitleExportBatch(pool, ext, convert) {
+    let indexMap = loadExportIndexMap();
+    for (let i = 0; i < pool.length; i++) {
+      const it = pool[i];
+      const seriesTitle = resolveSeriesTitle(it);
+      if (it.bvid) indexMap = upsertExportIndexMap(indexMap, it.bvid, seriesTitle);
+      const relativePath = buildSubtitleExportRelativePath(it, ext);
+      downloadText(relativePath, convert(it.data));
+      if (pool.length > 1) await sleep(220);
+    }
+    saveExportIndexMap(indexMap);
+    const indexMd = renderExportIndexMd(indexMap);
+    if (indexMd) {
+      await sleep(pool.length ? 260 : 0);
+      downloadText(buildSubtitleExportIndexPath(), indexMd);
+    }
+    return { count: pool.length, indexEntries: Object.keys(indexMap).length };
   }
 
   function sleep(ms) {
@@ -13456,16 +13674,9 @@
           setStatus(`无可用字幕 · ok=${ok} empty=${empty} err=${err}`, "err");
           return;
         }
-        for (let i = 0; i < pool.length; i++) {
-          const it = pool[i];
-          const base = safeFilename(
-            `${it.bvid}${it.page > 1 ? "_P" + String(it.page).padStart(2, "0") : ""}_${it.title || "sub"}`,
-          );
-          downloadText(`${base}.${ext}`, convert(it.data));
-          if (pool.length > 1) await sleep(200);
-        }
+        const exported = await downloadSubtitleExportBatch(pool, ext, convert);
         setStatus(
-          `已下载 ${pool.length} 个 ${ext.toUpperCase()} · 抓取 ok=${ok} empty=${empty} err=${err}`,
+          `已下载 ${exported.count} 个 ${ext.toUpperCase()} → ${SUBTITLE_EXPORT_ROOT}/ · index ${exported.indexEntries} 条 · 抓取 ok=${ok} empty=${empty} err=${err}`,
           "ok",
         );
       }
