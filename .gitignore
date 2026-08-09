@@ -11,3 +11,6 @@ coverage/
 Thumbs.db
 .idea/
 .vscode/
+
+.codegraph/
+digest.txt
