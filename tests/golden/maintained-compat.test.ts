@@ -143,6 +143,10 @@ describe("Maintained full-feature compatibility source", () => {
     expect(maintainedSource).toContain("function knowledgeChunkToHtml(");
     expect(maintainedSource).toContain("function hydrateKnowledgeAnswerDom(");
     expect(maintainedSource).toContain('ADD_ATTR: ["target", "rel", "aria-label", "data-bsb-m", "class", "style", "xmlns", "encoding"]');
+    // AI 处理字幕 cards share Knowledge MD/math/highlight rendering.
+    expect(maintainedSource).toContain("function renderProcessedTranscriptBodyHtml(");
+    expect(maintainedSource).toContain("bsb-preprocess-block-body bsb-md-rich");
+    expect(maintainedSource).toContain("function wrapFirstTextOccurrence(");
   });
 
   it("refreshes the preprocess canvas after automatic subtitle capture", () => {

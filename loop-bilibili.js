@@ -4273,6 +4273,43 @@
         font-size:calc(var(--bsb-note-font) * .96); line-height:1.86; letter-spacing:.018em;
         white-space:pre-wrap; overflow-wrap:anywhere; text-wrap:pretty;
       }
+      /* AI 处理字幕：Markdown / 公式 / ==高亮== 富文本正文 */
+      #${PANEL_ID} .bsb-preprocess-block-body.bsb-md-rich {
+        white-space:normal;
+      }
+      #${PANEL_ID} .bsb-preprocess-block-body.bsb-md-rich > *:first-child { margin-top:0; }
+      #${PANEL_ID} .bsb-preprocess-block-body.bsb-md-rich > *:last-child { margin-bottom:0; }
+      #${PANEL_ID} .bsb-preprocess-block-body.bsb-md-rich p { margin:0 0 .7em; }
+      #${PANEL_ID} .bsb-preprocess-block-body.bsb-md-rich ul,
+      #${PANEL_ID} .bsb-preprocess-block-body.bsb-md-rich ol { margin:.35em 0 .7em; padding-left:1.25em; }
+      #${PANEL_ID} .bsb-preprocess-block-body.bsb-md-rich li { margin:.2em 0; }
+      #${PANEL_ID} .bsb-preprocess-block-body.bsb-md-rich strong {
+        color:color-mix(in srgb,var(--ctp-rosewater) 88%,var(--ctp-text));
+        font-weight:800;
+      }
+      #${PANEL_ID} .bsb-preprocess-block-body.bsb-md-rich code {
+        font:650 .9em/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;
+        padding:.08em .35em; border-radius:5px;
+        background:color-mix(in srgb,var(--bsb-block-accent) 10%,var(--ctp-surface0));
+      }
+      #${PANEL_ID} .bsb-preprocess-block-body.bsb-md-rich pre {
+        margin:.5em 0 .8em; padding:10px 12px; border-radius:10px; overflow:auto;
+        background:color-mix(in srgb,var(--ctp-crust) 35%,var(--ctp-mantle));
+        border:1px solid color-mix(in srgb,var(--ctp-surface1) 70%,transparent);
+      }
+      #${PANEL_ID} .bsb-preprocess-block-body.bsb-md-rich pre code { padding:0; background:transparent; }
+      #${PANEL_ID} .bsb-preprocess-block-body.bsb-md-rich blockquote {
+        margin:.5em 0 .8em; padding:.2em 0 .2em .9em;
+        border-left:3px solid color-mix(in srgb,var(--bsb-block-accent) 55%,transparent);
+        color:var(--ctp-subtext1);
+      }
+      #${PANEL_ID} .bsb-preprocess-block-body.bsb-md-rich .bsb-katex-display {
+        display:block; overflow-x:auto; margin:.65em 0 .85em; padding:.35em 0; text-align:center;
+      }
+      #${PANEL_ID} .bsb-preprocess-block-body.bsb-md-rich .bsb-katex-inline {
+        display:inline-block; max-width:100%; overflow-x:auto; vertical-align:middle;
+      }
+      #${PANEL_ID} .bsb-preprocess-block-body.bsb-md-rich .katex { font-size:1.05em; }
       #${PANEL_ID} .bsb-preprocess-block-body::selection {
         background:color-mix(in srgb,var(--bsb-block-accent) 28%,transparent); color:var(--ctp-text);
       }
@@ -9212,6 +9249,51 @@
     setStatus("正在停止 Knowledge 回答…");
   }
 
+  /** Unwrap existing knowledge-anchor marks so re-decoration stays idempotent. */
+  function unwrapKnowledgeAnchorMarks(root) {
+    if (!root) return;
+    root.querySelectorAll("mark.bsb-knowledge-anchor-mark").forEach((mark) => {
+      const parent = mark.parentNode;
+      if (!parent) return;
+      while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+      parent.removeChild(mark);
+    });
+  }
+
+  /**
+   * Wrap the first occurrence of `needle` in a text node under root.
+   * Skips code/math/links so rich Markdown bodies keep structure.
+   */
+  function wrapFirstTextOccurrence(root, needle, createMark) {
+    const value = String(needle || "");
+    if (!root || !value) return false;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      const parent = node.parentElement;
+      if (!parent) continue;
+      if (parent.closest("pre, code, kbd, samp, a, button, .katex, .bsb-katex-display, .bsb-katex-inline, .bsb-math-fallback, mark.bsb-knowledge-anchor-mark")) {
+        continue;
+      }
+      const text = node.nodeValue || "";
+      const idx = text.indexOf(value);
+      if (idx < 0) continue;
+      const before = text.slice(0, idx);
+      const mid = text.slice(idx, idx + value.length);
+      const after = text.slice(idx + value.length);
+      const frag = document.createDocumentFragment();
+      if (before) frag.appendChild(document.createTextNode(before));
+      const mark = createMark(mid);
+      if (mark) frag.appendChild(mark);
+      else frag.appendChild(document.createTextNode(mid));
+      if (after) frag.appendChild(document.createTextNode(after));
+      node.replaceWith(frag);
+      return true;
+    }
+    return false;
+  }
+
   async function decorateKnowledgeAnchors(host = null) {
     const root = document.getElementById(PANEL_ID);
     const scope = host || root?.querySelector('[data-role="ai-content"]');
@@ -9221,25 +9303,53 @@
     const bodies = Array.from(scope.querySelectorAll(".bsb-preprocess-block-body"));
     for (const body of bodies) {
       const article = body.closest(".bsb-preprocess-block");
-      const original = body.textContent || "";
+      const rich = body.classList.contains("bsb-md-rich");
+      const original = body.getAttribute("data-knowledge-plain") || body.textContent || "";
       const articleSourceKey = article?.dataset.knowledgeSourceKey || currentKnowledgeSource().sourceKey;
       const relevant = anchors.filter((a) => a.sourceKey === articleSourceKey && original.includes(a.selectedText));
-      if (!relevant.length) continue;
-      const ranges = relevant.map((a) => ({ a, start: original.indexOf(a.selectedText), end: original.indexOf(a.selectedText) + a.selectedText.length })).filter((x) => x.start >= 0).sort((x, y) => x.start - y.start || y.end - x.end);
+      if (!relevant.length) {
+        if (article) article.classList.remove("has-knowledge");
+        continue;
+      }
+      const ranges = relevant
+        .map((a) => ({
+          a,
+          start: original.indexOf(a.selectedText),
+          end: original.indexOf(a.selectedText) + a.selectedText.length,
+        }))
+        .filter((x) => x.start >= 0)
+        .sort((x, y) => x.start - y.start || y.end - x.end);
       const accepted = [];
       let cursor = -1;
       for (const r of ranges) {
         if (r.start < cursor) continue;
-        accepted.push(r); cursor = r.end;
-      }
-      let html = ""; cursor = 0;
-      for (const r of accepted) {
-        html += escapeHtml(original.slice(cursor, r.start));
-        html += `<mark class="bsb-knowledge-anchor-mark" data-knowledge-anchor-id="${escapeAttr(r.a.id)}" title="${knowledgeNodesForAnchor(r.a.id).length} 个追问 · 点击继续">${escapeHtml(original.slice(r.start, r.end))}</mark>`;
+        accepted.push(r);
         cursor = r.end;
       }
-      html += escapeHtml(original.slice(cursor));
-      body.innerHTML = html;
+      if (rich) {
+        // Keep Markdown/math HTML; only wrap text nodes for anchor marks.
+        unwrapKnowledgeAnchorMarks(body);
+        for (const r of accepted) {
+          wrapFirstTextOccurrence(body, r.a.selectedText, (mid) => {
+            const mark = document.createElement("mark");
+            mark.className = "bsb-knowledge-anchor-mark";
+            mark.dataset.knowledgeAnchorId = r.a.id;
+            mark.title = `${knowledgeNodesForAnchor(r.a.id).length} 个追问 · 点击继续`;
+            mark.textContent = mid;
+            return mark;
+          });
+        }
+      } else {
+        let html = "";
+        cursor = 0;
+        for (const r of accepted) {
+          html += escapeHtml(original.slice(cursor, r.start));
+          html += `<mark class="bsb-knowledge-anchor-mark" data-knowledge-anchor-id="${escapeAttr(r.a.id)}" title="${knowledgeNodesForAnchor(r.a.id).length} 个追问 · 点击继续">${escapeHtml(original.slice(r.start, r.end))}</mark>`;
+          cursor = r.end;
+        }
+        html += escapeHtml(original.slice(cursor));
+        body.innerHTML = html;
+      }
       if (article) article.classList.add("has-knowledge");
     }
   }
@@ -10058,6 +10168,14 @@
     return blocks;
   }
 
+  /** Render one preprocess paragraph with the same MD/math/highlight stack as Knowledge. */
+  function renderProcessedTranscriptBodyHtml(plain) {
+    const source = String(plain || "").trim();
+    if (!source) return "";
+    const { md, maths } = prepareMarkdownMath(source);
+    return knowledgeChunkToHtml(md, maths);
+  }
+
   function renderProcessedTranscriptCards(text) {
     const blocks = processedTranscriptReadingBlocks(text);
     if (!blocks.length) return `<pre class="bsb-main-input-preview">${escapeHtml(text)}</pre>`;
@@ -10100,7 +10218,8 @@
       const kend = last?.seconds ?? kstart;
       const segmentId = `seg-${kbvid || "local"}-p${kpage}-${Math.round(kstart * 10)}-${md5(clean || block.text).slice(0, 7)}`;
       const sourceKey = knowledgeSourceKey(kbvid, kpage);
-      return `<article class="bsb-preprocess-block" data-preprocess-block="${paragraphIndex}" data-knowledge-segment="${escapeAttr(segmentId)}" data-knowledge-source-key="${escapeAttr(sourceKey)}" data-knowledge-bvid="${escapeAttr(kbvid)}" data-knowledge-page="${kpage}" data-knowledge-start="${kstart}" data-knowledge-end="${kend}" data-knowledge-clock="${escapeAttr(first?.clock || "")}" data-knowledge-topic="${escapeAttr(block.topic || "")}" data-knowledge-title="${escapeAttr(fallbackSource.title || "")}" data-knowledge-author="${escapeAttr(fallbackSource.author || "")}"><div class="bsb-preprocess-block-head"><span class="bsb-preprocess-block-index">${String(paragraphIndex).padStart(2, "0")}</span>${block.topic ? `<span class="bsb-preprocess-block-topic">${escapeHtml(block.topic)}</span>` : ""}${warning}${timeHtml}</div><div class="bsb-preprocess-block-body">${escapeHtml(clean || block.text)}</div></article>`;
+      const bodyHtml = renderProcessedTranscriptBodyHtml(clean || block.text);
+      return `<article class="bsb-preprocess-block" data-preprocess-block="${paragraphIndex}" data-knowledge-segment="${escapeAttr(segmentId)}" data-knowledge-source-key="${escapeAttr(sourceKey)}" data-knowledge-bvid="${escapeAttr(kbvid)}" data-knowledge-page="${kpage}" data-knowledge-start="${kstart}" data-knowledge-end="${kend}" data-knowledge-clock="${escapeAttr(first?.clock || "")}" data-knowledge-topic="${escapeAttr(block.topic || "")}" data-knowledge-title="${escapeAttr(fallbackSource.title || "")}" data-knowledge-author="${escapeAttr(fallbackSource.author || "")}"><div class="bsb-preprocess-block-head"><span class="bsb-preprocess-block-index">${String(paragraphIndex).padStart(2, "0")}</span>${block.topic ? `<span class="bsb-preprocess-block-topic">${escapeHtml(block.topic)}</span>` : ""}${warning}${timeHtml}</div><div class="bsb-preprocess-block-body bsb-md-rich" data-knowledge-plain="${escapeAttr(clean || block.text)}">${bodyHtml}</div></article>`;
     }).join("");
     return `<div class="bsb-preprocess-reading">${html}</div>`;
   }
@@ -10135,10 +10254,18 @@
     if (kind === "processed" && state.preprocessRun?.busy) {
       content.innerHTML = `<div class="bsb-empty"><div class="bsb-empty-ico">◌</div><strong>AI 正在处理字幕…</strong><span>${escapeHtml(state.preprocessRun.statusText || "正在规范化、翻译并整理字幕")}</span></div>`;
     } else if (text) {
-      content.innerHTML = kind === "processed"
-        ? renderProcessedTranscriptCards(text)
-        : `<pre class="bsb-main-input-preview">${escapeHtml(text)}</pre>`;
-      if (kind === "processed") await decorateKnowledgeAnchors(content);
+      if (kind === "processed") {
+        try {
+          await ensureKnowledgeRenderLibs(text);
+        } catch (_) {
+          /* simple markdown fallback */
+        }
+        content.innerHTML = renderProcessedTranscriptCards(text);
+        await decorateKnowledgeAnchors(content);
+        await hydrateKnowledgeAnswerDom(content, state.renderEpoch);
+      } else {
+        content.innerHTML = `<pre class="bsb-main-input-preview">${escapeHtml(text)}</pre>`;
+      }
     } else {
       const title = kind === "processed" ? "还没有 AI 处理字幕" : "还没有原始字幕";
       const detail = kind === "processed"
