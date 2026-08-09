@@ -106,6 +106,70 @@ describe("Maintained full-feature compatibility source", () => {
     ).toContain("SubBatch?.SubBatchMonorepo");
   });
 
+  it("exports subtitles under loop-bilibili-subbatch with short P* names and index.md", () => {
+    expect(maintainedSource).toContain('const SUBTITLE_EXPORT_ROOT = "loop-bilibili-subbatch"');
+    expect(maintainedSource).toContain("function buildSubtitleExportRelativePath(");
+    expect(maintainedSource).toContain("function downloadSubtitleExportBatch(");
+    expect(maintainedSource).toContain("function renderExportIndexMd(");
+    expect(maintainedSource).toContain("GM_download");
+    expect(maintainedSource).toContain("buildSubtitleExportIndexPath()");
+
+    const batch = extractFunctionSource(maintainedSource, "downloadSubtitleExportBatch");
+    expect(batch).toContain("buildSubtitleExportRelativePath(it, ext)");
+    expect(batch).toContain("upsertExportIndexMap");
+    expect(batch).toContain("buildSubtitleExportIndexPath()");
+
+    // Shipped product path must call the batch exporter (not flat BV_Pn_title files).
+    const doBatch = extractFunctionSource(maintainedSource, "doBatch");
+    expect(doBatch).toContain("downloadSubtitleExportBatch(pool, ext, convert)");
+    expect(doBatch).not.toContain('`${it.bvid}${it.page > 1 ? "_P"');
+
+    // Drive the real maintained source functions (not a re-implementation).
+    const resolveSeries = sourceFunction<UnknownFunction>(
+      maintainedSource,
+      "resolveSeriesTitle",
+    );
+    const resolveStem = sourceFunction<UnknownFunction>(
+      maintainedSource,
+      "resolveSubtitleFileStem",
+    );
+    const buildPath = sourceFunction<UnknownFunction>(
+      maintainedSource,
+      "buildSubtitleExportRelativePath",
+    );
+    const upsert = sourceFunction<UnknownFunction>(
+      maintainedSource,
+      "upsertExportIndexMap",
+    );
+    const renderIndex = sourceFunction<UnknownFunction>(
+      maintainedSource,
+      "renderExportIndexMd",
+    );
+    const item = {
+      bvid: "BV14u41147YH",
+      page: 33,
+      title:
+        "【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结) - P33【【动画篇】6.5 头部跟随动画 - 物体约束】",
+      part: "【动画篇】6.5 头部跟随动画 - 物体约束",
+    };
+    expect(resolveSeries(item)).toBe(
+      "【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
+    );
+    expect(resolveStem(item)).toBe("P33【动画篇】6.5 头部跟随动画 - 物体约束");
+    expect(buildPath(item, "txt")).toMatch(
+      /^loop-bilibili-subbatch\/.+\/P33【动画篇】6\.5 头部跟随动画 - 物体约束\.txt$/,
+    );
+    const map = upsert(
+      upsert({}, "BV14u41147YH", "旧标题"),
+      "BV14u41147YH",
+      resolveSeries(item),
+    );
+    expect(renderIndex(map)).toContain(
+      "BV14u41147YH 【Kurt】Blender零基础入门教程 | Blender中文区新手必刷教程(已完结)",
+    );
+    expect(renderIndex(map)).not.toContain("旧标题");
+  });
+
   it("uses two-pane Knowledge Workspace (Navigator | Reader)", () => {
     expect(maintainedSource).toContain("function knowledgeNavigatorHtml(");
     expect(maintainedSource).toContain("function knowledgeReaderHtml(");

@@ -6,15 +6,16 @@ import {
 } from "../../apps/userscript/metadata";
 
 describe("Userscript metadata", () => {
-  it("保留 v6.0.2 安装身份并升级至 v6.1.8", () => {
+  it("保留 v6.0.2 安装身份并升级至 v6.1.9", () => {
     const header = renderUserscriptMetadata();
-    expect(userscriptMetadata.version).toBe("6.1.8");
+    expect(userscriptMetadata.version).toBe("6.1.9");
     expect(header).toContain("// @name         Bili SubBatch (loop-bilibili)");
     expect(header).toContain(
       "// @namespace    https://github.com/loop-bilibili/bili-subbatch",
     );
     expect(header).toContain("// @match        *://www.bilibili.com/video/*");
     expect(header).toContain("// @grant        GM_xmlhttpRequest");
+    expect(header).toContain("// @grant        GM_download");
     expect(header).toContain("// @run-at       document-idle");
   });
 });
