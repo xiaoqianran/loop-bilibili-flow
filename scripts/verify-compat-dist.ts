@@ -14,7 +14,7 @@ const maintainedSourcePath = resolve(projectRoot, "loop-bilibili.js");
 const productionOutputPath = resolve(projectRoot, "dist/userscript/subbatch.user.js");
 
 const requiredMetadata = [
-  "// @version      6.5.1",
+  "// @version      6.6.0",
   "// @run-at       document-idle",
   "// @match        *://www.bilibili.com/video/*",
   "// @match        *://www.bilibili.com/list/*",

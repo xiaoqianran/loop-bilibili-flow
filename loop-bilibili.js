@@ -32,6 +32,7 @@
 // ==/UserScript==
 
 /**
+ * v6.6.0 — 个人主页嵌套文件夹：顶层 = UP 名；其下单视频 / 视频选集 / 合集分层；下载路径同步为 loop-bilibili-subbatch/UP/…。
  * v6.5.1 — 自动抓取后联动采集模式下拉：多分P 切「视频选集」，ugc 合集切「合集」，减少手动点选。
  * v6.5.0 — 架构收敛：字幕导出/选集合集分组/index 规则仅存在 packages/core；产品体只做 monorepo bridge + IO，消除双轨实现。
  * v6.4.1 — 合集与视频选集一样在字幕库自动建文件夹：扫描/打开合集内视频识别 ugc_season 并分组；自动模式扫合集页拉全列表。
@@ -1274,6 +1275,14 @@
 
   function attachCollectionGroupMeta(items, meta = {}, ctx = {}) {
     return coreCall("attachCollectionGroupMeta", items, meta, ctx);
+  }
+
+  function attachUserSpaceGroupMeta(items, meta = {}) {
+    return coreCall("attachUserSpaceGroupMeta", items, meta);
+  }
+
+  function setGroupSelection(items, groupKey, selected) {
+    return coreCall("setGroupSelection", items, groupKey, selected);
   }
 
   function normalizeExportItem(item, peers = []) {
@@ -3466,9 +3475,14 @@
       }
       #${PANEL_ID} .bsb-resource-item { grid-template-columns: 20px minmax(0,1fr); }
       #${PANEL_ID} .bsb-resource-folder { grid-template-columns: 16px 20px minmax(0,1fr); background: color-mix(in srgb, var(--ctp-surface0) 55%, transparent); margin-top: 3px; }
-      #${PANEL_ID} .bsb-resource-item.child {
+      #${PANEL_ID} .bsb-resource-item.child,
+      #${PANEL_ID} .bsb-resource-folder.child {
         margin-left: 14px; border-radius: 0 10px 10px 0;
         border-left: 2px solid color-mix(in srgb, var(--ctp-overlay0) 35%, transparent);
+      }
+      #${PANEL_ID} .bsb-resource-item.child-2,
+      #${PANEL_ID} .bsb-resource-folder.child-2 {
+        margin-left: 28px;
       }
       #${PANEL_ID} .bsb-resource-item:hover,
       #${PANEL_ID} .bsb-resource-folder:hover {
@@ -6556,9 +6570,7 @@
         if (groupCb) {
           const key = String(groupCb.getAttribute("data-group-check") || "");
           const selected = !!groupCb.checked;
-          state.items.forEach((item) => {
-            if (resolveLibraryGroupKey(item) === key) item.selected = selected;
-          });
+          setGroupSelection(state.items, key, selected);
           renderList({ renderTranscript: false });
           return;
         }
@@ -7501,7 +7513,7 @@
         if (!query) return true;
         const haystack = [
           item?.title, item?.bvid, item?.author, item?.part,
-          item?.groupFolder, item?.collectionName, item?.videoTitle,
+          item?.groupFolder, item?.parentFolder, item?.collectionName, item?.videoTitle,
           item?.collectionShortUrl,
           ...(Array.isArray(item?.sources) ? item.sources : []),
         ].filter(Boolean).join(" ").toLocaleLowerCase();
@@ -7522,7 +7534,7 @@
     return counts;
   }
 
-  function libraryItemRowHtml(it, i, { child = false } = {}) {
+  function libraryItemRowHtml(it, i, { child = false, depth = 0 } = {}) {
     const status = libraryStatus(it);
     const stClass = status === "ok" ? "st-ok" : status === "empty" ? "st-empty" : status === "error" ? "st-err" : "st-wait";
     const active = routeVideoKey(it.bvid, it.page || 1) === state.transcriptItemKey;
@@ -7536,13 +7548,60 @@
     const author = escapeHtml(it.author || "");
     const source = Array.isArray(it.sources) && it.sources.length ? escapeHtml(it.sources[it.sources.length - 1]) : "";
     const secondary = [author, bvPart, source].filter(Boolean).join(" · ");
-    return `<div class="bsb-resource-item${child ? " child" : ""}${active ? " active" : ""}" data-transcript-i="${i}" title="${escapeAttr(it.title || it.bvid || "")}">
+    const depthClass = depth >= 2 ? " child child-2" : child || depth > 0 ? " child" : "";
+    return `<div class="bsb-resource-item${depthClass}${active ? " active" : ""}" data-transcript-i="${i}" title="${escapeAttr(it.title || it.bvid || "")}">
         <input type="checkbox" data-i="${i}" ${it.selected ? "checked" : ""} aria-label="选择 ${escapeAttr(displayTitle)}">
         <div class="bsb-resource-main">
           <div class="bsb-resource-title">${escapeHtml(displayTitle)}</div>
           <div class="bsb-resource-meta"><span>${secondary}</span><span class="bsb-resource-status ${stClass}">${libraryStatusLabel(it)}</span></div>
         </div>
       </div>`;
+  }
+
+  function libraryFolderKindLabel(groupType) {
+    if (groupType === "collection") return "合集";
+    if (groupType === "selection") return "视频选集";
+    if (groupType === "space") return "个人主页";
+    return "文件夹";
+  }
+
+  /** Recursive folder/item HTML (supports 个人主页 UP → 选集/合集 nesting). */
+  function libraryRenderNodeHtml(node, depth = 0) {
+    if (node.type === "item") {
+      return libraryItemRowHtml(node.entry.item, node.entry.index, {
+        child: depth > 0,
+        depth,
+      });
+    }
+    const kindLabel = libraryFolderKindLabel(node.groupType);
+    const checked = node.checkState === "all" ? "checked" : "";
+    const partial = node.checkState === "partial" ? "1" : "0";
+    const chevron = node.collapsed ? "▶" : "▼";
+    const depthClass = depth >= 2 ? " child child-2" : depth > 0 ? " child" : "";
+    const chunks = [];
+    chunks.push(`<div class="bsb-resource-folder${depthClass}" data-group-key="${escapeAttr(node.groupKey)}">
+        <button type="button" class="bsb-folder-toggle" data-folder-toggle="${escapeAttr(node.groupKey)}" aria-label="${node.collapsed ? "展开" : "收起"} ${escapeAttr(node.folderLabel)}">${chevron}</button>
+        <input type="checkbox" data-group-check="${escapeAttr(node.groupKey)}" data-partial="${partial}" ${checked} aria-label="选择文件夹 ${escapeAttr(node.folderLabel)}">
+        <div class="bsb-resource-main">
+          <div class="bsb-resource-title">📁 ${escapeHtml(node.folderLabel)}</div>
+          <div class="bsb-resource-meta"><span>${kindLabel} · ${node.selectedCount}/${node.total} 已选</span><span>${node.total} 项</span></div>
+        </div>
+      </div>`);
+    if (!node.collapsed) {
+      if (Array.isArray(node.nodes) && node.nodes.length) {
+        for (const nested of node.nodes) {
+          chunks.push(libraryRenderNodeHtml(nested, depth + 1));
+        }
+      } else {
+        for (const child of node.children || []) {
+          chunks.push(libraryItemRowHtml(child.item, child.index, {
+            child: true,
+            depth: depth + 1,
+          }));
+        }
+      }
+    }
+    return chunks.join("");
   }
 
   function renderList({ renderTranscript = true } = {}) {
@@ -7571,31 +7630,7 @@
       state.libraryFolderCollapsed = {};
     }
     const nodes = buildLibraryRenderNodes(entries, state.libraryFolderCollapsed);
-    const chunks = [];
-    for (const node of nodes) {
-      if (node.type === "item") {
-        chunks.push(libraryItemRowHtml(node.entry.item, node.entry.index, { child: false }));
-        continue;
-      }
-      const kindLabel = node.groupType === "collection" ? "合集" : "视频选集";
-      const checked = node.checkState === "all" ? "checked" : "";
-      const partial = node.checkState === "partial" ? "1" : "0";
-      const chevron = node.collapsed ? "▶" : "▼";
-      chunks.push(`<div class="bsb-resource-folder" data-group-key="${escapeAttr(node.groupKey)}">
-        <button type="button" class="bsb-folder-toggle" data-folder-toggle="${escapeAttr(node.groupKey)}" aria-label="${node.collapsed ? "展开" : "收起"} ${escapeAttr(node.folderLabel)}">${chevron}</button>
-        <input type="checkbox" data-group-check="${escapeAttr(node.groupKey)}" data-partial="${partial}" ${checked} aria-label="选择文件夹 ${escapeAttr(node.folderLabel)}">
-        <div class="bsb-resource-main">
-          <div class="bsb-resource-title">📁 ${escapeHtml(node.folderLabel)}</div>
-          <div class="bsb-resource-meta"><span>${kindLabel} · ${node.selectedCount}/${node.total} 已选</span><span>${node.total} 项</span></div>
-        </div>
-      </div>`);
-      if (!node.collapsed) {
-        for (const child of node.children) {
-          chunks.push(libraryItemRowHtml(child.item, child.index, { child: true }));
-        }
-      }
-    }
-    box.innerHTML = chunks.join("");
+    box.innerHTML = nodes.map((node) => libraryRenderNodeHtml(node, node.depth || 0)).join("");
     // 部分选中：父级勾选消失（不显示半选），与「全选才勾上」一致。
     box.querySelectorAll('input[data-group-check][data-partial="1"]').forEach((el) => {
       el.checked = false;
@@ -13663,6 +13698,15 @@
         items = res.items;
         meta = res.meta || {};
         if (res.truncated) meta.truncated = true;
+        if (ctx.type === "user") {
+          // 个人主页：顶层文件夹 = UP 名；单视频 / 后续选集·合集会嵌套其下。
+          const author =
+            String(meta.author || "").trim()
+            || String(items.find((it) => String(it?.author || "").trim())?.author || "").trim()
+            || "";
+          items = attachUserSpaceGroupMeta(items, { author, mid: ctx.mid });
+          if (author) meta.author = author;
+        }
         if (ctx.type === "collection") {
           if (!meta.author && ctx.authorHint) meta.author = ctx.authorHint;
           if (!meta.name && ctx.collectionTitleHint) meta.name = ctx.collectionTitleHint;
@@ -13716,6 +13760,8 @@
           previous.groupType = raw.groupType || previous.groupType;
           previous.groupKey = raw.groupKey || previous.groupKey;
           previous.groupFolder = raw.groupFolder || previous.groupFolder;
+          previous.parentFolder = raw.parentFolder || previous.parentFolder;
+          previous.spaceMid = raw.spaceMid || previous.spaceMid;
           previous.collectionName = raw.collectionName || previous.collectionName;
           previous.collectionMid = raw.collectionMid || previous.collectionMid;
           previous.collectionSid = raw.collectionSid || previous.collectionSid;

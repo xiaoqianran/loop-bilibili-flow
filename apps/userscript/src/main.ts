@@ -25,7 +25,7 @@ const runtime = createUserscriptRuntime(host);
  * Product body must call `SubBatch.SubBatchMonorepo.core.*` (or top-level aliases).
  */
 const SubBatchMonorepo = {
-  version: "6.5.1",
+  version: "6.6.0",
   runtime,
   host,
   /** Entire pure core namespace — preferred bridge target. */
@@ -67,12 +67,16 @@ const SubBatchMonorepo = {
   resolveLibraryFolderLabel: core.resolveLibraryFolderLabel,
   attachSelectionGroupMeta: core.attachSelectionGroupMeta,
   attachCollectionGroupMeta: core.attachCollectionGroupMeta,
+  attachUserSpaceGroupMeta: core.attachUserSpaceGroupMeta,
   applyUgcSeasonToItem: core.applyUgcSeasonToItem,
   applyUgcSeasonToItems: core.applyUgcSeasonToItems,
   buildGroupMetaPatches: core.buildGroupMetaPatches,
   applyGroupMetaPatchToItems: core.applyGroupMetaPatchToItems,
   mergeGroupFields: core.mergeGroupFields,
   setGroupSelection: core.setGroupSelection,
+  resolveSpaceGroupKey: core.resolveSpaceGroupKey,
+  resolveFolderSegments: core.resolveFolderSegments,
+  resolveExportFolderSegments: core.resolveExportFolderSegments,
   suggestCaptureMode: core.suggestCaptureMode,
   shortcutCommands: core.SHORTCUT_COMMANDS,
   shouldIgnoreShortcutEvent: core.shouldIgnoreShortcutEvent,

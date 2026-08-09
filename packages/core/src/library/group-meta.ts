@@ -1,6 +1,6 @@
 /**
  * Library group metadata attachers — single source of truth for
- * 视频选集 / 合集 folder fields on library items.
+ * 视频选集 / 合集 / 个人主页 folder fields on library items.
  *
  * Product (loop-bilibili) must call these instead of re-implementing.
  */
@@ -14,9 +14,31 @@ import {
 
 const MULTI_PART_TITLE_RE = /^(.*)\s-\sP(\d+)【([\s\S]*)】\s*$/;
 
+function cleanUpName(author: string | null | undefined): string {
+  const up = String(author || "").trim();
+  if (!up || up === "未知UP") return "";
+  return up;
+}
+
+/** Pick parentFolder already stamped on items (个人主页 nesting). */
+function inheritParentFolder(
+  items: LibraryGroupItem[],
+  explicit?: string | null,
+): string {
+  const fromMeta = cleanUpName(explicit);
+  if (fromMeta) return fromMeta;
+  for (const it of items) {
+    const p = cleanUpName(it?.parentFolder);
+    if (p) return p;
+  }
+  return "";
+}
+
 export interface SelectionGroupMeta {
   author?: string;
   title?: string;
+  /** Keep 个人主页 nesting when expanding multi-P under a space scan. */
+  parentFolder?: string;
 }
 
 export interface CollectionGroupMeta {
@@ -25,6 +47,7 @@ export interface CollectionGroupMeta {
   name?: string;
   title?: string;
   author?: string;
+  parentFolder?: string;
 }
 
 export interface CollectionGroupContext {
@@ -32,6 +55,12 @@ export interface CollectionGroupContext {
   season_id?: string | number;
   collectionTitleHint?: string;
   authorHint?: string;
+  parentFolder?: string;
+}
+
+export interface UserSpaceGroupMeta {
+  author?: string;
+  mid?: string | number;
 }
 
 /** Minimal view shape for ugc_season stamping (Bilibili view/detail). */
@@ -58,6 +87,33 @@ function resolveSeriesTitleLocal(item: LibraryGroupItem | null | undefined): str
   return String(item?.bvid || "untitled").trim() || "untitled";
 }
 
+/**
+ * Stamp 个人主页 nesting: top-level folder = UP name.
+ * Singles sit under UP; later selection/collection meta nests one level deeper.
+ */
+export function attachUserSpaceGroupMeta<T extends LibraryGroupItem>(
+  items: T[] | null | undefined,
+  meta: UserSpaceGroupMeta = {},
+): T[] {
+  const list = items || [];
+  const author =
+    cleanUpName(meta.author)
+    || cleanUpName(list.find((it) => cleanUpName(it?.author))?.author)
+    || "";
+  const mid = String(meta.mid || "").trim();
+  if (!author && !mid) return list.map((it) => ({ ...it }));
+  const parentFolder = author || String(list[0]?.parentFolder || "").trim();
+  return list.map((it) => {
+    const itemAuthor = cleanUpName(it.author) || author;
+    return {
+      ...it,
+      author: itemAuthor || it.author,
+      parentFolder: parentFolder || it.parentFolder,
+      spaceMid: mid || it.spaceMid,
+    };
+  });
+}
+
 /** Stamp 视频选集 fields: groupType/groupKey/groupFolder/videoTitle. */
 export function attachSelectionGroupMeta<T extends LibraryGroupItem>(
   items: T[] | null | undefined,
@@ -71,7 +127,11 @@ export function attachSelectionGroupMeta<T extends LibraryGroupItem>(
     || "";
   const bvid = String(list[0]?.bvid || "").trim();
   const groupKey = bvid ? `selection:${bvid}` : "selection:unknown";
-  const groupFolder = buildUpFolderLabel(author, videoTitle);
+  const parentFolder = inheritParentFolder(list, meta.parentFolder);
+  // Nested under UP → leaf is 选集名 only; flat mode keeps "UP 选集名".
+  const groupFolder = parentFolder
+    ? (videoTitle || "未命名视频")
+    : buildUpFolderLabel(author, videoTitle);
   return list.map((it) => ({
     ...it,
     author: String(it.author || "").trim() || author,
@@ -79,6 +139,8 @@ export function attachSelectionGroupMeta<T extends LibraryGroupItem>(
     groupType: "selection" as const,
     groupKey,
     groupFolder,
+    parentFolder: parentFolder || it.parentFolder,
+    spaceMid: it.spaceMid,
   }));
 }
 
@@ -103,7 +165,10 @@ export function attachCollectionGroupMeta<T extends LibraryGroupItem>(
     mid && sid
       ? `collection:${mid}/${sid}`
       : `collection:${shortUrl || collectionName}`;
-  const groupFolder = buildUpFolderLabel(author, collectionName);
+  const parentFolder = inheritParentFolder(list, meta.parentFolder || ctx.parentFolder);
+  const groupFolder = parentFolder
+    ? (collectionName || "未命名合集")
+    : buildUpFolderLabel(author, collectionName);
   return list.map((it) => ({
     ...it,
     author: String(it.author || "").trim() || author,
@@ -114,6 +179,8 @@ export function attachCollectionGroupMeta<T extends LibraryGroupItem>(
     collectionMid: mid,
     collectionSid: sid,
     collectionShortUrl: shortUrl,
+    parentFolder: parentFolder || it.parentFolder,
+    spaceMid: it.spaceMid,
   }));
 }
 
@@ -132,7 +199,10 @@ export function applyUgcSeasonToItem<T extends LibraryGroupItem>(
   const collectionName = String(season.title || item.collectionName || "未命名合集").trim();
   const shortUrl = buildCollectionShortUrl(mid, sid);
   const groupKey = `collection:${mid}/${sid}`;
-  const groupFolder = buildUpFolderLabel(author, collectionName);
+  const parentFolder = cleanUpName(item.parentFolder);
+  const groupFolder = parentFolder
+    ? collectionName
+    : buildUpFolderLabel(author, collectionName);
   return {
     ...item,
     author: author || item.author,
@@ -143,6 +213,7 @@ export function applyUgcSeasonToItem<T extends LibraryGroupItem>(
     collectionMid: String(mid),
     collectionSid: String(sid),
     collectionShortUrl: shortUrl,
+    parentFolder: parentFolder || item.parentFolder,
   };
 }
 
@@ -209,6 +280,8 @@ export function mergeGroupFields<T extends LibraryGroupItem>(
   if (source.groupType) next.groupType = source.groupType;
   if (source.groupKey) next.groupKey = source.groupKey;
   if (source.groupFolder) next.groupFolder = source.groupFolder;
+  if (source.parentFolder) next.parentFolder = source.parentFolder;
+  if (source.spaceMid != null && source.spaceMid !== "") next.spaceMid = source.spaceMid;
   if (source.collectionName) next.collectionName = source.collectionName;
   if (source.collectionMid != null) next.collectionMid = source.collectionMid;
   if (source.collectionSid != null) next.collectionSid = source.collectionSid;

@@ -1,8 +1,18 @@
 /**
- * Library list grouping for 视频选集 / 合集 folder UI.
+ * Library list grouping for 视频选集 / 合集 / 个人主页 folder UI.
+ *
+ * 个人主页 nesting:
+ *   📁 UP名称
+ *     · 普通单视频 (items)
+ *     📁 视频选集名 → P*
+ *     📁 合集名 → 各集
+ * Download paths mirror the same segments under loop-bilibili-subbatch/.
  */
 
 export type LibraryGroupType = "selection" | "collection" | "single";
+
+/** Folder UI kind; "space" is the top-level UP folder for 个人主页. */
+export type LibraryFolderKind = LibraryGroupType | "space";
 
 export interface LibraryGroupItem {
   bvid?: string;
@@ -13,7 +23,15 @@ export interface LibraryGroupItem {
   selected?: boolean;
   groupType?: LibraryGroupType | string;
   groupKey?: string;
+  /** Leaf folder label (选集名/合集名, or flat "UP 名" when not nested). */
   groupFolder?: string;
+  /**
+   * Top-level UP folder for 个人主页 nesting.
+   * When set, export path is parentFolder[/leaf]/file and UI nests under UP.
+   */
+  parentFolder?: string;
+  /** Space mid for stable space: groupKey. */
+  spaceMid?: string | number;
   videoTitle?: string;
   collectionName?: string;
   collectionMid?: string | number;
@@ -31,33 +49,55 @@ export interface LibraryEntry {
 export interface LibraryFolderGroup {
   type: "folder";
   groupKey: string;
-  groupType: LibraryGroupType;
+  groupType: LibraryFolderKind;
   folderLabel: string;
   collapsed: boolean;
   selectedCount: number;
   total: number;
   /** all | none | partial */
   checkState: "all" | "none" | "partial";
+  /**
+   * Leaf entries under this folder (all descendants for space parents;
+   * direct children for selection/collection).
+   */
   children: LibraryEntry[];
+  /**
+   * Nested render tree (space parent only). When present, UI should render
+   * these instead of flattening `children` as item rows.
+   */
+  nodes?: LibraryRenderNode[];
+  /** Nesting depth hint for UI indent (0 = top). */
+  depth?: number;
 }
 
 export interface LibraryFlatItem {
   type: "item";
   entry: LibraryEntry;
+  depth?: number;
 }
 
 export type LibraryRenderNode = LibraryFolderGroup | LibraryFlatItem;
 
 const MULTI_PART_TITLE_RE = /^(.*)\s-\sP(\d+)【([\s\S]*)】\s*$/;
 
+function cleanAuthor(author: string | null | undefined): string {
+  const up = String(author || "").trim();
+  if (!up || up === "未知UP") return "";
+  return up;
+}
+
+function cleanParent(parent: string | null | undefined): string {
+  return cleanAuthor(parent);
+}
+
 /** "UP名称 标题/合集名"；无 UP 时只保留名称（避免下载落到「未知UP …」）。 */
 export function buildUpFolderLabel(
   author: string | null | undefined,
   name: string | null | undefined,
 ): string {
-  const up = String(author || "").trim();
+  const up = cleanAuthor(author);
   const n = String(name || "").trim() || "未命名";
-  if (!up || up === "未知UP") return n;
+  if (!up) return n;
   return `${up} ${n}`;
 }
 
@@ -86,6 +126,15 @@ export function inferLibraryGroupType(item: LibraryGroupItem | null | undefined)
   return "single";
 }
 
+/** Stable key for the top-level 个人主页 UP folder. */
+export function resolveSpaceGroupKey(item: LibraryGroupItem | null | undefined): string {
+  const mid = String(item?.spaceMid || "").trim();
+  if (mid) return `space:${mid}`;
+  const parent = cleanParent(item?.parentFolder);
+  if (parent) return `space:${parent}`;
+  return "";
+}
+
 export function resolveLibraryGroupKey(item: LibraryGroupItem | null | undefined): string {
   if (item?.groupKey) return String(item.groupKey);
   const kind = inferLibraryGroupType(item);
@@ -104,23 +153,81 @@ export function resolveLibraryGroupKey(item: LibraryGroupItem | null | undefined
   return `single:${bvid}:P${page}`;
 }
 
+/**
+ * Leaf folder label for UI (selection/collection name).
+ * When under parentFolder, omits UP prefix (parent folder already shows UP).
+ * Flat mode keeps "UP 名称" for 选集/合集.
+ */
 export function resolveLibraryFolderLabel(item: LibraryGroupItem | null | undefined): string {
   const existing = String(item?.groupFolder || "").trim();
-  // Keep a real UP-named folder; ignore stale "未知UP …" so download can recompute.
-  if (existing && !/^未知UP\b/.test(existing)) return existing;
+  const parent = cleanParent(item?.parentFolder);
+  // Keep a real non-未知UP label; ignore stale "未知UP …" so download can recompute.
+  if (existing && !/^未知UP\b/.test(existing)) {
+    // If nested under UP and groupFolder still has "UP name" prefix, strip for leaf.
+    if (parent && existing.startsWith(`${parent} `)) {
+      const leaf = existing.slice(parent.length + 1).trim();
+      if (leaf) return leaf;
+    }
+    return existing;
+  }
   const kind = inferLibraryGroupType(item);
   const author = item?.author;
   if (kind === "collection") {
-    return buildUpFolderLabel(author, item?.collectionName || "未命名合集");
+    const name = String(item?.collectionName || "未命名合集").trim() || "未命名合集";
+    return parent ? name : buildUpFolderLabel(author, name);
   }
   if (kind === "selection") {
     const title = String(item?.videoTitle || "").trim()
       || String(item?.title || "").replace(/\s-\sP\d+【[\s\S]*】\s*$/, "").trim()
       || item?.bvid
       || "未命名视频";
-    return buildUpFolderLabel(author, title);
+    return parent ? title : buildUpFolderLabel(author, title);
   }
+  // single
+  if (parent) return parent;
   return buildUpFolderLabel(author, item?.title || item?.bvid || "未命名视频");
+}
+
+/**
+ * Path segments under loop-bilibili-subbatch (not including root or file).
+ *
+ * 个人主页:
+ *   single     → [UP]
+ *   selection  → [UP, 选集名]
+ *   collection → [UP, 合集名]
+ * Flat (非主页):
+ *   → [resolveLibraryFolderLabel]  (keeps "UP 名称" one segment)
+ */
+export function resolveFolderSegments(item: LibraryGroupItem | null | undefined): string[] {
+  const parent = cleanParent(item?.parentFolder);
+  const kind = inferLibraryGroupType(item);
+
+  if (parent) {
+    if (kind === "collection") {
+      const name =
+        String(item?.collectionName || "").trim()
+        || String(item?.groupFolder || "").trim()
+        || "未命名合集";
+      // groupFolder may already be leaf or "UP name"
+      const leaf = name.startsWith(`${parent} `) ? name.slice(parent.length + 1).trim() || name : name;
+      return [parent, leaf || "未命名合集"];
+    }
+    if (kind === "selection") {
+      const title =
+        String(item?.videoTitle || "").trim()
+        || String(item?.groupFolder || "").trim()
+        || String(item?.title || "").replace(/\s-\sP\d+【[\s\S]*】\s*$/, "").trim()
+        || item?.bvid
+        || "未命名视频";
+      const leaf = title.startsWith(`${parent} `) ? title.slice(parent.length + 1).trim() || title : title;
+      return [parent, leaf || "未命名视频"];
+    }
+    // single under UP — files sit directly in the UP folder
+    return [parent];
+  }
+
+  const label = resolveLibraryFolderLabel(item);
+  return label ? [label] : [];
 }
 
 /**
@@ -220,18 +327,21 @@ function effectiveGroupKey(
   return resolveLibraryGroupKey(item);
 }
 
+function folderCheckState(selectedCount: number, total: number): "all" | "none" | "partial" {
+  if (selectedCount === 0) return "none";
+  if (selectedCount === total) return "all";
+  return "partial";
+}
+
 /**
- * Group filtered library entries into folders (selection/collection) + flat singles.
- * Folder order follows first appearance of each groupKey.
- *
- * - 视频选集: multi-P same BV (or groupType=selection)
- * - 合集: groupType/collectionSid/… (even a single captured episode) auto-folders
+ * Build flat folder/item nodes for a list that does NOT use space parent nesting
+ * (or for entries already scoped under one parent).
  */
-export function buildLibraryRenderNodes(
+function buildLeafRenderNodes(
   entries: LibraryEntry[],
-  collapsedMap: Record<string, boolean> | null | undefined = {},
+  collapsedMap: Record<string, boolean>,
+  depth: number,
 ): LibraryRenderNode[] {
-  const collapsed = collapsedMap || {};
   const multiBvids = bvidMultiPageKeys(entries);
   const collectionKeys = collectionFolderKeys(entries);
   const folderBuckets = new Map<string, LibraryEntry[]>();
@@ -247,12 +357,10 @@ export function buildLibraryRenderNodes(
   const nodes: LibraryRenderNode[] = [];
   const emittedFolders = new Set<string>();
 
-  // Interleave: walk original entries order, emit folder once when first child appears,
-  // emit singles in place.
   for (const entry of entries) {
     const kind = effectiveGroupType(entry.item, multiBvids, collectionKeys);
     if (kind === "single") {
-      nodes.push({ type: "item", entry });
+      nodes.push({ type: "item", entry, depth });
       continue;
     }
     const key = effectiveGroupKey(entry.item, multiBvids, collectionKeys);
@@ -261,10 +369,6 @@ export function buildLibraryRenderNodes(
     const children = folderBuckets.get(key) || [entry];
     const selectedCount = children.filter((c) => c.item.selected).length;
     const total = children.length;
-    let checkState: "all" | "none" | "partial" = "none";
-    if (selectedCount === 0) checkState = "none";
-    else if (selectedCount === total) checkState = "all";
-    else checkState = "partial";
     // Prefer a child that already has a good folder label / author (avoid 未知UP).
     const labeled =
       children.map((c) => c.item).find((it) => it.groupFolder && !/^未知UP\b/.test(String(it.groupFolder)))
@@ -275,12 +379,108 @@ export function buildLibraryRenderNodes(
       groupKey: key,
       groupType: kind,
       folderLabel: resolveLibraryFolderLabel(labeled),
-      collapsed: !!collapsed[key],
+      collapsed: !!collapsedMap[key],
       selectedCount,
       total,
-      checkState,
+      checkState: folderCheckState(selectedCount, total),
       children,
+      depth,
     });
+  }
+
+  return nodes;
+}
+
+/**
+ * Group filtered library entries into folders (selection/collection/space) + flat singles.
+ * Folder order follows first appearance of each groupKey.
+ *
+ * - 个人主页: items with parentFolder nest under 📁 UP → (singles | 选集 | 合集)
+ * - 视频选集: multi-P same BV (or groupType=selection)
+ * - 合集: groupType/collectionSid/… (even a single captured episode) auto-folders
+ */
+export function buildLibraryRenderNodes(
+  entries: LibraryEntry[],
+  collapsedMap: Record<string, boolean> | null | undefined = {},
+): LibraryRenderNode[] {
+  const collapsed = collapsedMap || {};
+  const spaceBuckets = new Map<string, { label: string; entries: LibraryEntry[] }>();
+  const flatEntries: LibraryEntry[] = [];
+
+  for (const entry of entries) {
+    const spaceKey = resolveSpaceGroupKey(entry.item);
+    const parent = cleanParent(entry.item?.parentFolder);
+    if (spaceKey && parent) {
+      if (!spaceBuckets.has(spaceKey)) {
+        spaceBuckets.set(spaceKey, { label: parent, entries: [] });
+      }
+      const bucket = spaceBuckets.get(spaceKey)!;
+      if (parent && parent !== "未知UP") bucket.label = parent;
+      bucket.entries.push(entry);
+    } else {
+      flatEntries.push(entry);
+    }
+  }
+
+  // Pre-build space folder nodes and flat leaf nodes.
+  const spaceNodeByKey = new Map<string, LibraryFolderGroup>();
+  for (const [spaceKey, bucket] of spaceBuckets) {
+    const nested = buildLeafRenderNodes(bucket.entries, collapsed, 1);
+    const selectedCount = bucket.entries.filter((c) => c.item.selected).length;
+    const total = bucket.entries.length;
+    spaceNodeByKey.set(spaceKey, {
+      type: "folder",
+      groupKey: spaceKey,
+      groupType: "space",
+      folderLabel: bucket.label,
+      collapsed: !!collapsed[spaceKey],
+      selectedCount,
+      total,
+      checkState: folderCheckState(selectedCount, total),
+      children: bucket.entries,
+      nodes: nested,
+      depth: 0,
+    });
+  }
+  const flatNodes = buildLeafRenderNodes(flatEntries, collapsed, 0);
+
+  // Walk original entry order to interleave space folders with flat nodes.
+  const nodes: LibraryRenderNode[] = [];
+  const emittedSpace = new Set<string>();
+  const emittedFlatKeys = new Set<string>();
+
+  const flatNodeKey = (node: LibraryRenderNode): string => {
+    if (node.type === "item") return `item:${node.entry.index}`;
+    return `folder:${node.groupKey}`;
+  };
+
+  // Map each flat entry index → the leaf node that owns it (for order emission).
+  const flatOwnerByIndex = new Map<number, LibraryRenderNode>();
+  for (const node of flatNodes) {
+    if (node.type === "item") {
+      flatOwnerByIndex.set(node.entry.index, node);
+    } else {
+      for (const child of node.children) {
+        flatOwnerByIndex.set(child.index, node);
+      }
+    }
+  }
+
+  for (const entry of entries) {
+    const spaceKey = resolveSpaceGroupKey(entry.item);
+    if (spaceKey && cleanParent(entry.item?.parentFolder)) {
+      if (emittedSpace.has(spaceKey)) continue;
+      emittedSpace.add(spaceKey);
+      const spaceNode = spaceNodeByKey.get(spaceKey);
+      if (spaceNode) nodes.push(spaceNode);
+      continue;
+    }
+    const owner = flatOwnerByIndex.get(entry.index);
+    if (!owner) continue;
+    const k = flatNodeKey(owner);
+    if (emittedFlatKeys.has(k)) continue;
+    emittedFlatKeys.add(k);
+    nodes.push(owner);
   }
 
   return nodes;
@@ -291,7 +491,25 @@ export function setGroupSelection(
   groupKey: string,
   selected: boolean,
 ): void {
+  const key = String(groupKey || "").trim();
+  if (!key) return;
+
+  if (key.startsWith("space:")) {
+    for (const item of items) {
+      if (resolveSpaceGroupKey(item) === key) item.selected = selected;
+    }
+    return;
+  }
+
   for (const item of items) {
-    if (resolveLibraryGroupKey(item) === groupKey) item.selected = selected;
+    if (resolveLibraryGroupKey(item) === key) item.selected = selected;
+    // multip without groupKey still folders as selection:bvid via effective key —
+    // also match selection:BV when item bvid equals and multi-P heuristic would apply.
+    if (key.startsWith("selection:")) {
+      const bvid = key.slice("selection:".length);
+      if (bvid && String(item.bvid || "").trim() === bvid) {
+        item.selected = selected;
+      }
+    }
   }
 }

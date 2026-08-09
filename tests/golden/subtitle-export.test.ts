@@ -20,6 +20,7 @@ import {
   setGroupSelection,
   attachCollectionGroupMeta,
   attachSelectionGroupMeta,
+  attachUserSpaceGroupMeta,
   applyUgcSeasonToItem,
   applyUgcSeasonToItems,
   buildGroupMetaPatches,
@@ -27,6 +28,8 @@ import {
   mergeGroupFields,
   suggestCaptureMode,
   buildVideoShortUrl,
+  resolveFolderSegments,
+  resolveExportFolderSegments,
   upsertCollectionExportIndex,
   upsertExportIndexMap,
   upsertIndexForExportItem,
@@ -535,5 +538,108 @@ describe("library folder groups", () => {
       expect(nodes[1].children).toHaveLength(2);
       expect(nodes[1].checkState).toBe("partial");
     }
+  });
+
+  it("个人主页: UP top folder nests singles / 选集 / 合集; download path mirrors", () => {
+    const space = attachUserSpaceGroupMeta(
+      [
+        { bvid: "BV1SINGLE", page: 1, title: "日常随拍", author: "示例UP", groupType: "single" as const, selected: true },
+        { bvid: "BV1SEL", page: 1, title: "教程 - P1【开场】", author: "示例UP", part: "开场", selected: true },
+        { bvid: "BV1SEL", page: 2, title: "教程 - P2【实战】", author: "示例UP", part: "实战", selected: false },
+        {
+          bvid: "BV1COL1",
+          page: 1,
+          title: "合集第1集",
+          author: "示例UP",
+          selected: true,
+        },
+        {
+          bvid: "BV1COL2",
+          page: 1,
+          title: "合集第2集",
+          author: "示例UP",
+          selected: true,
+        },
+      ],
+      { author: "示例UP", mid: "12345" },
+    );
+
+    expect(space.every((it) => it.parentFolder === "示例UP")).toBe(true);
+    expect(space.every((it) => String(it.spaceMid) === "12345")).toBe(true);
+
+    // Expand multi-P under space → leaf folder without re-prefixing UP
+    const withSel = [
+      space[0],
+      ...attachSelectionGroupMeta([space[1], space[2]], {
+        author: "示例UP",
+        title: "完整教程",
+      }),
+      ...attachCollectionGroupMeta([space[3], space[4]], {
+        mid: "12345",
+        season_id: "99",
+        name: "进阶合集",
+        author: "示例UP",
+      }),
+    ];
+    expect(withSel[1].groupFolder).toBe("完整教程");
+    expect(withSel[1].parentFolder).toBe("示例UP");
+    expect(withSel[3].groupFolder).toBe("进阶合集");
+    expect(withSel[3].parentFolder).toBe("示例UP");
+
+    // Path segments
+    expect(resolveFolderSegments(withSel[0])).toEqual(["示例UP"]);
+    expect(resolveFolderSegments(withSel[1])).toEqual(["示例UP", "完整教程"]);
+    expect(resolveFolderSegments(withSel[3])).toEqual(["示例UP", "进阶合集"]);
+
+    // Download paths
+    expect(buildSubtitleExportRelativePath(withSel[0], "txt")).toBe(
+      `${SUBTITLE_EXPORT_ROOT}/${safePathSegment("示例UP")}/${joinFileName("日常随拍", "txt")}`,
+    );
+    expect(buildSubtitleExportRelativePath(withSel[1], "txt")).toBe(
+      `${SUBTITLE_EXPORT_ROOT}/${safePathSegment("示例UP")}/${safePathSegment("完整教程")}/${joinFileName("P1开场", "txt")}`,
+    );
+    expect(buildSubtitleExportRelativePath(withSel[3], "txt")).toBe(
+      `${SUBTITLE_EXPORT_ROOT}/${safePathSegment("示例UP")}/${safePathSegment("进阶合集")}/${joinFileName("合集第1集", "txt")}`,
+    );
+    expect(resolveExportFolderSegments(withSel[1])).toEqual([
+      safePathSegment("示例UP"),
+      safePathSegment("完整教程"),
+    ]);
+
+    // UI: one space folder with nested nodes
+    const entries = withSel.map((item, index) => ({ item, index }));
+    const nodes = buildLibraryRenderNodes(entries, {});
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0].type).toBe("folder");
+    if (nodes[0].type !== "folder") return;
+    expect(nodes[0].groupType).toBe("space");
+    expect(nodes[0].folderLabel).toBe("示例UP");
+    expect(nodes[0].groupKey).toBe("space:12345");
+    expect(nodes[0].total).toBe(5);
+    expect(nodes[0].nodes).toBeDefined();
+    const nested = nodes[0].nodes || [];
+    // single + selection folder + collection folder
+    expect(nested.map((n) => n.type)).toEqual(["item", "folder", "folder"]);
+    const selFolder = nested[1];
+    const colFolder = nested[2];
+    expect(selFolder.type === "folder" && selFolder.folderLabel).toBe("完整教程");
+    expect(colFolder.type === "folder" && colFolder.folderLabel).toBe("进阶合集");
+    expect(selFolder.type === "folder" && selFolder.children).toHaveLength(2);
+    expect(colFolder.type === "folder" && colFolder.children).toHaveLength(2);
+
+    // Space checkbox selects all
+    setGroupSelection(withSel, "space:12345", false);
+    expect(withSel.every((it) => !it.selected)).toBe(true);
+    setGroupSelection(withSel, "space:12345", true);
+    expect(withSel.every((it) => it.selected)).toBe(true);
+  });
+
+  it("attachUserSpaceGroupMeta is pure and reuses author from items", () => {
+    const stamped = attachUserSpaceGroupMeta(
+      [{ bvid: "BV1", title: "a", author: "KurTips" }],
+      { mid: "1" },
+    );
+    expect(stamped[0].parentFolder).toBe("KurTips");
+    expect(stamped[0].spaceMid).toBe("1");
   });
 });

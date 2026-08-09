@@ -2,19 +2,29 @@
  * Subtitle batch download layout helpers.
  *
  * Downloads land under the browser download directory as:
+ *   loop-bilibili-subbatch/<folder…>/<file>.{ext}
+ *
+ * Flat (视频选集 / 合集 独立模式):
  *   loop-bilibili-subbatch/<UP 视频名|合集名>/<file>.{ext}
+ *
+ * 个人主页 nested (parentFolder = UP 名):
+ *   loop-bilibili-subbatch/<UP>/<file>.{ext}                 — 普通单视频
+ *   loop-bilibili-subbatch/<UP>/<选集名>/P*.{ext}            — 视频选集
+ *   loop-bilibili-subbatch/<UP>/<合集名>/<单集标题>.{ext}    — 合集
+ *
  * plus a root index.md mapping (same shape for 选集 / 合集):
  *   - 视频选集/单视频: <UP> www.bilibili.com/video/BVxxx <视频标题>
  *   - 合集: <UP> space.bilibili.com/{mid}/lists/{sid} <合集名>
  * Same BV / 合集短地址 upsert 覆盖名称与作者。
  *
- * Folder labels MUST match the 字幕 panel (resolveLibraryFolderLabel).
+ * Folder segments MUST match the 字幕 panel nesting.
  */
 
 import {
   buildCollectionShortUrl,
   buildUpFolderLabel,
   inferLibraryGroupType,
+  resolveFolderSegments,
   resolveLibraryFolderLabel,
   type LibraryGroupItem,
 } from "../library/groups";
@@ -131,11 +141,19 @@ export function resolvePartLabel(item: SubtitleExportItem | null | undefined): s
  * File stem inside the export folder.
  * - 视频选集: P33【动画篇】6.5 …
  * - 合集: 单集视频标题（各 BV 不同）
- * - 单视频: P1 或带 part 的 P{n}{part}
+ * - 个人主页单视频 (parentFolder): 视频标题（直接落在 UP 文件夹下）
+ * - 其它单视频: P1 或带 part 的 P{n}{part}
  */
 export function resolveSubtitleFileStem(item: SubtitleExportItem | null | undefined): string {
   const kind = inferLibraryGroupType(item);
   if (kind === "collection") {
+    const title = String(item?.title || "").trim();
+    if (title) return title;
+    return String(item?.bvid || "video").trim() || "video";
+  }
+  // 个人主页普通单视频：文件名用标题，路径为 UP/标题.ext
+  const parent = String(item?.parentFolder || "").trim();
+  if (kind === "single" && parent && parent !== "未知UP") {
     const title = String(item?.title || "").trim();
     if (title) return title;
     return String(item?.bvid || "video").trim() || "video";
@@ -146,23 +164,38 @@ export function resolveSubtitleFileStem(item: SubtitleExportItem | null | undefi
 }
 
 /**
- * Folder under loop-bilibili-subbatch — same rule as 字幕 panel folder label.
- * Prefer non-未知UP groupFolder; otherwise recompute from author + name.
+ * Display / legacy folder name (unsanitized — for UI / describe).
+ * Nested 个人主页 paths join with " / " (UP / 选集名).
+ * Prefer non-未知UP groupFolder when not nested; otherwise recompute.
  */
 export function resolveExportFolderName(item: SubtitleExportItem | null | undefined): string {
+  const raw = resolveFolderSegments(item);
+  if (raw.length > 1) return raw.join(" / ");
+  if (raw.length === 1) return raw[0];
   const folder = String(item?.groupFolder || "").trim();
   if (folder && !/^未知UP\b/.test(folder)) return folder;
-  // Keep UI and disk names aligned.
   return resolveLibraryFolderLabel(item);
+}
+
+/**
+ * Sanitized path segments under loop-bilibili-subbatch (no root, no file).
+ * Mirrors 字幕 panel nesting for 个人主页.
+ */
+export function resolveExportFolderSegments(
+  item: SubtitleExportItem | null | undefined,
+): string[] {
+  const raw = resolveFolderSegments(item);
+  return raw.map((s) => safePathSegment(s)).filter(Boolean);
 }
 
 export function buildSubtitleExportRelativePath(
   item: SubtitleExportItem | null | undefined,
   ext: string,
 ): string {
-  const series = safePathSegment(resolveExportFolderName(item));
+  const segments = resolveExportFolderSegments(item);
   const fileName = joinFileName(resolveSubtitleFileStem(item), ext);
-  return `${SUBTITLE_EXPORT_ROOT}/${series}/${fileName}`;
+  if (!segments.length) return `${SUBTITLE_EXPORT_ROOT}/${fileName}`;
+  return `${SUBTITLE_EXPORT_ROOT}/${segments.join("/")}/${fileName}`;
 }
 
 export function buildSubtitleExportIndexPath(): string {
@@ -332,7 +365,7 @@ export function renderExportIndexMd(map: SubtitleExportIndexMap | null | undefin
 }
 
 /**
- * Fill author / groupFolder from sibling items so download matches 字幕 panel.
+ * Fill author / groupFolder / parentFolder from sibling items so download matches 字幕 panel.
  * Fixes 未知UP when list API omitted upper name but peers (or UI folder) already know it.
  */
 export function normalizeExportItem(
@@ -352,6 +385,18 @@ export function normalizeExportItem(
     : peerAuthor || String(base.author || "").trim();
 
   if (author) base.author = author;
+
+  // Inherit 个人主页 UP folder from peers when missing.
+  if (!String(base.parentFolder || "").trim() || base.parentFolder === "未知UP") {
+    const peerParent = sameGroup
+      .map((p) => String(p?.parentFolder || "").trim())
+      .find((p) => p && p !== "未知UP");
+    if (peerParent) base.parentFolder = peerParent;
+  }
+  if (base.spaceMid == null || base.spaceMid === "") {
+    const peerMid = sameGroup.map((p) => p?.spaceMid).find((m) => m != null && m !== "");
+    if (peerMid != null && peerMid !== "") base.spaceMid = peerMid;
+  }
 
   const peerFolder = sameGroup
     .map((p) => String(p?.groupFolder || "").trim())
@@ -403,11 +448,13 @@ export function describeSubtitleExport(item: SubtitleExportItem | null | undefin
   const normalized = normalizeExportItem(item, item ? [item] : []);
   const seriesTitle = resolveExportFolderName(normalized);
   const fileStem = resolveSubtitleFileStem(normalized);
+  const folderSegments = resolveExportFolderSegments(normalized);
   return {
     bvid: String(normalized.bvid || "").trim(),
     seriesTitle,
     fileStem,
-    folderSegment: safePathSegment(seriesTitle),
+    folderSegment: folderSegments.join("/") || safePathSegment(seriesTitle),
+    folderSegments,
     fileSegment: safePathSegment(fileStem, 160),
     relativePath: buildSubtitleExportRelativePath(normalized, ext),
     indexPath: buildSubtitleExportIndexPath(),
