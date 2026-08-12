@@ -32,6 +32,12 @@
 // ==/UserScript==
 
 /**
+ * v6.9.3 — 流程后处理 LLM 改为有序队列：编号 + 拖拽排序，运行顺序与队列一致。
+ * v6.9.2 — 流程抽屉与工作台对齐：预处理 / 对话 / 后处理。
+ * v6.9.1 — 对话增加字幕上下文压缩与旧轮记忆压缩；超长不再只砍开头。
+ * v6.9.0 — AI 工作台新增「对话」阶段（预处理与后处理之间）：对着当前字幕多轮提问，支持 / 命令。
+ * v6.8.1 — 重写 HTML 阅读页内置 Prompt：只提取对理解这一期真正有用的内容，去掉排版清单。
+ * v6.8.0 — 后处理新增『HTML 阅读页』：模型只产出语义 HTML，本地用 Folio 壳自动渲染并可导出独立页面。
  * v6.6.7 — 字幕库任务条：抓取/扫描可暂停继续；左侧主操作与阅读区导出分层，去掉堆叠按钮。
  * v6.6.6 — 合集扫描展开单元内多分P：带「第一单元」等章节的合集不再只抓每个单元的 P1。
  * v6.6.5 — Catppuccin 主题切换：设置 → 外观可选 Latte / Frappé / Macchiato / Mocha（默认 Mocha），本地持久化。
@@ -168,10 +174,27 @@
   const AI_PROFILES_STORE_KEY = "bili-subbatch-ai-profiles-v1";
   const AI_PROFILES_SCHEMA_VERSION = 4;
   const PROMPT_STORE_KEY = "bili-subbatch-prompts-v1";
-  const PROMPT_SCHEMA_VERSION = 6;
+  const PROMPT_SCHEMA_VERSION = 8;
   const DEFAULT_PROMPT_ID = "builtin-mermaid-learning-map";
   const DEFAULT_PREPROCESS_PROMPT_ID = "builtin-subtitle-normalizer";
   const DEFAULT_KNOWLEDGE_PROMPT_ID = "builtin-knowledge-drilldown";
+  const DEFAULT_HTML_FOLIO_PROMPT_ID = "builtin-html-reading-folio";
+  const STUDIO_CHAT_STORE_KEY = "bili-subbatch-studio-chat-v1";
+  const STUDIO_MODEL_STORE_KEY = "bili-subbatch-studio-model-v1";
+  const STUDIO_CHAT_KEEP_RECENT = 8;
+  const STUDIO_CHAT_CONTEXT_CHARS = 12000;
+  const STUDIO_CHAT_MEMORY_CHARS = 2400;
+  const STUDIO_SLASH_COMMANDS = Object.freeze([
+    Object.freeze({ id: "clear", aliases: ["clear", "清空", "new", "新建"], hint: "清空当前对话" }),
+    Object.freeze({ id: "stop", aliases: ["stop", "停止"], hint: "停止生成" }),
+    Object.freeze({ id: "copy", aliases: ["copy", "复制"], hint: "复制上一条回答" }),
+    Object.freeze({ id: "export", aliases: ["export", "导出"], hint: "导出对话为 Markdown" }),
+    Object.freeze({ id: "compress", aliases: ["compress", "压缩"], hint: "立刻压缩旧对话记忆" }),
+    Object.freeze({ id: "memory", aliases: ["memory", "记忆"], hint: "查看当前压缩记忆" }),
+    Object.freeze({ id: "raw", aliases: ["raw", "原文"], hint: "改用原始字幕当上下文" }),
+    Object.freeze({ id: "norm", aliases: ["norm", "规范化"], hint: "改用规范化稿当上下文" }),
+    Object.freeze({ id: "help", aliases: ["help", "帮助"], hint: "列出可用命令" }),
+  ]);
   const PREPROCESS_ENABLED_STORE_KEY = "bili-subbatch-preprocess-enabled-v1";
   const PREPROCESS_MODEL_STORE_KEY = "bili-subbatch-preprocess-model-v1";
   const PREPROCESS_CONCURRENCY_STORE_KEY = "bili-subbatch-preprocess-concurrency-v1";
@@ -180,7 +203,7 @@
   const PREPROCESS_MAX_CHARS_STORE_KEY = "bili-subbatch-preprocess-max-chars-v1";
   const PREPROCESS_RETRIES_STORE_KEY = "bili-subbatch-preprocess-retries-v1";
   const POST_TASKS_STORE_KEY = "bili-subbatch-post-tasks-v1";
-  const POST_TASKS_SCHEMA_VERSION = 1;
+  const POST_TASKS_SCHEMA_VERSION = 2;
   const KNOWLEDGE_MODEL_STORE_KEY = "bili-subbatch-knowledge-model-v1";
   const SHORTCUT_STORE_KEY = "bili-subbatch-shortcuts-v1";
   const SHORTCUT_SCHEMA_VERSION = 2;
@@ -333,6 +356,42 @@
       "BV / 分集：{{bvid}}",
       "发布者：{{author}}",
       "</source_metadata>",
+      "",
+      "<transcript>",
+      "{{subtitle}}",
+      "</transcript>",
+    ].join("\n"),
+  });
+
+  const DEFAULT_HTML_FOLIO_PROMPT = Object.freeze({
+    id: DEFAULT_HTML_FOLIO_PROMPT_ID,
+    stage: "postprocess",
+    name: "HTML 阅读页",
+    hint: "看懂这一期 · 少而准 · 自动渲染",
+    systemPrompt: [
+      "把本期字幕整理成一份「看完能懂」的阅读页。只根据字幕，不补课外知识。",
+      "",
+      "先问自己：读者看完这一页，应该比只听视频多明白什么？只写那个增量。",
+      "按需要取舍，不要凑章节：",
+      "- 这一期在解决什么问题（一句话）",
+      "- 讲者的核心判断或方法，以及它凭什么成立",
+      "- 关键步骤、前提、边界、反例、容易做错的地方",
+      "- 字幕里真实出现过的例子、数字、命令、术语",
+      "- 看完该记住的，最多 3 条",
+      "删口头禅、重复和按时间线复述。不确定的词标「识别存疑」，不要猜。简体中文；术语可留原文。不要写 BV、分P、时间戳。",
+      "",
+      "只输出一个 ```html 代码块，里面恰好一个 <article class=\"bsb-folio\">。",
+      "header：一行 kicker + 一个 h1 + 一段 lede（lede 写「看完能明白什么」，不要空套话）。",
+      "每个 section 一个 h2。标签够用即可：p ul ol li strong mark code pre aside table。",
+      "关键结论用 <aside data-kind=\"key\">，提醒用 note，风险用 warn。步骤用 <ol class=\"steps\">。",
+      "不要 style、script、完整网页、Mermaid、前言后记或思考过程。",
+    ].join("\n"),
+    userPromptTemplate: [
+      "把下面字幕整理成阅读页。只写对理解这一期真正有用的内容。",
+      "",
+      "<source>",
+      "{{title}} · {{bvid}} · {{author}}",
+      "</source>",
       "",
       "<transcript>",
       "{{subtitle}}",
@@ -2936,6 +2995,16 @@
     preprocessMaxChars: loadBoundedNumberSetting(PREPROCESS_MAX_CHARS_STORE_KEY, PREPROCESS_DEFAULT_MAX_CHARS, 8000, 60000),
     preprocessRetries: loadBoundedNumberSetting(PREPROCESS_RETRIES_STORE_KEY, PREPROCESS_DEFAULT_RETRIES, 0, 4),
     preprocessRun: null, // shared subtitle normalization stage for current session
+    studioBusy: false,
+    studioRuntime: null,
+    studioMessages: [],
+    studioMemory: "",
+    studioMemoryUntilId: "",
+    studioMemoryTurns: 0,
+    studioLastContextMeta: null,
+    studioContextPref: "auto", // auto | raw | processed
+    studioModelId: String(storageGet(STUDIO_MODEL_STORE_KEY, "") || ""),
+    studioSlashIndex: 0,
     forcePreprocessOnce: false,
     aiViewingPreprocess: false, // legacy bridge; v5.8 input preview lives in drawer
     postTasks: [], // output artifacts: each POST Prompt + selected LLMs
@@ -3061,7 +3130,7 @@
       dock: null, // null | 'left' | 'right'
       dockExpanded: false,
       view: "ai", // ai | subs | knowledge | settings
-      aiStage: "preprocess", // preprocess | postprocess
+      aiStage: "preprocess", // preprocess | chat | postprocess
       settingsTab: "prompt", // prompt | llm | shortcuts | appearance
       promptStage: "preprocess", // preprocess | postprocess | knowledge
       noteFont: 17,
@@ -3123,7 +3192,7 @@
         dock: o.dock === "left" || o.dock === "right" ? o.dock : null,
         dockExpanded: false,
         view: ["ai", "subs", "knowledge", "settings"].includes(o.view) ? o.view : "ai",
-        aiStage: ["preprocess", "postprocess"].includes(o.aiStage) ? o.aiStage : "preprocess",
+        aiStage: ["preprocess", "chat", "postprocess"].includes(o.aiStage) ? o.aiStage : "preprocess",
         settingsTab: ["prompt", "llm", "shortcuts", "appearance"].includes(o.settingsTab) ? o.settingsTab : "prompt",
         promptStage: ["preprocess", "postprocess", "knowledge"].includes(o.promptStage) ? o.promptStage : "preprocess",
         noteFont: Math.max(NOTE_FONT_MIN, Math.min(NOTE_FONT_MAX, Number(o.noteFont) || 17)),
@@ -4020,6 +4089,134 @@
       #${PANEL_ID} .bsb-empty strong { color: var(--ctp-subtext1); font-size: 13px; }
       #${PANEL_ID} .bsb-empty span { font-size: 12px; max-width: 280px; line-height: 1.45; }
 
+      /* ── HTML Folio：后处理阅读页（模型只产语义，壳负责版式） ── */
+      #${PANEL_ID} .bsb-folio-shell {
+        display: grid; grid-template-columns: minmax(0, 11.5rem) minmax(0, 1fr);
+        gap: 0; min-height: 100%;
+        background: var(--ctp-base);
+      }
+      #${PANEL_ID} .bsb-folio-toc {
+        position: sticky; top: 0; align-self: start;
+        padding: 22px 14px 28px 8px; max-height: 100%; overflow: auto;
+        border-right: 1px solid color-mix(in srgb, var(--ctp-surface0) 80%, transparent);
+      }
+      #${PANEL_ID} .bsb-folio-toc strong {
+        display: block; margin: 0 0 10px; font-size: 10px; font-weight: 700;
+        letter-spacing: .14em; text-transform: uppercase; color: var(--ctp-overlay0);
+      }
+      #${PANEL_ID} .bsb-folio-toc a {
+        display: block; padding: 5px 0 5px 8px; margin: 0;
+        border-left: 1px solid color-mix(in srgb, var(--ctp-overlay0) 28%, transparent);
+        color: var(--ctp-overlay1); text-decoration: none; font-size: 11.5px; line-height: 1.4;
+      }
+      #${PANEL_ID} .bsb-folio-toc a:hover { color: var(--ctp-text); }
+      #${PANEL_ID} .bsb-folio-toc a.is-current {
+        color: var(--ctp-text); border-left-color: var(--ctp-lavender);
+      }
+      #${PANEL_ID} .bsb-folio-frame { min-width: 0; padding: 28px 28px 64px; }
+      #${PANEL_ID} .bsb-folio {
+        max-width: 40rem; margin: 0 auto;
+        color: var(--ctp-text);
+        font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Songti SC", "Source Han Serif SC", "Noto Serif SC", Georgia, serif;
+        font-size: calc(var(--bsb-note-font) + 1px); line-height: 1.72; letter-spacing: .005em;
+      }
+      #${PANEL_ID} .bsb-folio header { margin: 0 0 2.2em; }
+      #${PANEL_ID} .bsb-folio .kicker {
+        margin: 0 0 .7em; font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+        font-size: 11px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+        color: var(--ctp-overlay0);
+      }
+      #${PANEL_ID} .bsb-folio h1 {
+        margin: 0 0 .55em; font-size: 1.72em; font-weight: 650; line-height: 1.22;
+        letter-spacing: -.02em; color: var(--ctp-text);
+      }
+      #${PANEL_ID} .bsb-folio .lede {
+        margin: 0; font-size: 1.06em; line-height: 1.65; color: var(--ctp-subtext0);
+      }
+      #${PANEL_ID} .bsb-folio section { margin: 0 0 2.1em; }
+      #${PANEL_ID} .bsb-folio h2 {
+        margin: 0 0 .7em; padding-top: .2em;
+        font-size: 1.18em; font-weight: 650; letter-spacing: -.015em;
+      }
+      #${PANEL_ID} .bsb-folio h3 {
+        margin: 1.2em 0 .45em; font-size: 1.02em; font-weight: 650; color: var(--ctp-subtext1);
+      }
+      #${PANEL_ID} .bsb-folio p { margin: 0 0 .9em; }
+      #${PANEL_ID} .bsb-folio ul, #${PANEL_ID} .bsb-folio ol { margin: 0 0 1em; padding-left: 1.25em; }
+      #${PANEL_ID} .bsb-folio li { margin: .28em 0; }
+      #${PANEL_ID} .bsb-folio ol.steps {
+        list-style: none; padding: 0; counter-reset: folio-step;
+      }
+      #${PANEL_ID} .bsb-folio ol.steps li {
+        position: relative; padding: .15em 0 .55em 2.1em;
+        border-left: 1px solid color-mix(in srgb, var(--ctp-surface1) 70%, transparent);
+        margin: 0 0 0 .45em;
+      }
+      #${PANEL_ID} .bsb-folio ol.steps li::before {
+        counter-increment: folio-step; content: counter(folio-step);
+        position: absolute; left: -.72em; top: .15em;
+        width: 1.35em; height: 1.35em; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+        font-size: .68em; font-weight: 750;
+        color: var(--ctp-base); background: var(--ctp-lavender);
+      }
+      #${PANEL_ID} .bsb-folio aside.callout,
+      #${PANEL_ID} .bsb-folio aside[data-kind] {
+        margin: 1.1em 0 1.25em; padding: .75em 1em .75em 1.05em;
+        border-left: 2px solid var(--ctp-lavender);
+        background: color-mix(in srgb, var(--ctp-surface0) 42%, transparent);
+        border-radius: 0 10px 10px 0;
+        font-size: .96em;
+      }
+      #${PANEL_ID} .bsb-folio aside[data-kind="key"] { border-left-color: var(--ctp-yellow); }
+      #${PANEL_ID} .bsb-folio aside[data-kind="warn"] { border-left-color: var(--ctp-peach); }
+      #${PANEL_ID} .bsb-folio aside[data-kind="note"] { border-left-color: var(--ctp-sapphire); }
+      #${PANEL_ID} .bsb-folio aside.callout p:last-child,
+      #${PANEL_ID} .bsb-folio aside[data-kind] p:last-child { margin-bottom: 0; }
+      #${PANEL_ID} .bsb-folio figure.quote, #${PANEL_ID} .bsb-folio blockquote {
+        margin: 1.15em 0 1.3em; padding: 0 0 0 1em;
+        border-left: 2px solid color-mix(in srgb, var(--ctp-overlay0) 45%, transparent);
+        color: var(--ctp-subtext1); font-style: italic;
+      }
+      #${PANEL_ID} .bsb-folio .meta {
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+        font-size: .78em; color: var(--ctp-overlay1); letter-spacing: .02em;
+      }
+      #${PANEL_ID} .bsb-folio table {
+        width: 100%; border-collapse: collapse; margin: 0 0 1.2em;
+        font-size: .92em; font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      }
+      #${PANEL_ID} .bsb-folio th, #${PANEL_ID} .bsb-folio td {
+        text-align: left; padding: .45em .55em;
+        border-bottom: 1px solid color-mix(in srgb, var(--ctp-surface1) 55%, transparent);
+      }
+      #${PANEL_ID} .bsb-folio th { color: var(--ctp-subtext0); font-weight: 650; }
+      #${PANEL_ID} .bsb-folio code, #${PANEL_ID} .bsb-folio pre {
+        font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+      }
+      #${PANEL_ID} .bsb-folio :not(pre) > code {
+        font-size: .86em; padding: .08em .35em; border-radius: 5px;
+        background: color-mix(in srgb, var(--ctp-surface0) 70%, transparent);
+      }
+      #${PANEL_ID} .bsb-folio pre {
+        margin: 0 0 1.2em; padding: 12px 14px; border-radius: 10px; overflow: auto;
+        background: var(--ctp-crust); font-size: .84em; line-height: 1.55;
+      }
+      #${PANEL_ID} .bsb-folio mark {
+        background: color-mix(in srgb, var(--ctp-yellow) 38%, transparent);
+        color: inherit; padding: 0 .12em; border-radius: 3px;
+      }
+      #${PANEL_ID} .bsb-folio hr {
+        border: 0; height: 1px; margin: 1.8em 0;
+        background: color-mix(in srgb, var(--ctp-surface1) 70%, transparent);
+      }
+      @media (max-width: 760px) {
+        #${PANEL_ID} .bsb-folio-shell { grid-template-columns: 1fr; }
+        #${PANEL_ID} .bsb-folio-toc { display: none; }
+        #${PANEL_ID} .bsb-folio-frame { padding: 18px 16px 48px; }
+      }
+
       /* ── AI 工作区（主画布） ── */
       #${PANEL_ID} .bsb-ai-hero {
         display: flex; align-items: flex-start; justify-content: space-between;
@@ -4163,6 +4360,71 @@
         overflow: hidden;
       }
       #${PANEL_ID} .bsb-ai-stream .bsb-ai-raw { display: none !important; }
+      #${PANEL_ID} .bsb-studio-dock {
+        display: none; position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+        padding: 8px 10px 10px;
+        border-top: 1px solid color-mix(in srgb, var(--ctp-surface0) 75%, transparent);
+        background: color-mix(in srgb, var(--ctp-mantle) 92%, transparent);
+      }
+      #${PANEL_ID} .bsb-ai-canvas-wrap.is-studio .bsb-studio-dock { display: block; }
+      #${PANEL_ID} .bsb-ai-canvas-wrap.is-studio .bsb-ai-stream { bottom: 88px; }
+      #${PANEL_ID} .bsb-ai-canvas-wrap.is-studio .bsb-jump-latest { display: none; }
+      #${PANEL_ID} .bsb-studio-composer {
+        display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; align-items: end;
+      }
+      #${PANEL_ID} .bsb-studio-composer textarea {
+        width: 100%; min-height: 40px; max-height: 120px; resize: none;
+        padding: 9px 11px; border-radius: 12px; line-height: 1.45;
+        border: 1px solid color-mix(in srgb, var(--ctp-surface1) 70%, transparent);
+        background: color-mix(in srgb, var(--ctp-base) 70%, transparent);
+        color: var(--ctp-text); font: inherit; font-size: 12.5px;
+      }
+      #${PANEL_ID} .bsb-studio-composer textarea:focus {
+        outline: 0; border-color: color-mix(in srgb, var(--ctp-lavender) 50%, transparent);
+      }
+      #${PANEL_ID} .bsb-studio-composer .bsb-btn { height: 40px; padding: 0 14px; border-radius: 12px; }
+      #${PANEL_ID} .bsb-studio-slash {
+        position: absolute; left: 10px; right: 78px; bottom: calc(100% - 6px);
+        max-height: 220px; overflow: auto; padding: 6px;
+        border-radius: 12px;
+        border: 1px solid color-mix(in srgb, var(--ctp-surface1) 60%, transparent);
+        background: color-mix(in srgb, var(--ctp-base) 96%, transparent);
+        box-shadow: 0 12px 32px color-mix(in srgb, var(--ctp-crust) 45%, transparent);
+      }
+      #${PANEL_ID} .bsb-studio-slash[hidden] { display: none !important; }
+      #${PANEL_ID} .bsb-studio-slash button {
+        display: grid; grid-template-columns: 5.5rem minmax(0,1fr); gap: 8px; align-items: center;
+        width: 100%; text-align: left; padding: 7px 8px; border: 0; border-radius: 8px;
+        background: transparent; color: var(--ctp-text); cursor: pointer; font: inherit;
+      }
+      #${PANEL_ID} .bsb-studio-slash button.active,
+      #${PANEL_ID} .bsb-studio-slash button:hover {
+        background: color-mix(in srgb, var(--ctp-lavender) 12%, var(--ctp-surface0));
+      }
+      #${PANEL_ID} .bsb-studio-slash code {
+        font-size: 11.5px; font-weight: 750; color: var(--ctp-lavender);
+      }
+      #${PANEL_ID} .bsb-studio-slash span { font-size: 11px; color: var(--ctp-overlay1); }
+      #${PANEL_ID} .bsb-studio-thread { display: grid; gap: 14px; padding: 8px 4px 20px; }
+      #${PANEL_ID} .bsb-studio-msg { max-width: 92%; }
+      #${PANEL_ID} .bsb-studio-msg.user { justify-self: end; }
+      #${PANEL_ID} .bsb-studio-msg.user .bsb-studio-bubble {
+        padding: 9px 12px; border-radius: 14px 14px 4px 14px;
+        background: color-mix(in srgb, var(--ctp-lavender) 16%, var(--ctp-surface0));
+        color: var(--ctp-text); font-size: 13px; line-height: 1.55; white-space: pre-wrap;
+      }
+      #${PANEL_ID} .bsb-studio-msg.assistant { justify-self: start; width: min(100%, 44rem); }
+      #${PANEL_ID} .bsb-studio-msg.assistant .bsb-studio-bubble {
+        font-size: 13.5px; line-height: 1.65; color: var(--ctp-text);
+      }
+      #${PANEL_ID} .bsb-studio-msg.system {
+        justify-self: center; max-width: 28rem; text-align: center;
+        font-size: 11.5px; color: var(--ctp-overlay1); line-height: 1.5;
+      }
+      #${PANEL_ID} .bsb-studio-role {
+        display: block; margin-bottom: 4px; font-size: 10px; font-weight: 750;
+        letter-spacing: .08em; text-transform: uppercase; color: var(--ctp-overlay0);
+      }
 
       /*
        * 唯一滚动层：绝对定位铺满画布，height 明确，overflow-y: scroll
@@ -5509,6 +5771,39 @@
       #${PANEL_ID} .bsb-output-task-index { width:24px; height:24px; display:grid; place-items:center; flex:0 0 auto; border-radius:8px; background:var(--ctp-surface0); color:var(--ctp-overlay1); font-size:9.5px; font-weight:850; }
       #${PANEL_ID} .bsb-output-task-name { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11.5px; font-weight:800; }
       #${PANEL_ID} .bsb-model-picks { display:flex; flex-wrap:wrap; gap:6px; margin-top:7px; }
+      #${PANEL_ID} .bsb-model-order { display:grid; gap:8px; margin-top:7px; }
+      #${PANEL_ID} .bsb-model-rank-list { display:flex; flex-direction:column; gap:5px; }
+      #${PANEL_ID} .bsb-model-rank {
+        display:grid; grid-template-columns:14px 28px minmax(0,1fr) 22px; align-items:center; gap:6px;
+        min-height:32px; padding:0 6px 0 8px; user-select:none;
+        border:1px solid color-mix(in srgb,var(--ctp-blue) 32%,var(--ctp-surface1));
+        border-radius:10px; background:color-mix(in srgb,var(--ctp-blue) 10%,var(--ctp-base));
+        color:var(--ctp-text);
+      }
+      #${PANEL_ID} .bsb-model-rank[draggable="true"] { cursor:grab; }
+      #${PANEL_ID} .bsb-model-rank.dragging { opacity:.45; cursor:grabbing; }
+      #${PANEL_ID} .bsb-model-rank.drag-over {
+        border-color:color-mix(in srgb,var(--ctp-sapphire) 55%,transparent);
+        box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ctp-sapphire) 30%,transparent);
+      }
+      #${PANEL_ID} .bsb-model-rank-handle { color:var(--ctp-overlay0); font-size:12px; letter-spacing:-1px; }
+      #${PANEL_ID} .bsb-model-rank-n {
+        width:22px; height:18px; display:grid; place-items:center; border-radius:6px;
+        background:var(--ctp-lavender); color:var(--ctp-crust); font-size:9px; font-weight:850;
+      }
+      #${PANEL_ID} .bsb-model-rank-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; font-weight:700; }
+      #${PANEL_ID} .bsb-model-rank-remove {
+        width:22px; height:22px; border:0; border-radius:7px; background:transparent;
+        color:var(--ctp-overlay1); cursor:pointer; font-size:14px; line-height:1;
+      }
+      #${PANEL_ID} .bsb-model-rank-remove:hover { color:var(--ctp-red); background:color-mix(in srgb,var(--ctp-red) 12%,transparent); }
+      #${PANEL_ID} .bsb-model-add-list { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+      #${PANEL_ID} .bsb-model-add {
+        min-height:28px; padding:0 9px; border-radius:999px; cursor:pointer; font-size:10.5px; font-weight:650;
+        border:1px dashed color-mix(in srgb,var(--ctp-overlay0) 45%,transparent);
+        background:transparent; color:var(--ctp-subtext0);
+      }
+      #${PANEL_ID} .bsb-model-add:hover { color:var(--ctp-text); border-color:var(--ctp-lavender); background:color-mix(in srgb,var(--ctp-lavender) 10%,transparent); }
       #${PANEL_ID} .bsb-model-pick {
         position:relative; display:inline-flex; align-items:center; gap:6px; min-height:30px; padding:0 9px;
         border:1px solid color-mix(in srgb,var(--ctp-surface1) 75%,transparent); border-radius:999px;
@@ -6622,7 +6917,9 @@
                 <div class="bsb-ai-stage-tabs" data-role="ai-stage-tabs" aria-label="AI 处理阶段">
                   <button type="button" data-ai-stage="preprocess" class="active"><span class="bsb-stage-index">1</span><span><strong>预处理</strong><small>字幕整理</small></span></button>
                   <span class="bsb-stage-connector">→</span>
-                  <button type="button" data-ai-stage="postprocess"><span class="bsb-stage-index">2</span><span><strong>后处理</strong><small>Mermaid / 其他产物</small></span></button>
+                  <button type="button" data-ai-stage="chat"><span class="bsb-stage-index">2</span><span><strong>对话</strong><small>对着字幕聊</small></span></button>
+                  <span class="bsb-stage-connector">→</span>
+                  <button type="button" data-ai-stage="postprocess"><span class="bsb-stage-index">3</span><span><strong>后处理</strong><small>Mermaid / HTML 页</small></span></button>
                 </div>
                 <div class="bsb-ai-compact-stats bsb-chips" data-role="ai-chips" title="当前选择状态">
                   <span class="bsb-chip">选 <em data-role="chip-sel">0</em></span>
@@ -6633,7 +6930,7 @@
               <div class="bsb-ai-command-actions">
                 <button type="button" class="bsb-btn ghost" data-act="ai-flow-drawer" title="配置预处理和后处理流程">流程</button>
                 <button type="button" class="bsb-btn danger" data-act="ai-stop" style="display:none">停止</button>
-                <button type="button" class="bsb-btn accent" data-act="ai-send" title="按照当前处理方案运行">运行</button>
+                <button type="button" class="bsb-btn accent" data-act="ai-send" data-pipeline-action title="按照当前处理方案运行">运行</button>
               </div>
             </div>
             <div class="bsb-preprocess-nav" data-role="ai-preprocess-nav" aria-label="预处理字幕导航">
@@ -6667,7 +6964,10 @@
                   <button type="button" class="bsb-mini on" data-postprocess-action data-act="ai-stick" title="跟随最新 / 暂停跟随（上滑也会自动暂停）" hidden>粘底</button>
                   <button type="button" class="bsb-mini" data-postprocess-action data-act="ai-regenerate-current" title="只重新生成当前产物的当前模型版本" hidden>重试</button>
                   <button type="button" class="bsb-mini" data-postprocess-action data-act="ai-copy" title="复制当前输出" hidden>复制</button>
-                  <button type="button" class="bsb-mini" data-postprocess-action data-act="ai-export" title="导出 Markdown" hidden>导出</button>
+                  <button type="button" class="bsb-mini" data-postprocess-action data-act="ai-export" title="导出当前产物（HTML 页或 Markdown）" hidden>导出</button>
+                  <button type="button" class="bsb-mini" data-studio-action data-act="studio-clear" title="清空当前对话" hidden>清空</button>
+                  <button type="button" class="bsb-mini" data-studio-action data-act="studio-copy" title="复制上一条回答" hidden>复制</button>
+                  <button type="button" class="bsb-mini" data-studio-action data-act="studio-export" title="导出对话" hidden>导出</button>
                   <button type="button" class="bsb-mini" data-act="ai-font-dec" title="减小正文字号">A−</button>
                   <button type="button" class="bsb-mini" data-act="ai-font-inc" title="增大正文字号">A+</button>
                   <button type="button" class="bsb-mini" data-act="ai-top" title="回到顶部">顶部</button>
@@ -6687,6 +6987,13 @@
                   <div class="bsb-ai-anchor" data-role="ai-anchor"></div>
                 </div>
                 <button type="button" class="bsb-jump-latest" data-act="ai-jump" title="跳到最新输出">↓ 最新</button>
+              </div>
+              <div class="bsb-studio-dock" data-role="studio-dock" hidden>
+                <div class="bsb-studio-slash" data-role="studio-slash" hidden></div>
+                <div class="bsb-studio-composer">
+                  <textarea data-role="studio-input" rows="1" placeholder="对着这一期提问… 输入 / 使用命令"></textarea>
+                  <button type="button" class="bsb-btn accent" data-act="studio-send" title="发送">发送</button>
+                </div>
               </div>
             </div>
           </section>
@@ -7037,6 +7344,50 @@
       renderAiList(root);
     }, 60));
     bindConfigListDrag(root);
+    bindFlowModelDrag(root);
+    const studioInput = root.querySelector('[data-role="studio-input"]');
+    if (studioInput) {
+      studioInput.addEventListener("input", () => {
+        studioInput.style.height = "auto";
+        studioInput.style.height = `${Math.min(120, Math.max(40, studioInput.scrollHeight))}px`;
+        renderStudioSlashMenu();
+      });
+      studioInput.addEventListener("keydown", (e) => {
+        const menu = root.querySelector('[data-role="studio-slash"]');
+        const open = menu && !menu.hidden;
+        const items = open ? Array.from(menu.querySelectorAll("[data-studio-slash]")) : [];
+        if (open && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+          e.preventDefault();
+          const delta = e.key === "ArrowDown" ? 1 : -1;
+          state.studioSlashIndex = (state.studioSlashIndex + delta + items.length) % Math.max(1, items.length);
+          renderStudioSlashMenu();
+          return;
+        }
+        if (open && (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey))) {
+          e.preventDefault();
+          const active = items[state.studioSlashIndex] || items[0];
+          if (active) {
+            studioInput.value = "";
+            hideStudioSlashMenu();
+            runStudioSlash(active.dataset.studioSlash);
+          }
+          return;
+        }
+        if (e.key === "Escape" && open) {
+          e.preventDefault();
+          hideStudioSlashMenu();
+          return;
+        }
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          const text = String(studioInput.value || "");
+          studioInput.value = "";
+          studioInput.style.height = "40px";
+          hideStudioSlashMenu();
+          sendStudioChat(text).catch((error) => setStatus(`对话失败：${error?.message || error}`, "err"));
+        }
+      });
+    }
     root.querySelector('[data-role="knowledge-search"]')?.addEventListener("input", debounce((e) => {
       state.knowledgeSearch = String(e.target.value || "");
       renderKnowledgeWorkspace().catch(() => {});
@@ -7189,6 +7540,21 @@
         state.preprocessRetries = saveBoundedNumberSetting(PREPROCESS_RETRIES_STORE_KEY, preRetries.value, PREPROCESS_DEFAULT_RETRIES, 0, 4);
         return;
       }
+      const studioModel = e.target.closest?.("[data-flow-studiomodel]");
+      if (studioModel) {
+        state.studioModelId = String(studioModel.value || "");
+        storageSet(STUDIO_MODEL_STORE_KEY, state.studioModelId);
+        renderAiFlowDrawer();
+        return;
+      }
+      const studioContext = e.target.closest?.("[data-flow-studiocontext]");
+      if (studioContext) {
+        const next = String(studioContext.value || "auto");
+        state.studioContextPref = ["raw", "processed"].includes(next) ? next : "auto";
+        persistStudioChat();
+        if (currentAiWorkbenchStage() === "chat") renderStudioCanvas();
+        return;
+      }
       const taskCard = e.target.closest?.("[data-flow-task-id]");
       if (taskCard) {
         const taskId = String(taskCard.dataset.flowTaskId || "");
@@ -7197,13 +7563,6 @@
         if (!task) return;
         const promptSelect = e.target.closest?.("[data-flow-task-prompt]");
         if (promptSelect) task.promptId = String(promptSelect.value || "");
-        const modelToggle = e.target.closest?.("[data-flow-task-model]");
-        if (modelToggle) {
-          const modelId = String(modelToggle.dataset.flowTaskModel || "");
-          const set = new Set(task.modelIds || []);
-          if (modelToggle.checked) set.add(modelId); else set.delete(modelId);
-          task.modelIds = [...set];
-        }
         savePostTasks(tasks);
       }
     });
@@ -7380,6 +7739,15 @@
       if (inputView) { e.preventDefault(); state.aiInputView = String(inputView.dataset.inputView || "raw"); renderAiInputDrawer(); return; }
       const aiStageTab = e.target.closest?.("[data-ai-stage]");
       if (aiStageTab) { e.preventDefault(); setAiWorkbenchStage(aiStageTab.dataset.aiStage).catch((error) => setStatus(`切换 AI 阶段失败: ${error?.message || error}`, "err")); return; }
+      const studioSlash = e.target.closest?.("[data-studio-slash]");
+      if (studioSlash) {
+        e.preventDefault();
+        const input = root.querySelector('[data-role="studio-input"]');
+        if (input) input.value = "";
+        hideStudioSlashMenu();
+        runStudioSlash(studioSlash.dataset.studioSlash);
+        return;
+      }
       const preprocessView = e.target.closest?.("[data-ai-preprocess-view]");
       if (preprocessView) { e.preventDefault(); state.aiInputView = String(preprocessView.dataset.aiPreprocessView || "raw"); renderPreprocessCanvas().catch((error) => setStatus(`打开字幕失败: ${error?.message || error}`, "err")); return; }
       const outputTask = e.target.closest?.("[data-ai-output-task]");
@@ -7390,6 +7758,37 @@
         const id = String(taskRemove.dataset.flowTaskRemove || "");
         savePostTasks(currentPostTasks().filter((t) => t.id !== id));
         renderAiFlowDrawer();
+        return;
+      }
+      const modelAdd = e.target.closest?.("[data-flow-task-model-add]");
+      if (modelAdd) {
+        e.preventDefault();
+        const card = modelAdd.closest?.("[data-flow-task-id]");
+        const taskId = String(card?.dataset.flowTaskId || "");
+        const modelId = String(modelAdd.dataset.flowTaskModelAdd || "");
+        const tasks = currentPostTasks().map((t) => ({ ...t, modelIds: [...(t.modelIds || [])] }));
+        const task = tasks.find((t) => t.id === taskId);
+        if (task && modelId && !task.modelIds.includes(modelId)) {
+          task.modelIds.push(modelId);
+          savePostTasks(tasks);
+          renderAiFlowDrawer();
+        }
+        return;
+      }
+      const modelRemove = e.target.closest?.("[data-flow-task-model-remove]");
+      if (modelRemove) {
+        e.preventDefault();
+        e.stopPropagation();
+        const card = modelRemove.closest?.("[data-flow-task-id]");
+        const taskId = String(card?.dataset.flowTaskId || "");
+        const modelId = String(modelRemove.dataset.flowTaskModelRemove || "");
+        const tasks = currentPostTasks().map((t) => ({ ...t, modelIds: [...(t.modelIds || [])] }));
+        const task = tasks.find((t) => t.id === taskId);
+        if (task && modelId) {
+          task.modelIds = task.modelIds.filter((id) => id !== modelId);
+          savePostTasks(tasks);
+          renderAiFlowDrawer();
+        }
         return;
       }
       const editorAction = e.target.closest?.('[data-role="prompt-editor"] button[data-act], [data-role="ai-editor"] button[data-act]');
@@ -8714,11 +9113,27 @@
       return;
     }
     if (act === "ai-stop") {
+      if (state.studioBusy) {
+        abortStudioRequest();
+        setStatus("正在停止对话生成…");
+        return;
+      }
       state.aiAbort = true;
       abortAllAiRuns();
       setStatus("正在停止 AI Pipeline（预处理 + 后处理）…");
       return;
     }
+    if (act === "studio-send") {
+      const input = ensurePanel().querySelector('[data-role="studio-input"]');
+      const text = String(input?.value || "");
+      if (input) input.value = "";
+      hideStudioSlashMenu();
+      await sendStudioChat(text);
+      return;
+    }
+    if (act === "studio-clear") { studioClearChat(); return; }
+    if (act === "studio-copy") { studioCopyLast(); return; }
+    if (act === "studio-export") { studioExportChat(); return; }
     if (act === "ai-toggle") {
       toggleAiPanel();
       return;
@@ -8790,9 +9205,11 @@
       const library = savePromptProfilesFromForm({ activeId: state.activePromptId });
       const pre = createPromptProfile(DEFAULT_PREPROCESS_PROMPT, 0);
       const post = createPromptProfile(DEFAULT_MERMAID_PROMPT, 1);
-      const knowledge = createPromptProfile(DEFAULT_KNOWLEDGE_PROMPT, 2);
-      const prompts = library.prompts.filter((p) => ![DEFAULT_PREPROCESS_PROMPT_ID, DEFAULT_PROMPT_ID, DEFAULT_KNOWLEDGE_PROMPT_ID].includes(p.id));
+      const html = createPromptProfile(DEFAULT_HTML_FOLIO_PROMPT, 2);
+      const knowledge = createPromptProfile(DEFAULT_KNOWLEDGE_PROMPT, 3);
+      const prompts = library.prompts.filter((p) => ![DEFAULT_PREPROCESS_PROMPT_ID, DEFAULT_PROMPT_ID, DEFAULT_HTML_FOLIO_PROMPT_ID, DEFAULT_KNOWLEDGE_PROMPT_ID].includes(p.id));
       prompts.unshift(knowledge);
+      prompts.unshift(html);
       prompts.unshift(post);
       prompts.unshift(pre);
       savePromptProfiles(prompts, post.id, pre.id, knowledge.id);
@@ -8800,7 +9217,7 @@
       state.promptSearch = "";
       if (state.ui) state.ui.promptStage = "preprocess";
       setPromptStageTab("preprocess", { silent: true, preserveEditor: true });
-      setStatus("已恢复内置『字幕规范化』『全 Mermaid 学习图谱』『局部知识追问』；其他自定义提示词保持不变", "ok");
+      setStatus("已恢复内置『字幕规范化』『全 Mermaid 学习图谱』『HTML 阅读页』『局部知识追问』；其他自定义提示词保持不变", "ok");
       return;
     }
     if (act === "ai-save") {
@@ -8930,6 +9347,17 @@
       if (!text.trim()) return setStatus("没有可导出的笔记", "err");
       const bvid = (run?.sourceBvids || state.aiSourceBvids)[0] || "bilibili";
       const modelName = run?.config?.name || run?.config?.model || "AI";
+      const folio = extractHtmlFolioSource(text);
+      if (folio) {
+        const title = extractFolioTitle(folio) || `${modelName} 阅读页`;
+        downloadText(
+          `${safeFilename(`${bvid}_${modelName}_阅读页`)}.html`,
+          buildStandaloneFolioHtml(title, folio, state.ui?.ctpFlavor),
+          { overwrite: true },
+        );
+        setStatus(`已导出 ${modelName} 的 HTML 阅读页`, "ok");
+        return;
+      }
       downloadText(`${safeFilename(`${bvid}_${modelName}_AI笔记`)}.md`, text);
       setStatus(`已导出 ${modelName} 的 Markdown`, "ok");
       return;
@@ -9244,6 +9672,12 @@
   function ensureBuiltinStagePrompts(prompts) {
     const list = [...(prompts || [])];
     if (!list.some((p) => p.stage === "preprocess")) list.unshift(createPromptProfile(DEFAULT_PREPROCESS_PROMPT, 0));
+    if (!list.some((p) => p.id === DEFAULT_HTML_FOLIO_PROMPT_ID)) {
+      const mermaidAt = list.findIndex((p) => p.id === DEFAULT_PROMPT_ID);
+      const html = createPromptProfile(DEFAULT_HTML_FOLIO_PROMPT, list.length);
+      if (mermaidAt >= 0) list.splice(mermaidAt + 1, 0, html);
+      else list.push(html);
+    }
     if (!list.some((p) => p.stage === "knowledge")) list.push(createPromptProfile(DEFAULT_KNOWLEDGE_PROMPT, list.length));
     return list;
   }
@@ -9312,6 +9746,21 @@
     return { prompts: next, changed };
   }
 
+  function migrateBuiltinHtmlFolioPrompt(prompts, storedVersion) {
+    if (Number(storedVersion || 0) >= 8) return { prompts, changed: false };
+    let changed = false;
+    const next = (prompts || []).map((prompt) => {
+      if (!prompt || prompt.id !== DEFAULT_HTML_FOLIO_PROMPT_ID) return prompt;
+      changed = true;
+      return createPromptProfile({
+        ...DEFAULT_HTML_FOLIO_PROMPT,
+        id: prompt.id,
+        stage: "postprocess",
+      }, 0);
+    });
+    return { prompts: next, changed };
+  }
+
   function resolvePromptActiveIds(prompts, postId, preId, knowledgeId) {
     const posts = prompts.filter((p) => p.stage === "postprocess");
     const pres = prompts.filter((p) => p.stage === "preprocess");
@@ -9338,11 +9787,14 @@
         prompts = migratedChunking.prompts;
         const migratedHighlight = migrateBuiltinKnowledgeHighlightRules(prompts, storedVersion);
         prompts = migratedHighlight.prompts;
+        const migratedHtmlFolio = migrateBuiltinHtmlFolioPrompt(prompts, storedVersion);
+        prompts = migratedHtmlFolio.prompts;
         const migrated = {
           changed:
             migratedLanguage.changed ||
             migratedChunking.changed ||
             migratedHighlight.changed ||
+            migratedHtmlFolio.changed ||
             storedVersion < PROMPT_SCHEMA_VERSION,
         };
         const ids = resolvePromptActiveIds(
@@ -9367,8 +9819,9 @@
     }
     const pre = createPromptProfile(DEFAULT_PREPROCESS_PROMPT, 0);
     const post = createPromptProfile(DEFAULT_MERMAID_PROMPT, 1);
-    const knowledge = createPromptProfile(DEFAULT_KNOWLEDGE_PROMPT, 2);
-    const prompts = [pre, post, knowledge];
+    const html = createPromptProfile(DEFAULT_HTML_FOLIO_PROMPT, 2);
+    const knowledge = createPromptProfile(DEFAULT_KNOWLEDGE_PROMPT, 3);
+    const prompts = [pre, post, html, knowledge];
     state.promptProfiles = prompts;
     state.activePromptId = post.id;
     state.activePrePromptId = pre.id;
@@ -10554,14 +11007,33 @@
     const prompts = state.promptProfiles?.length ? state.promptProfiles : loadPromptProfiles().prompts;
     const profiles = state.aiProfiles?.length ? state.aiProfiles : loadAiProfiles();
     let tasks = [];
+    let storedTaskVersion = 0;
     try {
       const raw = storageGet(POST_TASKS_STORE_KEY, null);
       if (raw) {
         const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
         tasks = Array.isArray(parsed) ? parsed : parsed?.tasks;
+        storedTaskVersion = Array.isArray(parsed) ? 1 : Number(parsed?.version || 1);
       }
     } catch (_) { /* use default */ }
     tasks = sanitizePostTasks(tasks, prompts, profiles, { createDefault: true });
+    const htmlPrompt = prompts.find((p) => p.id === DEFAULT_HTML_FOLIO_PROMPT_ID && p.stage === "postprocess");
+    if (htmlPrompt && storedTaskVersion < 2 && !tasks.some((t) => t.promptId === htmlPrompt.id)) {
+      const modelIds = tasks[0]?.modelIds?.length
+        ? [...tasks[0].modelIds]
+        : profiles.filter((p) => p.enabled).map((p) => p.id);
+      tasks.push(normalizePostTask({
+        promptId: htmlPrompt.id,
+        modelIds,
+        enabled: true,
+        order: tasks.length,
+      }, tasks.length));
+    }
+    if (storedTaskVersion < POST_TASKS_SCHEMA_VERSION) {
+      try {
+        storageSet(POST_TASKS_STORE_KEY, JSON.stringify({ version: POST_TASKS_SCHEMA_VERSION, tasks }));
+      } catch (_) { /* ignore */ }
+    }
     state.postTasks = tasks;
     if (!tasks.some((t) => t.id === state.aiActiveTaskId)) state.aiActiveTaskId = tasks[0]?.id || "";
     return tasks;
@@ -10891,6 +11363,73 @@
     });
   }
 
+  function bindFlowModelDrag(root) {
+    if (!root || root._bsbFlowModelDragBound) return;
+    root._bsbFlowModelDragBound = true;
+    let drag = null;
+
+    const clearDragUi = () => {
+      root.querySelectorAll(".bsb-model-rank.dragging, .bsb-model-rank.drag-over").forEach((el) => {
+        el.classList.remove("dragging", "drag-over");
+      });
+    };
+
+    root.addEventListener("dragstart", (e) => {
+      const item = e.target.closest?.(".bsb-model-rank[draggable='true']");
+      if (!item || !root.contains(item)) return;
+      const card = item.closest?.("[data-flow-task-id]");
+      const id = String(item.dataset.flowModelId || "");
+      if (!card || !id) return;
+      if (e.target.closest?.("[data-flow-task-model-remove]")) {
+        e.preventDefault();
+        return;
+      }
+      drag = { id, taskId: String(card.dataset.flowTaskId || ""), card };
+      item.classList.add("dragging");
+      try {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", id);
+      } catch (_) { /* ignore */ }
+    });
+
+    root.addEventListener("dragend", () => {
+      clearDragUi();
+      drag = null;
+    });
+
+    root.addEventListener("dragover", (e) => {
+      if (!drag) return;
+      const item = e.target.closest?.(".bsb-model-rank[draggable='true']");
+      const card = item?.closest?.("[data-flow-task-id]");
+      if (!item || !card || String(card.dataset.flowTaskId || "") !== drag.taskId) return;
+      e.preventDefault();
+      try { e.dataTransfer.dropEffect = "move"; } catch (_) { /* ignore */ }
+      card.querySelectorAll(".bsb-model-rank.drag-over").forEach((el) => {
+        if (el !== item) el.classList.remove("drag-over");
+      });
+      if (String(item.dataset.flowModelId || "") !== drag.id) item.classList.add("drag-over");
+    });
+
+    root.addEventListener("drop", (e) => {
+      if (!drag) return;
+      const item = e.target.closest?.(".bsb-model-rank[draggable='true']");
+      const card = item?.closest?.("[data-flow-task-id]");
+      if (!item || !card || String(card.dataset.flowTaskId || "") !== drag.taskId) return;
+      e.preventDefault();
+      const fromId = drag.id;
+      const toId = String(item.dataset.flowModelId || "");
+      const taskId = drag.taskId;
+      clearDragUi();
+      drag = null;
+      if (!fromId || !toId || fromId === toId) return;
+      const tasks = currentPostTasks().map((t) => ({ ...t, modelIds: [...(t.modelIds || [])] }));
+      const task = tasks.find((t) => t.id === taskId);
+      if (!task) return;
+      task.modelIds = reorderIds(task.modelIds, fromId, toId);
+      savePostTasks(tasks);
+    });
+  }
+
   function renderPromptList(root) {
     const host = root?.querySelector('[data-role="prompt-list"]');
     if (!host) return;
@@ -11130,6 +11669,18 @@
     const ready = all.filter((p) => p.apiKey && p.baseUrl && p.model);
     const selected = ready.find((p) => p.id === state.preprocessModelId);
     return selected || ready.find((p) => p.enabled) || ready[0] || null;
+  }
+
+  function getStudioModelConfig(profiles) {
+    const all = Array.isArray(profiles) && profiles.length ? profiles : (state.aiProfiles?.length ? state.aiProfiles : loadAiProfiles());
+    const ready = all.filter((p) => p.apiKey && p.baseUrl && p.model);
+    const selected = ready.find((p) => p.id === state.studioModelId);
+    const fallback = selected || getPreprocessModelConfig(all) || knowledgeGetModelConfig() || ready.find((p) => p.enabled) || ready[0] || null;
+    if (fallback && state.studioModelId !== fallback.id) {
+      state.studioModelId = fallback.id;
+      storageSet(STUDIO_MODEL_STORE_KEY, fallback.id);
+    }
+    return fallback;
   }
 
   function loadAiConfig() {
@@ -11384,8 +11935,553 @@
     return run?.promptName || promptForTask(task)?.name || "未命名产物";
   }
 
+  function loadStudioChatStore() {
+    try {
+      const raw = storageGet(STUDIO_CHAT_STORE_KEY, null);
+      if (!raw) return {};
+      const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function persistStudioChat(routeKey = currentRouteVideoKey()) {
+    const key = String(routeKey || "").trim();
+    if (!key) return;
+    const store = loadStudioChatStore();
+    store[key] = {
+      messages: (state.studioMessages || []).slice(-40),
+      memory: String(state.studioMemory || ""),
+      memoryUntilId: String(state.studioMemoryUntilId || ""),
+      memoryTurns: Number(state.studioMemoryTurns) || 0,
+      contextPref: state.studioContextPref || "auto",
+      updatedAt: Date.now(),
+    };
+    const keys = Object.keys(store).sort((a, b) => (store[b].updatedAt || 0) - (store[a].updatedAt || 0));
+    for (const extra of keys.slice(24)) delete store[extra];
+    try { storageSet(STUDIO_CHAT_STORE_KEY, JSON.stringify(store)); } catch (_) { /* ignore */ }
+  }
+
+  function loadStudioChat(routeKey = currentRouteVideoKey()) {
+    const key = String(routeKey || "").trim();
+    const entry = key ? loadStudioChatStore()[key] : null;
+    state.studioMessages = Array.isArray(entry?.messages) ? entry.messages : [];
+    state.studioMemory = String(entry?.memory || "");
+    state.studioMemoryUntilId = String(entry?.memoryUntilId || "");
+    state.studioMemoryTurns = Number(entry?.memoryTurns) || 0;
+    state.studioLastContextMeta = null;
+    state.studioContextPref = ["raw", "processed"].includes(entry?.contextPref) ? entry.contextPref : "auto";
+  }
+
+  function studioTranscriptContext() {
+    const processed = currentInputPreviewText("processed");
+    const raw = currentInputPreviewText("raw");
+    const pref = state.studioContextPref;
+    if (pref === "raw") return { text: raw, source: "原始字幕" };
+    if (pref === "processed") return { text: processed || raw, source: processed ? "规范化稿" : "原始字幕" };
+    return { text: processed || raw, source: processed ? "规范化稿" : "原始字幕" };
+  }
+
+  function clipStudioContext(text) {
+    const packed = compressStudioTranscript(text, "");
+    return packed.text;
+  }
+
+  function studioQueryTokens(...parts) {
+    const raw = parts.filter(Boolean).join(" ").toLowerCase();
+    return raw
+      .split(/[^\u4e00-\u9fffA-Za-z0-9_]+/)
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 2);
+  }
+
+  function splitStudioTranscriptChunks(text) {
+    const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+    const chunks = [];
+    let buf = [];
+    const flush = () => {
+      const value = buf.join("\n").trim();
+      if (value) chunks.push(value);
+      buf = [];
+    };
+    for (const line of lines) {
+      const trimmed = line.trim();
+      const boundary = !trimmed
+        || /^#{1,4}\s/.test(trimmed)
+        || /^\[BV/i.test(trimmed)
+        || /^===\s/.test(trimmed);
+      if (boundary && buf.length) flush();
+      if (trimmed) buf.push(line);
+      if (buf.join("\n").length >= 720) flush();
+    }
+    flush();
+    return chunks;
+  }
+
+  function scoreStudioChunk(chunk, tokens) {
+    const low = String(chunk || "").toLowerCase();
+    let score = 0;
+    for (const token of tokens) {
+      if (!low.includes(token)) continue;
+      score += token.length >= 4 ? 2 : 1;
+    }
+    if (/^#{1,4}\s/.test(chunk.trim())) score += 0.4;
+    return score;
+  }
+
+  function compressStudioTranscript(text, query, budget = STUDIO_CHAT_CONTEXT_CHARS) {
+    const value = String(text || "");
+    if (!value) {
+      return { text: "", compressed: false, original: 0, kept: 0, chunks: 0, total: 0 };
+    }
+    if (value.length <= budget) {
+      return { text: value, compressed: false, original: value.length, kept: value.length, chunks: 1, total: 1 };
+    }
+    const chunks = splitStudioTranscriptChunks(value);
+    const tokens = studioQueryTokens(query);
+    const selected = new Set();
+    const head = Math.min(2, chunks.length);
+    for (let i = 0; i < head; i++) selected.add(i);
+    const ranked = chunks
+      .map((chunk, index) => ({ chunk, index, score: scoreStudioChunk(chunk, tokens) }))
+      .filter((row) => !selected.has(row.index))
+      .sort((a, b) => b.score - a.score || a.index - b.index);
+    let used = [...selected].reduce((sum, index) => sum + chunks[index].length, 0);
+    for (const row of ranked) {
+      if (row.score <= 0 && used > budget * 0.55) continue;
+      if (used + row.chunk.length > budget) continue;
+      selected.add(row.index);
+      used += row.chunk.length;
+      if (used >= budget * 0.94) break;
+    }
+    const ordered = [...selected].sort((a, b) => a - b);
+    const parts = [];
+    let prev = -2;
+    for (const index of ordered) {
+      if (index !== prev + 1) parts.push("…");
+      parts.push(chunks[index]);
+      prev = index;
+    }
+    return {
+      text: parts.join("\n\n"),
+      compressed: true,
+      original: value.length,
+      kept: used,
+      chunks: selected.size,
+      total: chunks.length,
+    };
+  }
+
+  function clipStudioSnippet(text, max) {
+    const value = String(text || "").replace(/\s+/g, " ").trim();
+    if (value.length <= max) return value;
+    return `${value.slice(0, Math.max(0, max - 1))}…`;
+  }
+
+  function compactStudioMemoryText(text, budget = STUDIO_CHAT_MEMORY_CHARS) {
+    const lines = String(text || "").split("\n").map((line) => line.trim()).filter(Boolean);
+    if (!lines.length) return "";
+    const kept = [];
+    let used = 0;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      if (used + line.length + 1 > budget && kept.length) break;
+      kept.unshift(line);
+      used += line.length + 1;
+    }
+    return kept.join("\n");
+  }
+
+  function refreshStudioMemory() {
+    const all = (state.studioMessages || []).filter((msg) => (
+      (msg.role === "user" || msg.role === "assistant")
+      && msg.content
+      && msg.status !== "running"
+    ));
+    if (all.length <= STUDIO_CHAT_KEEP_RECENT) return false;
+    const foldable = all.slice(0, -STUDIO_CHAT_KEEP_RECENT);
+    const lastId = String(state.studioMemoryUntilId || "");
+    const already = lastId ? foldable.findIndex((msg) => msg.id === lastId) : -1;
+    const fresh = already >= 0 ? foldable.slice(already + 1) : foldable;
+    if (!fresh.length) return !!state.studioMemory;
+    const bullets = fresh.map((msg) => (
+      msg.role === "user"
+        ? `- 问：${clipStudioSnippet(msg.content, 72)}`
+        : `- 答：${clipStudioSnippet(msg.content, 140)}`
+    ));
+    state.studioMemory = compactStudioMemoryText(
+      [state.studioMemory, ...bullets].filter(Boolean).join("\n"),
+    );
+    state.studioMemoryUntilId = foldable[foldable.length - 1]?.id || lastId;
+    state.studioMemoryTurns = foldable.length;
+    return true;
+  }
+
+  function matchStudioSlash(query) {
+    const q = String(query || "").replace(/^\//, "").trim().toLowerCase();
+    return STUDIO_SLASH_COMMANDS.filter((cmd) => !q || cmd.aliases.some((a) => a.startsWith(q) || a.includes(q)));
+  }
+
+  function parseStudioSlashInput(text) {
+    const hit = String(text || "").trim().match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/);
+    if (!hit) return null;
+    const token = String(hit[1] || "").toLowerCase();
+    const cmd = STUDIO_SLASH_COMMANDS.find((c) => c.aliases.includes(token));
+    return cmd ? { cmd, rest: String(hit[2] || "").trim() } : null;
+  }
+
+  function studioLastAssistantText() {
+    const msgs = state.studioMessages || [];
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === "assistant" && msgs[i].content) return String(msgs[i].content);
+    }
+    return "";
+  }
+
+  function renderStudioSlashMenu() {
+    const root = document.getElementById(PANEL_ID);
+    const menu = root?.querySelector('[data-role="studio-slash"]');
+    const input = root?.querySelector('[data-role="studio-input"]');
+    if (!menu || !input) return;
+    const value = String(input.value || "");
+    const typingCommand = /^\/[^\s]*$/.test(value);
+    if (!typingCommand) {
+      menu.hidden = true;
+      return;
+    }
+    const items = matchStudioSlash(value);
+    if (!items.length) {
+      menu.hidden = true;
+      return;
+    }
+    if (state.studioSlashIndex >= items.length) state.studioSlashIndex = 0;
+    menu.hidden = false;
+    menu.innerHTML = items.map((cmd, i) => (
+      `<button type="button" class="${i === state.studioSlashIndex ? "active" : ""}" data-studio-slash="${escapeAttr(cmd.id)}"><code>/${escapeHtml(cmd.aliases[0])}</code><span>${escapeHtml(cmd.hint)}</span></button>`
+    )).join("");
+  }
+
+  function hideStudioSlashMenu() {
+    const menu = document.getElementById(PANEL_ID)?.querySelector('[data-role="studio-slash"]');
+    if (menu) menu.hidden = true;
+  }
+
+  function studioMessageHtml(msg) {
+    const role = msg.role === "user" ? "user" : msg.role === "system" ? "system" : "assistant";
+    if (role === "system") {
+      return `<div class="bsb-studio-msg system">${escapeHtml(msg.content || "")}</div>`;
+    }
+    if (role === "user") {
+      return `<div class="bsb-studio-msg user"><span class="bsb-studio-role">你</span><div class="bsb-studio-bubble">${escapeHtml(msg.content || "")}</div></div>`;
+    }
+    const body = msg.content
+      ? (typeof marked !== "undefined"
+        ? sanitizeRenderedHtml(String(marked.parse(msg.content) || ""))
+        : `<p>${escapeHtml(msg.content)}</p>`)
+      : (msg.status === "running" ? "<p>…</p>" : "<p></p>");
+    return `<div class="bsb-studio-msg assistant" data-studio-msg="${escapeAttr(msg.id || "")}"><span class="bsb-studio-role">研读</span><div class="bsb-studio-bubble">${body}</div></div>`;
+  }
+
+  function renderStudioCanvas() {
+    const root = ensurePanel();
+    if (state.ui) state.ui.aiStage = "chat";
+    applyAiWorkbenchStageUi();
+    const host = root.querySelector('[data-role="ai-content"]');
+    const meta = root.querySelector('[data-role="ai-canvas-meta"]');
+    const ctx = studioTranscriptContext();
+    const route = currentRouteVideoRef();
+    const pack = state.studioLastContextMeta;
+    const bits = [ctx.source];
+    if (route?.bvid) bits.push(route.bvid);
+    if (pack?.compressed) bits.push(`字幕 ${Math.round(pack.original / 100) / 10}k→${Math.round(pack.kept / 100) / 10}k`);
+    if (state.studioMemoryTurns) bits.push(`记忆 ${state.studioMemoryTurns} 轮`);
+    if (meta) meta.textContent = bits.join(" · ");
+    if (!host) return;
+    if (!(state.studioMessages || []).length) {
+      host.innerHTML = `<div class="bsb-empty"><div class="bsb-empty-ico">◎</div><strong>对着这一期提问</strong><span>像聊天一样追问字幕。超长字幕会按问题压缩，旧对话会折进记忆。输入 <code>/</code> 可压缩、看记忆或清空。</span></div>`;
+      return;
+    }
+    host.innerHTML = `<div class="bsb-studio-thread">${state.studioMessages.map(studioMessageHtml).join("")}</div>`;
+    const box = root.querySelector('[data-role="ai-md"]');
+    if (box) {
+      state.aiProgScroll = true;
+      box.scrollTop = box.scrollHeight;
+      requestAnimationFrame(() => { state.aiProgScroll = false; });
+    }
+  }
+
+  function refreshStudioStopUi() {
+    const root = document.getElementById(PANEL_ID);
+    if (!root) return;
+    const show = !!(state.aiBusy || state.studioBusy);
+    root.querySelectorAll('[data-act="ai-stop"]').forEach((b) => {
+      b.style.display = show ? "" : "none";
+    });
+    const stream = root.querySelector('[data-role="ai-stream"]');
+    if (stream) stream.classList.toggle("streaming", !!(state.studioBusy || (typeof activeAiRunBusy === "function" && activeAiRunBusy())));
+  }
+
+  function abortStudioRequest() {
+    const runtime = state.studioRuntime;
+    if (!runtime) return;
+    runtime.abort = true;
+    try { runtime.abortController?.abort(); } catch (_) { /* noop */ }
+    try { runtime.xhr?.abort?.(); } catch (_) { /* noop */ }
+  }
+
+  function studioClearChat() {
+    abortStudioRequest();
+    state.studioBusy = false;
+    state.studioRuntime = null;
+    state.studioMessages = [];
+    state.studioMemory = "";
+    state.studioMemoryUntilId = "";
+    state.studioMemoryTurns = 0;
+    state.studioLastContextMeta = null;
+    persistStudioChat();
+    renderStudioCanvas();
+    refreshStudioStopUi();
+    setStatus("已清空当前对话", "ok");
+  }
+
+  function studioCopyLast() {
+    const text = studioLastAssistantText();
+    if (!text) return setStatus("还没有可复制的回答", "err");
+    clipboardWrite(text);
+    setStatus("已复制上一条回答", "ok");
+  }
+
+  function studioExportChat() {
+    const msgs = (state.studioMessages || []).filter((m) => m.role !== "system");
+    if (!msgs.length) return setStatus("当前没有可导出的对话", "err");
+    const route = currentRouteVideoRef();
+    const memory = String(state.studioMemory || "").trim();
+    const text = [
+      memory ? `## 压缩记忆\n\n${memory}` : "",
+      ...msgs.map((m) => `## ${m.role === "user" ? "你" : "研读"}\n\n${m.content || ""}`),
+    ].filter(Boolean).join("\n\n");
+    downloadText(`${safeFilename(`${route?.bvid || "video"}_对话`)}.md`, text);
+    setStatus("已导出对话 Markdown", "ok");
+  }
+
+  function studioShowMemory() {
+    refreshStudioMemory();
+    const memory = String(state.studioMemory || "").trim();
+    if (!memory) {
+      setStatus("还没有压缩记忆。多聊几轮后旧对话会自动折进记忆。", "ok");
+      return;
+    }
+    state.studioMessages = [
+      ...(state.studioMessages || []),
+      {
+        id: `sys-${Date.now()}`,
+        role: "system",
+        content: `已压缩 ${state.studioMemoryTurns || 0} 轮旧对话：\n${memory}`,
+      },
+    ];
+    persistStudioChat();
+    renderStudioCanvas();
+  }
+
+  async function studioCompressNow() {
+    const folded = refreshStudioMemory();
+    persistStudioChat();
+    renderStudioCanvas();
+    if (!folded && !state.studioMemory) {
+      setStatus("对话还不够长，无需压缩记忆", "ok");
+      return;
+    }
+    const model = getStudioModelConfig();
+    const memory = String(state.studioMemory || "").trim();
+    if (!model || !memory || memory.length < 400) {
+      setStatus(`已抽取压缩记忆 ${state.studioMemoryTurns || 0} 轮 · ${memory.length} 字`, "ok");
+      return;
+    }
+    if (state.studioBusy) {
+      setStatus(`已抽取压缩记忆 ${state.studioMemoryTurns || 0} 轮。生成中时不另调模型精炼。`, "ok");
+      return;
+    }
+    const runtime = createAiRuntime("对话记忆压缩");
+    state.studioRuntime = runtime;
+    state.studioBusy = true;
+    refreshStudioStopUi();
+    setStatus("正在精炼压缩记忆…");
+    let latest = "";
+    try {
+      await new Promise((resolve, reject) => {
+        requestChatCompletion({
+          runtime,
+          baseUrl: model.baseUrl,
+          apiKey: model.apiKey,
+          model: model.model,
+          temperature: 0.2,
+          maxTokens: 800,
+          stream: false,
+          messages: [
+            {
+              role: "system",
+              content: "把旧对话记忆压成更短的要点清单。只保留问题、结论、步骤、边界和未决问题。简体中文。不要引言。每条一行，以 '- ' 开头，最多 12 条。",
+            },
+            { role: "user", content: memory },
+          ],
+          onStatus() {},
+          onDelta(_delta, full) { latest = String(full || ""); },
+          onDone(full) { latest = String(full || latest || ""); resolve(); },
+          onError(error) { reject(error instanceof Error ? error : new Error(String(error || "压缩失败"))); },
+        });
+      });
+      const next = compactStudioMemoryText(latest.trim());
+      if (next) state.studioMemory = next;
+      persistStudioChat();
+      renderStudioCanvas();
+      setStatus(`记忆已精炼 · ${state.studioMemory.length} 字`, "ok");
+    } catch (error) {
+      if (runtime.abort) setStatus("已停止记忆压缩");
+      else setStatus(`记忆精炼失败，仍保留抽取稿：${error?.message || error}`, "err");
+    } finally {
+      state.studioBusy = false;
+      state.studioRuntime = null;
+      refreshStudioStopUi();
+    }
+  }
+
+  function runStudioSlash(commandId) {
+    if (commandId === "clear") return studioClearChat();
+    if (commandId === "stop") {
+      abortStudioRequest();
+      setStatus("正在停止对话生成…");
+      return;
+    }
+    if (commandId === "copy") return studioCopyLast();
+    if (commandId === "export") return studioExportChat();
+    if (commandId === "compress") return studioCompressNow();
+    if (commandId === "memory") return studioShowMemory();
+    if (commandId === "raw") {
+      state.studioContextPref = "raw";
+      persistStudioChat();
+      renderStudioCanvas();
+      setStatus("对话上下文改为原始字幕", "ok");
+      return;
+    }
+    if (commandId === "norm") {
+      state.studioContextPref = "processed";
+      persistStudioChat();
+      renderStudioCanvas();
+      setStatus("对话上下文改为规范化稿（没有则回退原文）", "ok");
+      return;
+    }
+    if (commandId === "help") {
+      state.studioMessages = [
+        ...(state.studioMessages || []),
+        {
+          id: `sys-${Date.now()}`,
+          role: "system",
+          content: STUDIO_SLASH_COMMANDS.map((c) => `/${c.aliases[0]}  ${c.hint}`).join("\n"),
+        },
+      ];
+      persistStudioChat();
+      renderStudioCanvas();
+    }
+  }
+
+  async function sendStudioChat(rawText) {
+    const text = String(rawText || "").trim();
+    if (!text || state.studioBusy) return;
+    const slash = parseStudioSlashInput(text);
+    if (slash) {
+      runStudioSlash(slash.cmd.id);
+      return;
+    }
+    const model = getStudioModelConfig();
+    if (!model) {
+      setStatus("没有可用 LLM。请先在设置 → LLM 填写 Base URL / API Key / Model", "err");
+      return;
+    }
+    const ctx = studioTranscriptContext();
+    if (!ctx.text) {
+      setStatus("当前视频还没有字幕，先抓取后再提问", "err");
+      return;
+    }
+    const route = currentRouteVideoRef();
+    const userMsg = { id: `u-${Date.now()}`, role: "user", content: text, status: "done" };
+    const botMsg = { id: `a-${Date.now()}`, role: "assistant", content: "", status: "running" };
+    state.studioMessages = [...(state.studioMessages || []), userMsg, botMsg];
+    persistStudioChat();
+    renderStudioCanvas();
+    refreshStudioMemory();
+    const packed = compressStudioTranscript(
+      ctx.text,
+      [text, ...(state.studioMessages || []).filter((m) => m.role === "user").slice(-3).map((m) => m.content)].join(" "),
+    );
+    state.studioLastContextMeta = packed;
+    const history = state.studioMessages
+      .filter((m) => m.role === "user" || m.role === "assistant")
+      .filter((m) => m.id !== botMsg.id && m.content)
+      .slice(-STUDIO_CHAT_KEEP_RECENT)
+      .map((m) => ({ role: m.role, content: m.content }));
+    const memory = String(state.studioMemory || "").trim();
+    const system = [
+      "你在帮用户研读当前这条视频字幕。只根据提供的字幕与压缩记忆回答，不编造字幕没有的事实。",
+      "简体中文。术语、命令、代码可留原文。不确定就明说。",
+      "像对话一样直接答，先给结论，再补必要步骤或边界。不要复述整段字幕。",
+      "",
+      `<video>${route?.bvid || ""} P${route?.page || 1}</video>`,
+      `<context_source>${ctx.source}${packed.compressed ? " · compressed" : ""}</context_source>`,
+      memory ? `<conversation_memory>\n${memory}\n</conversation_memory>` : "",
+      "<transcript>",
+      packed.text,
+      "</transcript>",
+    ].filter(Boolean).join("\n");
+    const runtime = createAiRuntime(`对话 · ${model.name || model.model}`);
+    state.studioRuntime = runtime;
+    state.studioBusy = true;
+    refreshStudioStopUi();
+    let latest = "";
+    try {
+      await new Promise((resolve, reject) => {
+        requestChatCompletion({
+          runtime,
+          baseUrl: model.baseUrl,
+          apiKey: model.apiKey,
+          model: model.model,
+          temperature: model.temperature,
+          maxTokens: model.maxTokens,
+          stream: model.stream !== false,
+          messages: [{ role: "system", content: system }, ...history, { role: "user", content: text }],
+          onStatus() {},
+          onDelta(_delta, full) {
+            latest = String(full || "");
+            botMsg.content = latest;
+            const bubble = document.querySelector(`#${PANEL_ID} [data-studio-msg="${botMsg.id}"] .bsb-studio-bubble`);
+            if (bubble) bubble.textContent = latest;
+            else renderStudioCanvas();
+          },
+          onDone(full) { latest = String(full || latest || ""); resolve(); },
+          onError(error) { reject(error instanceof Error ? error : new Error(String(error || "对话失败"))); },
+        });
+      });
+      botMsg.content = latest.trim();
+      botMsg.status = "done";
+      setStatus("对话已回复", "ok");
+    } catch (error) {
+      const stopped = !!runtime.abort;
+      botMsg.content = latest.trim() || (stopped ? "已停止" : String(error?.message || error));
+      botMsg.status = stopped ? "stopped" : "error";
+      setStatus(stopped ? "对话已停止" : `对话失败：${error?.message || error}`, stopped ? "" : "err");
+    } finally {
+      state.studioBusy = false;
+      state.studioRuntime = null;
+      persistStudioChat();
+      renderStudioCanvas();
+      refreshStudioStopUi();
+    }
+  }
+
   function currentAiWorkbenchStage() {
-    return state.ui?.aiStage === "postprocess" ? "postprocess" : "preprocess";
+    const stage = state.ui?.aiStage;
+    if (stage === "postprocess" || stage === "chat") return stage;
+    return "preprocess";
   }
 
   function applyAiWorkbenchStageUi() {
@@ -11399,17 +12495,24 @@
     });
     const preNav = root.querySelector('[data-role="ai-preprocess-nav"]');
     const postNav = root.querySelector('[data-role="ai-postprocess-nav"]');
+    const dock = root.querySelector('[data-role="studio-dock"]');
+    const wrap = root.querySelector(".bsb-ai-canvas-wrap");
     if (preNav) preNav.hidden = stage !== "preprocess";
     if (postNav) postNav.hidden = stage !== "postprocess";
+    if (dock) dock.hidden = stage !== "chat";
+    wrap?.classList.toggle("is-studio", stage === "chat");
     root.querySelectorAll("[data-preprocess-action]").forEach((el) => { el.hidden = stage !== "preprocess"; });
     root.querySelectorAll("[data-postprocess-action]").forEach((el) => { el.hidden = stage !== "postprocess"; });
+    root.querySelectorAll("[data-studio-action]").forEach((el) => { el.hidden = stage !== "chat"; });
+    root.querySelectorAll("[data-pipeline-action]").forEach((el) => { el.hidden = stage === "chat"; });
     const label = root.querySelector('[data-role="ai-canvas-stage-label"]');
-    if (label) label.textContent = stage === "preprocess" ? "预处理" : "后处理";
+    if (label) label.textContent = stage === "preprocess" ? "预处理" : stage === "chat" ? "对话" : "后处理";
     root.querySelectorAll("[data-ai-preprocess-view]").forEach((button) => {
       const active = button.dataset.aiPreprocessView === state.aiInputView;
       button.classList.toggle("active", active);
       button.setAttribute("aria-selected", active ? "true" : "false");
     });
+    refreshStudioStopUi();
   }
 
   function parseProcessedTimestampToken(token) {
@@ -11593,13 +12696,16 @@
   }
 
   async function setAiWorkbenchStage(stage, opts = {}) {
-    const next = stage === "postprocess" ? "postprocess" : "preprocess";
+    const next = stage === "postprocess" ? "postprocess" : stage === "chat" ? "chat" : "preprocess";
     if (state.ui) state.ui.aiStage = next;
     applyAiWorkbenchStageUi();
     if (!opts.silent) saveUiGeom();
     if (opts.render === false) return;
     if (next === "preprocess") await renderPreprocessCanvas();
-    else await renderPostprocessCanvas();
+    else if (next === "chat") {
+      loadStudioChat();
+      renderStudioCanvas();
+    } else await renderPostprocessCanvas();
   }
 
   function renderAiResultTabs() {
@@ -11654,18 +12760,37 @@
     return `<div class="bsb-flow-stepper ${disabled ? "disabled" : ""}"><button type="button" data-flow-step="-1" ${off} aria-label="减少">−</button><div class="bsb-flow-stepper-value"><input type="number" min="${min}" max="${max}" step="${step}" value="${escapeAttr(value)}" ${dataAttr} ${off}>${unit ? `<span class="bsb-flow-stepper-unit">${escapeHtml(unit)}</span>` : ""}</div><button type="button" data-flow-step="1" ${off} aria-label="增加">＋</button></div>`;
   }
 
+  function flowTaskModelsHtml(task, profiles) {
+    const list = Array.isArray(profiles) ? profiles : [];
+    const selectedIds = (task.modelIds || []).filter((id) => list.some((p) => p.id === id));
+    const ranked = selectedIds.map((id, i) => {
+      const profile = list.find((p) => p.id === id);
+      const name = profile?.name || profile?.model || id;
+      const off = profile && profile.enabled === false ? " · 停用" : "";
+      return `<div class="bsb-model-rank" draggable="true" data-flow-model-id="${escapeAttr(id)}" title="拖动调整运行顺序">
+        <span class="bsb-model-rank-handle" aria-hidden="true">⠿</span>
+        <span class="bsb-model-rank-n">${String(i + 1).padStart(2, "0")}</span>
+        <span class="bsb-model-rank-name">${escapeHtml(name)}${off}</span>
+        <button type="button" class="bsb-model-rank-remove" data-flow-task-model-remove="${escapeAttr(id)}" title="移出运行队列" aria-label="移出 ${escapeAttr(name)}">×</button>
+      </div>`;
+    }).join("");
+    const available = list.filter((p) => !selectedIds.includes(p.id)).map((p) => (
+      `<button type="button" class="bsb-model-add" data-flow-task-model-add="${escapeAttr(p.id)}" title="追加到队列末尾">＋ ${escapeHtml(p.name || p.model)}${p.enabled === false ? " · 停用" : ""}</button>`
+    )).join("");
+    return `<div class="bsb-model-order">
+      <div class="bsb-model-rank-list">${ranked || '<span class="bsb-ai-result-empty">还没有模型。从下方添加到运行队列，上到下即 1 → 2 → 3。</span>'}</div>
+      ${list.length ? `<div class="bsb-model-add-list">${available || '<span class="bsb-ai-result-empty">全部模型已在队列中</span>'}</div>` : '<span class="bsb-ai-result-empty">请先在设置 → LLM 新建模型</span>'}
+    </div>`;
+  }
+
   function flowTaskCardHtml(task, index, prompts, profiles) {
     const posts = prompts.filter((p) => p.stage === "postprocess");
     const prompt = posts.find((p) => p.id === task.promptId) || posts[0] || null;
     const promptOptions = posts.map((p) => `<option value="${escapeAttr(p.id)}"${p.id === task.promptId ? " selected" : ""}>${escapeHtml(p.name)}</option>`).join("");
-    const modelPicks = profiles.map((p) => {
-      const checked = (task.modelIds || []).includes(p.id);
-      return `<label class="bsb-model-pick" title="${escapeAttr(p.model || p.name)}"><input type="checkbox" data-flow-task-model="${escapeAttr(p.id)}" ${checked ? "checked" : ""}> ${escapeHtml(p.name || p.model)}${p.enabled ? "" : " · 停用"}</label>`;
-    }).join("");
     return `<article class="bsb-output-task-card" data-flow-task-id="${escapeAttr(task.id)}">
       <div class="bsb-output-task-head"><span class="bsb-output-task-index">${String(index + 1).padStart(2, "0")}</span><span class="bsb-output-task-name">${escapeHtml(prompt?.name || "未命名产物")}</span><button type="button" class="bsb-mini" data-flow-task-remove="${escapeAttr(task.id)}" title="移除这个产物">移除</button></div>
       <div class="bsb-flow-field"><span class="bsb-flow-label">产物 Prompt</span>${flowSelectHtml("data-flow-task-prompt", promptOptions || '<option value="">没有 POST Prompt</option>')}</div>
-      <div class="bsb-flow-field" style="margin-top:9px"><span class="bsb-flow-label">LLM · 可多选</span><div class="bsb-model-picks">${modelPicks || '<span class="bsb-ai-result-empty">请先在设置 → LLM 新建模型</span>'}</div></div>
+      <div class="bsb-flow-field" style="margin-top:9px"><span class="bsb-flow-label">LLM 运行顺序</span>${flowTaskModelsHtml(task, profiles)}</div>
     </article>`;
   }
 
@@ -11680,12 +12805,20 @@
     const preOptions = pres.map((p) => `<option value="${escapeAttr(p.id)}"${p.id === state.activePrePromptId ? " selected" : ""}>${escapeHtml(p.name)}</option>`).join("");
     const readyProfiles = profiles.filter((p) => p.apiKey && p.baseUrl && p.model);
     const preModelOptions = readyProfiles.map((p) => `<option value="${escapeAttr(p.id)}"${p.id === state.preprocessModelId ? " selected" : ""}>${escapeHtml(p.name || p.model)}</option>`).join("");
-    host.innerHTML = `<div class="bsb-drawer-head"><div class="bsb-drawer-title"><strong>处理方案</strong><span>配置输入整理与最终要生成的产物。这里只定义流程，不展示结果。</span></div><button type="button" class="bsb-icon-btn" data-act="ai-drawer-close" aria-label="关闭">×</button></div>
+    const studioModel = getStudioModelConfig();
+    const studioModelOptions = readyProfiles.map((p) => `<option value="${escapeAttr(p.id)}"${studioModel?.id === p.id ? " selected" : ""}>${escapeHtml(p.name || p.model)}</option>`).join("");
+    const ctxPref = state.studioContextPref === "raw" || state.studioContextPref === "processed" ? state.studioContextPref : "auto";
+    const ctxOptions = [
+      `<option value="auto"${ctxPref === "auto" ? " selected" : ""}>自动（规范化稿优先）</option>`,
+      `<option value="processed"${ctxPref === "processed" ? " selected" : ""}>规范化稿</option>`,
+      `<option value="raw"${ctxPref === "raw" ? " selected" : ""}>原始字幕</option>`,
+    ].join("");
+    host.innerHTML = `<div class="bsb-drawer-head"><div class="bsb-drawer-title"><strong>处理方案</strong><span>配置预处理、对话与后处理。这里只定义流程，不展示结果。</span></div><button type="button" class="bsb-icon-btn" data-act="ai-drawer-close" aria-label="关闭">×</button></div>
       <div class="bsb-drawer-body">
         <section class="bsb-flow-section">
-          <div class="bsb-flow-section-head"><div><strong>输入整理</strong><span>一次规范化，供所有产物复用</span></div><label class="bsb-flow-switch"><input type="checkbox" data-flow-preprocess-enabled ${state.preprocessEnabled ? "checked" : ""}><span class="bsb-flow-switch-track" aria-hidden="true"></span><span class="bsb-flow-switch-text">${state.preprocessEnabled ? "已开启" : "已关闭"}</span></label></div>
+          <div class="bsb-flow-section-head"><div><strong>预处理</strong><span>一次规范化，供对话与后处理复用</span></div><label class="bsb-flow-switch"><input type="checkbox" data-flow-preprocess-enabled ${state.preprocessEnabled ? "checked" : ""}><span class="bsb-flow-switch-track" aria-hidden="true"></span><span class="bsb-flow-switch-text">${state.preprocessEnabled ? "已开启" : "已关闭"}</span></label></div>
           <div class="bsb-flow-grid">
-            <div class="bsb-flow-field"><span class="bsb-flow-label">Prompt</span>${flowSelectHtml("data-flow-preprompt", preOptions || '<option value="">没有 PRE Prompt</option>', !state.preprocessEnabled)}</div>
+            <div class="bsb-flow-field"><span class="bsb-flow-label">Prompt</span>${flowSelectHtml("data-flow-preprompt", preOptions || '<option value="">没有预处理 Prompt</option>', !state.preprocessEnabled)}</div>
             <div class="bsb-flow-field"><span class="bsb-flow-label">LLM</span>${flowSelectHtml("data-flow-premodel", preModelOptions || '<option value="">没有可用 LLM</option>', !state.preprocessEnabled)}</div>
             <div class="bsb-flow-field"><span class="bsb-flow-label">全局并发</span>${flowStepperHtml("data-flow-preconcurrency", state.preprocessConcurrency, 1, 8, 1, "", !state.preprocessEnabled)}</div>
             <div class="bsb-flow-field"><span class="bsb-flow-label">目标块时长</span>${flowStepperHtml("data-flow-pretarget-minutes", state.preprocessTargetMinutes, 2, 30, 1, "分钟", !state.preprocessEnabled)}</div>
@@ -11698,13 +12831,21 @@
               <div class="bsb-flow-field"><span class="bsb-flow-label">失败重试</span>${flowStepperHtml("data-flow-preretries", state.preprocessRetries, 0, 4, 1, "次", !state.preprocessEnabled)}</div>
             </div>
           </details>
-          <div class="bsb-preprocess-note">关闭后，各产物直接读取原始字幕。长视频按真实时间戳优先切块；单块超过字符硬上限会提前截断。Overlap 只用于跨块上下文，最终按真实时间戳确定性去重。并发是全局 Worker 数，不会乘以视频数量。</div>
+          <div class="bsb-preprocess-note">关闭后，对话与后处理直接读取原始字幕。长视频按真实时间戳优先切块；单块超过字符硬上限会提前截断。Overlap 只用于跨块上下文，最终按真实时间戳确定性去重。并发是全局 Worker 数，不会乘以视频数量。</div>
         </section>
         <section class="bsb-flow-section">
-          <div class="bsb-flow-section-head"><div><strong>输出产物</strong><span>${tasks.length} 个 · 每个产物独立选择 Prompt 与 LLM</span></div><button type="button" class="bsb-btn ghost" data-act="post-task-add">＋ 添加产物</button></div>
-          <div data-role="flow-task-list">${tasks.map((t, i) => flowTaskCardHtml(t, i, prompts, profiles)).join("") || '<div class="bsb-input-empty">还没有产物。</div>'}</div>
+          <div class="bsb-flow-section-head"><div><strong>对话</strong><span>对着当前字幕多轮提问，不走「运行」流水线</span></div></div>
+          <div class="bsb-flow-grid">
+            <div class="bsb-flow-field"><span class="bsb-flow-label">LLM</span>${flowSelectHtml("data-flow-studiomodel", studioModelOptions || '<option value="">没有可用 LLM</option>')}</div>
+            <div class="bsb-flow-field"><span class="bsb-flow-label">字幕上下文</span>${flowSelectHtml("data-flow-studiocontext", ctxOptions)}</div>
+          </div>
+          <div class="bsb-preprocess-note">在 AI 工作台的「对话」页提问。输入 / 可清空、压缩记忆、切换原文或规范化稿。超长字幕会按问题压缩，旧轮次会折进记忆。</div>
         </section>
-        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span class="bsb-ai-result-empty">Prompt 与 LLM 的具体内容仍在“设置”中维护。</span><button type="button" class="bsb-btn" data-act="ai-reprocess" ${state.preprocessEnabled ? "" : "disabled"}>重做输入整理</button></div>
+        <section class="bsb-flow-section">
+          <div class="bsb-flow-section-head"><div><strong>后处理</strong><span>${tasks.length} 个 · 每个产物独立选择 Prompt 与 LLM</span></div><button type="button" class="bsb-btn ghost" data-act="post-task-add">＋ 添加产物</button></div>
+          <div data-role="flow-task-list">${tasks.map((t, i) => flowTaskCardHtml(t, i, prompts, profiles)).join("") || '<div class="bsb-input-empty">还没有后处理产物。</div>'}</div>
+        </section>
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span class="bsb-ai-result-empty">Prompt 与 LLM 的具体内容仍在“设置”中维护。</span><button type="button" class="bsb-btn" data-act="ai-reprocess" ${state.preprocessEnabled ? "" : "disabled"}>重做预处理</button></div>
       </div>`;
   }
 
@@ -11971,12 +13112,8 @@
     state.aiBusy = anyBusy;
     const root = ensurePanel();
     root.classList.toggle("ai-busy", anyBusy);
-    root.querySelectorAll('[data-act="ai-stop"]').forEach((b) => {
-      b.style.display = anyBusy ? "" : "none";
-    });
     refreshActionDisabledState();
-    const stream = root.querySelector('[data-role="ai-stream"]');
-    if (stream) stream.classList.toggle("streaming", activeAiRunBusy());
+    refreshStudioStopUi();
     renderAiResultTabs();
   }
 
@@ -13030,6 +14167,182 @@
     }
   }
 
+  const FOLIO_CLASS_ALLOW = new Set([
+    "bsb-folio", "kicker", "lede", "callout", "steps", "quote", "meta",
+  ]);
+
+  function extractHtmlFolioSource(text) {
+    const raw = String(text || "");
+    const fence = raw.match(/```html\s*\n([\s\S]*?)```/i);
+    if (fence?.[1]) return String(fence[1]).trim();
+    const article = raw.match(/<article\b[\s\S]*<\/article>/i);
+    return article ? article[0].trim() : "";
+  }
+
+  function isHtmlFolioSource(text) {
+    return !!extractHtmlFolioSource(text);
+  }
+
+  function extractFolioTitle(html) {
+    const hit = String(html || "").match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i);
+    if (!hit) return "";
+    return stripHtml(hit[1]).replace(/\s+/g, " ").trim();
+  }
+
+  function sanitizeFolioHtml(html) {
+    if (typeof DOMPurify === "undefined") return `<article class="bsb-folio"><p>${escapeHtml(stripHtml(html))}</p></article>`;
+    return DOMPurify.sanitize(html, {
+      USE_PROFILES: { html: true },
+      SANITIZE_NAMED_PROPS: true,
+      FORBID_TAGS: ["script", "style", "iframe", "object", "embed", "form", "link", "meta", "svg", "img", "video", "audio", "base"],
+      ADD_TAGS: ["article", "header", "footer", "section", "aside", "figure", "figcaption", "mark", "nav"],
+      ADD_ATTR: ["class", "id", "data-kind", "aria-label", "role"],
+    });
+  }
+
+  function pruneFolioClasses(root) {
+    root.querySelectorAll("[class]").forEach((el) => {
+      const next = Array.from(el.classList).filter((name) => FOLIO_CLASS_ALLOW.has(name));
+      if (next.length) el.className = next.join(" ");
+      else el.removeAttribute("class");
+    });
+  }
+
+  function slugFolioHeading(text, index) {
+    const base = String(text || "")
+      .toLowerCase()
+      .replace(/[^\u4e00-\u9fff\w]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40);
+    return `folio-${base || "s"}-${index + 1}`;
+  }
+
+  function decorateFolioArticle(article) {
+    if (!article.classList.contains("bsb-folio")) article.classList.add("bsb-folio");
+    const headings = Array.from(article.querySelectorAll("h2, h3"));
+    headings.forEach((h, i) => {
+      if (!h.id) h.id = slugFolioHeading(h.textContent, i);
+    });
+    article.querySelectorAll("aside").forEach((aside) => {
+      const kind = String(aside.getAttribute("data-kind") || "").toLowerCase();
+      if (kind && !["key", "note", "warn"].includes(kind)) aside.removeAttribute("data-kind");
+      aside.classList.add("callout");
+    });
+    return headings.filter((h) => h.tagName === "H2");
+  }
+
+  function buildFolioToc(headings) {
+    const nav = document.createElement("nav");
+    nav.className = "bsb-folio-toc";
+    nav.setAttribute("aria-label", "本页章节");
+    const label = document.createElement("strong");
+    label.textContent = "章节";
+    nav.appendChild(label);
+    headings.forEach((h) => {
+      const a = document.createElement("a");
+      a.href = `#${h.id}`;
+      a.dataset.folioJump = h.id;
+      a.textContent = (h.textContent || "").trim() || "未命名";
+      nav.appendChild(a);
+    });
+    return nav;
+  }
+
+  function bindFolioToc(shell, scrollRoot) {
+    shell.addEventListener("click", (e) => {
+      const link = e.target.closest?.("[data-folio-jump]");
+      if (!link) return;
+      e.preventDefault();
+      const target = shell.querySelector(`#${CSS.escape(link.dataset.folioJump || "")}`);
+      if (!target) return;
+      const box = scrollRoot || shell.closest("[data-role='ai-md']");
+      if (box) {
+        const top = target.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 16;
+        box.scrollTo({ top, behavior: "smooth" });
+      } else {
+        target.scrollIntoView({ block: "start", behavior: "smooth" });
+      }
+      shell.querySelectorAll(".bsb-folio-toc a").forEach((a) => {
+        a.classList.toggle("is-current", a === link);
+      });
+    });
+  }
+
+  function mountHtmlFolio(host, sourceHtml, scrollRoot) {
+    const raw = extractHtmlFolioSource(sourceHtml) || String(sourceHtml || "");
+    const safe = sanitizeFolioHtml(raw);
+    const tpl = document.createElement("template");
+    tpl.innerHTML = safe;
+    let article = tpl.content.querySelector("article");
+    if (!article) {
+      article = document.createElement("article");
+      article.className = "bsb-folio";
+      article.append(...tpl.content.childNodes);
+    }
+    pruneFolioClasses(article);
+    const h2s = decorateFolioArticle(article);
+    const shell = document.createElement("div");
+    shell.className = "bsb-folio-shell";
+    shell.dataset.role = "html-folio";
+    if (h2s.length >= 2) shell.appendChild(buildFolioToc(h2s));
+    const frame = document.createElement("div");
+    frame.className = "bsb-folio-frame";
+    frame.appendChild(article);
+    shell.appendChild(frame);
+    host.replaceChildren(shell);
+    bindFolioToc(shell, scrollRoot);
+    if (h2s[0]) {
+      const first = shell.querySelector(`.bsb-folio-toc a[data-folio-jump="${h2s[0].id}"]`);
+      first?.classList.add("is-current");
+    }
+    return shell;
+  }
+
+  function folioExportTokenCss(flavor) {
+    const palette = getCtpPalette(flavor);
+    return Object.entries(palette).map(([key, hex]) => `--ctp-${key}:${hex};`).join("");
+  }
+
+  function buildStandaloneFolioHtml(title, sourceHtml, flavor) {
+    const raw = extractHtmlFolioSource(sourceHtml) || String(sourceHtml || "");
+    const safe = sanitizeFolioHtml(raw);
+    const tokens = folioExportTokenCss(flavor);
+    const pageTitle = escapeHtml(title || "阅读页");
+    return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${pageTitle}</title>
+<style>
+:root{${tokens}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--ctp-base);color:var(--ctp-text)}
+body{padding:48px 20px 80px}
+.bsb-folio{max-width:40rem;margin:0 auto;font-family:"Iowan Old Style","Palatino Linotype",Palatino,"Songti SC","Source Han Serif SC","Noto Serif SC",Georgia,serif;font-size:18px;line-height:1.72}
+.bsb-folio .kicker{margin:0 0 .7em;font-family:Inter,ui-sans-serif,system-ui,sans-serif;font-size:11px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--ctp-overlay0)}
+.bsb-folio h1{margin:0 0 .55em;font-size:1.8em;font-weight:650;line-height:1.22;letter-spacing:-.02em}
+.bsb-folio .lede{margin:0 0 1.8em;color:var(--ctp-subtext0)}
+.bsb-folio section{margin:0 0 2em}
+.bsb-folio h2{margin:0 0 .7em;font-size:1.2em}
+.bsb-folio p{margin:0 0 .9em}
+.bsb-folio aside{margin:1.1em 0;padding:.75em 1em;border-left:2px solid var(--ctp-lavender);background:color-mix(in srgb,var(--ctp-surface0) 42%,transparent);border-radius:0 10px 10px 0}
+.bsb-folio aside[data-kind="key"]{border-left-color:var(--ctp-yellow)}
+.bsb-folio aside[data-kind="warn"]{border-left-color:var(--ctp-peach)}
+.bsb-folio aside[data-kind="note"]{border-left-color:var(--ctp-sapphire)}
+.bsb-folio blockquote,.bsb-folio figure.quote{margin:1.15em 0;padding:0 0 0 1em;border-left:2px solid var(--ctp-overlay0);color:var(--ctp-subtext1);font-style:italic}
+.bsb-folio mark{background:color-mix(in srgb,var(--ctp-yellow) 38%,transparent)}
+.bsb-folio table{width:100%;border-collapse:collapse;font-size:.92em}
+.bsb-folio th,.bsb-folio td{text-align:left;padding:.45em .55em;border-bottom:1px solid var(--ctp-surface1)}
+.bsb-folio pre{padding:12px 14px;border-radius:10px;overflow:auto;background:var(--ctp-crust)}
+.bsb-folio :not(pre)>code{background:var(--ctp-surface0);padding:.08em .35em;border-radius:5px}
+</style>
+</head>
+<body>${safe}</body>
+</html>
+`;
+  }
+
   async function renderAiMarkdown(md, { streaming } = {}) {
     const root = ensurePanel();
     const box = root.querySelector('[data-role="ai-md"]');
@@ -13054,6 +14367,21 @@
         state.aiRaw = source;
       }
     }
+    if (isHtmlFolioSource(source)) {
+      try { await ensureMarkdownCore(); } catch (_) { /* DOMPurify 可能已在页内 */ }
+      if (epoch !== state.renderEpoch) return;
+      mountHtmlFolio(host, source, box);
+      if (box && !box.querySelector('[data-role="ai-anchor"]')) {
+        const a = document.createElement("div"); a.className = "bsb-ai-anchor"; a.dataset.role = "ai-anchor"; box.appendChild(a);
+      }
+      if (box) {
+        state.aiProgScroll = true; box.scrollTop = 0;
+        requestAnimationFrame(() => { state.aiProgScroll = false; });
+      }
+      state.aiStickBottom = false; state.aiUserReading = true; updateJumpLatestBtn();
+      return;
+    }
+
     const needsMath = hasMathSyntax(source);
     const needsCode = hasCodeSyntax(source);
     const needsMermaid = hasMermaidSyntax(source);
@@ -14997,10 +16325,15 @@
     renderAiResultTabs();
     renderAiInputDrawer();
     refreshAiChips();
+    abortStudioRequest();
+    state.studioBusy = false;
+    state.studioRuntime = null;
+    loadStudioChat(nextRouteKey);
     if (currentAiWorkbenchStage() === "preprocess") renderPreprocessCanvas().catch(() => {});
+    else if (currentAiWorkbenchStage() === "chat") renderStudioCanvas();
     const root = document.getElementById(PANEL_ID);
     const content = root?.querySelector('[data-role="ai-content"]');
-    if (content && currentAiWorkbenchStage() !== "preprocess") {
+    if (content && currentAiWorkbenchStage() === "postprocess") {
       content.innerHTML = `<div class="bsb-empty"><div class="bsb-empty-ico">◌</div><strong>当前视频已切换</strong><span>${nextRouteKey ? escapeHtml(nextRouteKey) + " · " : ""}正在读取当前字幕，旧视频 AI 结果已解除绑定</span></div>`;
     }
   }
@@ -15225,6 +16558,7 @@
 
     // 只有 BV+P 真正变化才清空 AI/字幕绑定；同一视频的无关 URL 参数变化不扰动阅读。
     if (videoChanged) {
+      persistStudioChat(lastRouteVideoKey);
       lastRouteVideoKey = nextVideoKey;
       state.autoCaptureAbortController?.abort();
       clearTimeout(state.autoAnalyzeTimer);

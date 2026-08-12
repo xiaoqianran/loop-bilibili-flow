@@ -174,7 +174,19 @@ describe("Maintained full-feature compatibility source", () => {
     expect(maintainedSource).toContain("bsb-md-highlight");
     expect(maintainedSource).toContain("【阅读强调】");
     expect(maintainedSource).toContain("==关键短语==");
-    expect(maintainedSource).toContain("PROMPT_SCHEMA_VERSION = 6");
+    expect(maintainedSource).toContain("PROMPT_SCHEMA_VERSION = 8");
+    expect(maintainedSource).toContain("function sendStudioChat(");
+    expect(maintainedSource).toContain("<strong>对话</strong>");
+    expect(maintainedSource).toContain("function flowTaskModelsHtml(");
+    expect(maintainedSource).toContain("function bindFlowModelDrag(");
+    expect(maintainedSource).toContain("function compressStudioTranscript(");
+    expect(maintainedSource).toContain("function refreshStudioMemory(");
+    expect(maintainedSource).toContain("data-ai-stage=\"chat\"");
+    expect(maintainedSource).toContain("看完能懂");
+    expect(maintainedSource).toContain("builtin-html-reading-folio");
+    expect(maintainedSource).toContain("function extractHtmlFolioSource(");
+    expect(maintainedSource).toContain("function mountHtmlFolio(");
+    expect(maintainedSource).toContain("bsb-folio-shell");
     // Knowledge MD/math: full-doc prepare + lib ensure before paint.
     expect(maintainedSource).toContain("function ensureKnowledgeRenderLibs(");
     expect(maintainedSource).toContain("function knowledgeChunkToHtml(");
