@@ -32,6 +32,11 @@
 // ==/UserScript==
 
 /**
+ * v6.6.7 — 字幕库任务条：抓取/扫描可暂停继续；左侧主操作与阅读区导出分层，去掉堆叠按钮。
+ * v6.6.6 — 合集扫描展开单元内多分P：带「第一单元」等章节的合集不再只抓每个单元的 P1。
+ * v6.6.5 — Catppuccin 主题切换：设置 → 外观可选 Latte / Frappé / Macchiato / Mocha（默认 Mocha），本地持久化。
+ * v6.6.4 — 设置 → Prompt / LLM 列表支持拖拽排序；顺序持久化，新建仍默认追加到底部。
+ * v6.6.3 — 恢复后台自动 pipeline：标签页即使在后台/未打开面板，点进视频也会自动抓字幕并送 AI；自动分析不再强行展开面板。
  * v6.6.2 — 个人主页不属于合集的散视频统一归入「视频」文件夹（UP/视频/…）。
  * v6.6.1 — 个人主页扫描后拉取该 UP 全部合集（名称+短地址），按 BV 把成员视频迁入 合集 文件夹（路径 UP/合集名/…）。
  * v6.6.0 — 个人主页嵌套文件夹：顶层 = UP 名；其下单视频 / 视频选集 / 合集分层；下载路径同步为 loop-bilibili-subbatch/UP/…。
@@ -92,6 +97,72 @@
     (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.0.2";
   const PANEL_ID = "bili-subbatch-panel";
   const UI_STORE_KEY = "bili-subbatch-ui-v2";
+  /** Catppuccin flavors — official palette https://catppuccin.com/palette/ */
+  const DEFAULT_CTP_FLAVOR = "mocha";
+  const CTP_FLAVOR_IDS = Object.freeze(["latte", "frappe", "macchiato", "mocha"]);
+  const CTP_FLAVORS = Object.freeze([
+    Object.freeze({ id: "mocha", label: "Mocha", hint: "默认深色", emoji: "🌿" }),
+    Object.freeze({ id: "macchiato", label: "Macchiato", hint: "中等深色", emoji: "🌺" }),
+    Object.freeze({ id: "frappe", label: "Frappé", hint: "柔和深色", emoji: "🪴" }),
+    Object.freeze({ id: "latte", label: "Latte", hint: "浅色日间", emoji: "🌻" }),
+  ]);
+  const CTP_PALETTES = Object.freeze({
+    latte: Object.freeze({
+      rosewater: "#dc8a78", flamingo: "#dd7878", pink: "#ea76cb", mauve: "#8839ef",
+      red: "#d20f39", maroon: "#e64553", peach: "#fe640b", yellow: "#df8e1d",
+      green: "#40a02b", teal: "#179299", sky: "#04a5e5", sapphire: "#209fb5",
+      blue: "#1e66f5", lavender: "#7287fd", text: "#4c4f69", subtext1: "#5c5f77",
+      subtext0: "#6c6f85", overlay2: "#7c7f93", overlay1: "#8c8fa1", overlay0: "#9ca0b0",
+      surface2: "#acb0be", surface1: "#bcc0cc", surface0: "#ccd0da",
+      base: "#eff1f5", mantle: "#e6e9ef", crust: "#dce0e8",
+    }),
+    frappe: Object.freeze({
+      rosewater: "#f2d5cf", flamingo: "#eebebe", pink: "#f4b8e4", mauve: "#ca9ee6",
+      red: "#e78284", maroon: "#ea999c", peach: "#ef9f76", yellow: "#e5c890",
+      green: "#a6d189", teal: "#81c8be", sky: "#99d1db", sapphire: "#85c1dc",
+      blue: "#8caaee", lavender: "#babbf1", text: "#c6d0f5", subtext1: "#b5bfe2",
+      subtext0: "#a5adce", overlay2: "#949cbb", overlay1: "#838ba7", overlay0: "#737994",
+      surface2: "#626880", surface1: "#51576d", surface0: "#414559",
+      base: "#303446", mantle: "#292c3c", crust: "#232634",
+    }),
+    macchiato: Object.freeze({
+      rosewater: "#f4dbd6", flamingo: "#f0c6c6", pink: "#f5bde6", mauve: "#c6a0f6",
+      red: "#ed8796", maroon: "#ee99a0", peach: "#f5a97f", yellow: "#eed49f",
+      green: "#a6da95", teal: "#8bd5ca", sky: "#91d7e3", sapphire: "#7dc4e4",
+      blue: "#8aadf4", lavender: "#b7bdf8", text: "#cad3f5", subtext1: "#b8c0e0",
+      subtext0: "#a5adcb", overlay2: "#939ab7", overlay1: "#8087a2", overlay0: "#6e738d",
+      surface2: "#5b6078", surface1: "#494d64", surface0: "#363a4f",
+      base: "#24273a", mantle: "#1e2030", crust: "#181926",
+    }),
+    mocha: Object.freeze({
+      rosewater: "#f5e0dc", flamingo: "#f2cdcd", pink: "#f5c2e7", mauve: "#cba6f7",
+      red: "#f38ba8", maroon: "#eba0ac", peach: "#fab387", yellow: "#f9e2af",
+      green: "#a6e3a1", teal: "#94e2d5", sky: "#89dceb", sapphire: "#74c7ec",
+      blue: "#89b4fa", lavender: "#b4befe", text: "#cdd6f4", subtext1: "#bac2de",
+      subtext0: "#a6adc8", overlay2: "#9399b2", overlay1: "#7f849c", overlay0: "#6c7086",
+      surface2: "#585b70", surface1: "#45475a", surface0: "#313244",
+      base: "#1e1e2e", mantle: "#181825", crust: "#11111b",
+    }),
+  });
+  function normalizeCtpFlavor(value) {
+    const id = String(value || "").trim().toLowerCase();
+    return CTP_FLAVOR_IDS.includes(id) ? id : DEFAULT_CTP_FLAVOR;
+  }
+  function getCtpPalette(flavor = DEFAULT_CTP_FLAVOR) {
+    return CTP_PALETTES[normalizeCtpFlavor(flavor)] || CTP_PALETTES[DEFAULT_CTP_FLAVOR];
+  }
+  function buildCtpFlavorCss(panelId) {
+    return CTP_FLAVOR_IDS.map((id) => {
+      const palette = CTP_PALETTES[id];
+      const vars = Object.entries(palette)
+        .map(([key, hex]) => `--ctp-${key}: ${hex};`)
+        .join("\n        ");
+      if (id === DEFAULT_CTP_FLAVOR) {
+        return `#${panelId},\n      #${panelId}[data-ctp-flavor="${id}"] {\n        ${vars}\n      }`;
+      }
+      return `#${panelId}[data-ctp-flavor="${id}"] {\n        ${vars}\n      }`;
+    }).join("\n\n      ");
+  }
   /** v2：默认 stream=true，避免非流式长推理被中间层 10s 掐断 (client_gone) */
   const AI_STORE_KEY = "bili-subbatch-ai-v2"; // legacy single-profile key
   const AI_PROFILES_STORE_KEY = "bili-subbatch-ai-profiles-v1";
@@ -2533,6 +2604,8 @@
     let meta = {};
     while (hasMore && page <= maxPages) {
       throwIfCanceled();
+      await waitIfJobPaused();
+      throwIfCanceled();
       if (onProgress) onProgress(`拉取列表 ${page}/${maxPages}…（已 ${all.length}）`);
       const res = await fetchListPage(ctx, page, pageSize);
       throwIfCanceled();
@@ -2658,6 +2731,110 @@
     return seasons;
   }
 
+  /**
+   * 合集 archives 接口按 BV 只给一条（默认 P1）。
+   * 带章节的合集（「第一单元 / 1.1、1.2…」）每个单元本身是多分P稿，
+   * 必须再读 view.pages 才能扫到展开后的全部课时。
+   */
+  async function expandCollectionArchivesWithParts(items, {
+    onProgress,
+    shouldCancel,
+    delayMs = 160,
+  } = {}) {
+    const list = Array.isArray(items) ? items : [];
+    const out = [];
+    const seen = new Set();
+    const canceled = () => typeof shouldCancel === "function" && shouldCancel();
+    const throwIfCanceled = () => {
+      if (!canceled()) return;
+      const error = new Error("扫描已取消");
+      error.name = "AbortError";
+      throw error;
+    };
+    const pushItem = (item) => {
+      const bvid = extractBvid(item.bvid) || String(item.bvid || "").trim();
+      if (!bvid) return;
+      const page = Math.max(1, Number(item.page) || 1);
+      const key = `${bvid}#${page}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ ...item, bvid, page });
+    };
+
+    for (let i = 0; i < list.length; i++) {
+      throwIfCanceled();
+      await waitIfJobPaused();
+      throwIfCanceled();
+      const it = list[i];
+      const bvid = extractBvid(it.bvid) || String(it.bvid || "").trim();
+      if (!bvid) continue;
+      setLibraryJob({ kind: "scan", index: i + 1, total: list.length, label: `展开分P ${bvid}` });
+      if (onProgress) onProgress(`展开合集分P ${i + 1}/${list.length}（${bvid}）…`);
+
+      let pages = Array.isArray(it.pages) && it.pages.length ? it.pages : null;
+      let title = String(it.title || "").trim();
+      let author = String(it.author || "").trim();
+      let aid = it.aid;
+      if (!pages || pages.length <= 1) {
+        try {
+          const hit = await fetchVideoViewFast(bvid);
+          const view = hit?.value || {};
+          pages = Array.isArray(view.pages) ? view.pages : [];
+          title = String(view.title || title || bvid).trim();
+          author = String(view.owner?.name || author).trim();
+          aid = view.aid || aid;
+        } catch (error) {
+          if (error?.name === "AbortError") throw error;
+          console.warn("[bili-subbatch] expand collection parts", bvid, error?.message || error);
+          pushItem({
+            ...it,
+            bvid,
+            title,
+            author,
+            aid,
+            page: Math.max(1, Number(it.page) || 1),
+          });
+          continue;
+        }
+      }
+
+      if (!pages.length || pages.length <= 1) {
+        pushItem({
+          ...it,
+          bvid,
+          aid,
+          title: title || it.title || bvid,
+          author,
+          page: 1,
+          pages: pages || [],
+        });
+      } else {
+        for (let p = 0; p < pages.length; p++) {
+          const part = pages[p] || {};
+          const pageNo = Math.max(1, Number(part.page) || p + 1);
+          const partName = String(part.part || "").trim();
+          pushItem({
+            ...it,
+            bvid,
+            aid,
+            title: partName
+              ? `${title || bvid} - P${pageNo}【${partName}】`
+              : `${title || bvid} - P${pageNo}`,
+            author,
+            page: pageNo,
+            part: partName,
+            pages,
+          });
+        }
+      }
+      if (delayMs && i < list.length - 1) {
+        await sleep(delayMs);
+        throwIfCanceled();
+      }
+    }
+    return out;
+  }
+
   async function loadVideoAsItems(bvid, expandAllParts) {
     // page=1 仅用于拿 View/pages 元信息；字幕在批量阶段再按 page 拉
     const r = await fetchSubtitle(bvid, 1);
@@ -2729,6 +2906,9 @@
     cancel: false, // legacy bridge
     cancelScan: false,
     cancelBatch: false,
+    scanPaused: false,
+    batchPaused: false,
+    libraryJob: { kind: "", index: 0, total: 0, label: "" },
     pendingRescan: false,
     pendingAiSend: false,
     mode: "auto", // auto | video | selection | user | favorite | collection | search
@@ -2882,9 +3062,10 @@
       dockExpanded: false,
       view: "ai", // ai | subs | knowledge | settings
       aiStage: "preprocess", // preprocess | postprocess
-      settingsTab: "prompt", // prompt | llm | shortcuts
+      settingsTab: "prompt", // prompt | llm | shortcuts | appearance
       promptStage: "preprocess", // preprocess | postprocess | knowledge
       noteFont: 17,
+      ctpFlavor: DEFAULT_CTP_FLAVOR, // latte | frappe | macchiato | mocha
       // Knowledge layout: AI rail width + workspace Navigator width only.
       knowledgeRailW: 400,
       knowledgeNavW: 280,
@@ -2943,9 +3124,10 @@
         dockExpanded: false,
         view: ["ai", "subs", "knowledge", "settings"].includes(o.view) ? o.view : "ai",
         aiStage: ["preprocess", "postprocess"].includes(o.aiStage) ? o.aiStage : "preprocess",
-        settingsTab: ["prompt", "llm", "shortcuts"].includes(o.settingsTab) ? o.settingsTab : "prompt",
+        settingsTab: ["prompt", "llm", "shortcuts", "appearance"].includes(o.settingsTab) ? o.settingsTab : "prompt",
         promptStage: ["preprocess", "postprocess", "knowledge"].includes(o.promptStage) ? o.promptStage : "preprocess",
         noteFont: Math.max(NOTE_FONT_MIN, Math.min(NOTE_FONT_MAX, Number(o.noteFont) || 17)),
+        ctpFlavor: normalizeCtpFlavor(o.ctpFlavor ?? d.ctpFlavor),
         knowledgeRailW: clampKnowledgeRailW(o.knowledgeRailW ?? d.knowledgeRailW, w),
         // Migrate old list width → navigator width if present.
         knowledgeNavW: clampKnowledgeNavW(
@@ -2977,6 +3159,7 @@
           settingsTab: state.ui.settingsTab || "prompt",
           promptStage: state.ui.promptStage || "preprocess",
           noteFont: state.ui.noteFont || 17,
+          ctpFlavor: normalizeCtpFlavor(state.ui.ctpFlavor),
           knowledgeRailW: clampKnowledgeRailW(state.ui.knowledgeRailW, state.ui.w),
           knowledgeNavW: clampKnowledgeNavW(state.ui.knowledgeNavW, state.ui.w),
           knowledgeContextOpen: state.ui.knowledgeContextOpen === true,
@@ -3007,39 +3190,13 @@
     return ui;
   }
 
-  // ─── UI (Catppuccin Mocha floating panel) ───────────────────────────────
+  // ─── UI (Catppuccin floating panel · multi-flavor) ─────────────────────
   function injectStyles() {
-    // Catppuccin Mocha — https://catppuccin.com/palette/ (userstyle tokens)
+    // Tokens: Latte / Frappé / Macchiato / Mocha — https://catppuccin.com/palette/
     GM_addStyle(`
-      #${PANEL_ID} {
-        /* Catppuccin Mocha */
-        --ctp-rosewater: #f5e0dc;
-        --ctp-flamingo: #f2cdcd;
-        --ctp-pink: #f5c2e7;
-        --ctp-mauve: #cba6f7;
-        --ctp-red: #f38ba8;
-        --ctp-maroon: #eba0ac;
-        --ctp-peach: #fab387;
-        --ctp-yellow: #f9e2af;
-        --ctp-green: #a6e3a1;
-        --ctp-teal: #94e2d5;
-        --ctp-sky: #89dceb;
-        --ctp-sapphire: #74c7ec;
-        --ctp-blue: #89b4fa;
-        --ctp-lavender: #b4befe;
-        --ctp-text: #cdd6f4;
-        --ctp-subtext1: #bac2de;
-        --ctp-subtext0: #a6adc8;
-        --ctp-overlay2: #9399b2;
-        --ctp-overlay1: #7f849c;
-        --ctp-overlay0: #6c7086;
-        --ctp-surface2: #585b70;
-        --ctp-surface1: #45475a;
-        --ctp-surface0: #313244;
-        --ctp-base: #1e1e2e;
-        --ctp-mantle: #181825;
-        --ctp-crust: #11111b;
+      ${buildCtpFlavorCss(PANEL_ID)}
 
+      #${PANEL_ID} {
         position: fixed;
         top: 0;
         left: 0;
@@ -3054,9 +3211,11 @@
         isolation: isolate;
         contain: style;
         color: var(--ctp-text);
+        color-scheme: dark;
         line-height: 1.45;
         pointer-events: none;
       }
+      #${PANEL_ID}[data-ctp-flavor="latte"] { color-scheme: light; }
       #${PANEL_ID} * { box-sizing: border-box; }
 
       #${PANEL_ID} .bsb-fab,
@@ -3530,6 +3689,71 @@
       #${PANEL_ID} .bsb-view[data-view-panel="subs"] {
         position: relative; gap: 8px; overflow: hidden;
       }
+      #${PANEL_ID} .bsb-library-jobbar {
+        display: none; flex-shrink: 0; align-items: center; gap: 10px;
+        min-height: 42px; padding: 7px 10px;
+        border: 1px solid color-mix(in srgb, var(--ctp-blue) 28%, var(--ctp-surface1));
+        border-radius: 12px;
+        background: color-mix(in srgb, var(--ctp-mantle) 82%, var(--ctp-base));
+      }
+      #${PANEL_ID} .bsb-library-jobbar.is-on { display: flex; }
+      #${PANEL_ID} .bsb-library-jobbar.is-paused {
+        border-color: color-mix(in srgb, var(--ctp-yellow) 40%, var(--ctp-surface1));
+      }
+      #${PANEL_ID} .bsb-job-progress {
+        flex: 1 1 auto; min-width: 0; display: grid; gap: 5px;
+        grid-template-columns: 10px minmax(0,1fr);
+        align-items: center;
+      }
+      #${PANEL_ID} .bsb-job-dot {
+        width: 8px; height: 8px; border-radius: 50%;
+        background: var(--ctp-blue);
+        box-shadow: 0 0 0 4px color-mix(in srgb, var(--ctp-blue) 18%, transparent);
+        animation: bsb-job-pulse 1.2s ease-in-out infinite;
+      }
+      #${PANEL_ID} .bsb-library-jobbar.is-paused .bsb-job-dot {
+        background: var(--ctp-yellow); animation: none;
+        box-shadow: 0 0 0 4px color-mix(in srgb, var(--ctp-yellow) 16%, transparent);
+      }
+      @keyframes bsb-job-pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: .55; transform: scale(.86); }
+      }
+      #${PANEL_ID} .bsb-job-copy { min-width: 0; display: grid; gap: 2px; }
+      #${PANEL_ID} .bsb-job-copy strong {
+        font-size: 11.5px; color: var(--ctp-text); font-weight: 700;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      #${PANEL_ID} .bsb-job-copy span {
+        font-size: 10px; color: var(--ctp-overlay1); font-variant-numeric: tabular-nums;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      #${PANEL_ID} .bsb-job-meter {
+        grid-column: 1 / -1; height: 3px; border-radius: 999px;
+        background: color-mix(in srgb, var(--ctp-surface1) 70%, transparent); overflow: hidden;
+      }
+      #${PANEL_ID} .bsb-job-meter i {
+        display: block; height: 100%; width: 0; border-radius: inherit;
+        background: linear-gradient(90deg, var(--ctp-blue), var(--ctp-lavender));
+        transition: width .2s ease;
+      }
+      #${PANEL_ID} .bsb-library-jobbar.is-paused .bsb-job-meter i {
+        background: var(--ctp-yellow);
+      }
+      #${PANEL_ID} .bsb-job-actions { display: flex; gap: 6px; flex-shrink: 0; }
+      #${PANEL_ID} .bsb-job-actions button {
+        height: 28px; padding: 0 10px; border-radius: 8px; cursor: pointer; font-size: 11px; font-weight: 650;
+        border: 1px solid color-mix(in srgb, var(--ctp-surface1) 60%, transparent);
+        background: color-mix(in srgb, var(--ctp-surface0) 50%, transparent); color: var(--ctp-text);
+      }
+      #${PANEL_ID} .bsb-job-actions [data-act="job-pause"] {
+        border-color: color-mix(in srgb, var(--ctp-yellow) 38%, transparent);
+        background: color-mix(in srgb, var(--ctp-yellow) 12%, transparent); color: var(--ctp-yellow);
+      }
+      #${PANEL_ID} .bsb-job-actions [data-act="job-stop"] {
+        border-color: color-mix(in srgb, var(--ctp-red) 38%, transparent);
+        background: color-mix(in srgb, var(--ctp-red) 10%, transparent); color: var(--ctp-red);
+      }
       #${PANEL_ID} .bsb-library-topbar {
         display: flex; align-items: center; gap: 7px; min-height: 34px; flex-shrink: 0;
       }
@@ -3634,25 +3858,43 @@
       #${PANEL_ID} .bsb-resource-status.st-err { color: var(--ctp-red); }
       #${PANEL_ID} .bsb-resource-status.st-wait { color: var(--ctp-overlay1); }
       #${PANEL_ID} .bsb-library-master-foot {
-        display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; padding: 6px;
+        display: grid; gap: 6px; padding: 7px;
         border-top: 1px solid color-mix(in srgb, var(--ctp-surface0) 72%, transparent);
       }
-      #${PANEL_ID} .bsb-library-master-foot button {
-        height: 28px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--ctp-surface1) 62%, transparent);
+      #${PANEL_ID} .bsb-library-select-tools {
+        display: flex; flex-wrap: wrap; gap: 4px;
+      }
+      #${PANEL_ID} .bsb-library-select-tools button {
+        height: 24px; border-radius: 7px; padding: 0 7px; cursor: pointer; font-size: 10px;
+        border: 1px solid transparent; background: transparent; color: var(--ctp-overlay1);
+      }
+      #${PANEL_ID} .bsb-library-select-tools button:hover {
+        color: var(--ctp-text);
+        background: color-mix(in srgb, var(--ctp-surface0) 55%, transparent);
+      }
+      #${PANEL_ID} .bsb-library-primary-tools {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+      }
+      #${PANEL_ID} .bsb-library-primary-tools button {
+        height: 32px; border-radius: 9px; cursor: pointer; font-size: 11.5px; font-weight: 680;
+        border: 1px solid color-mix(in srgb, var(--ctp-surface1) 62%, transparent);
         background: color-mix(in srgb, var(--ctp-surface0) 42%, transparent); color: var(--ctp-subtext1);
-        cursor: pointer; font-size: 10px; padding: 0 5px;
+        padding: 0 8px;
+      }
+      #${PANEL_ID} .bsb-library-primary-tools button.primary {
+        border-color: color-mix(in srgb, var(--ctp-blue) 42%, transparent);
+        background: color-mix(in srgb, var(--ctp-blue) 16%, var(--ctp-surface0));
+        color: var(--ctp-text);
+      }
+      #${PANEL_ID} .bsb-library-primary-tools button:hover {
+        border-color: color-mix(in srgb, var(--ctp-lavender) 40%, transparent);
       }
       #${PANEL_ID} .bsb-library-detail { min-width: 0; min-height: 0; display: flex; }
-      #${PANEL_ID} .bsb-detail-tabs {
-        display: flex; gap: 4px; padding: 0 10px 7px; border-bottom: 1px solid color-mix(in srgb, var(--ctp-surface0) 62%, transparent);
-      }
-      #${PANEL_ID} .bsb-detail-tabs button {
-        height: 27px; border-radius: 8px; padding: 0 9px; cursor: pointer;
-        border: 1px solid transparent; background: transparent; color: var(--ctp-overlay1); font-size: 10.5px;
-      }
-      #${PANEL_ID} .bsb-detail-tabs button.active {
-        color: var(--ctp-sapphire); background: color-mix(in srgb, var(--ctp-sapphire) 12%, transparent);
-        border-color: color-mix(in srgb, var(--ctp-sapphire) 30%, transparent);
+      #${PANEL_ID} .bsb-transcript-head-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+      #${PANEL_ID} .bsb-transcript-ai-link {
+        height: 26px; padding: 0 8px; border-radius: 8px; cursor: pointer; font-size: 10.5px;
+        border: 1px solid color-mix(in srgb, var(--ctp-lavender) 32%, transparent);
+        background: color-mix(in srgb, var(--ctp-lavender) 10%, transparent); color: var(--ctp-lavender);
       }
       #${PANEL_ID} .bsb-capture-drawer {
         position: absolute; z-index: 12; top: 52px; left: 14px; right: 14px;
@@ -3687,10 +3929,27 @@
       }
       #${PANEL_ID} .bsb-transcript-title span { font-size: 10px; color: var(--ctp-overlay1); }
       #${PANEL_ID} .bsb-transcript-tools {
-        padding: 8px 10px; display: grid; grid-template-columns: minmax(120px,1fr) auto auto auto;
-        gap: 6px; align-items: center; border-bottom: 1px solid color-mix(in srgb, var(--ctp-surface0) 62%, transparent);
+        padding: 8px 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+        border-bottom: 1px solid color-mix(in srgb, var(--ctp-surface0) 62%, transparent);
+      }
+      #${PANEL_ID} .bsb-transcript-toolbar-end {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto;
+      }
+      #${PANEL_ID} .bsb-toolbar-sep {
+        width: 1px; height: 16px; background: color-mix(in srgb, var(--ctp-surface1) 70%, transparent);
+      }
+      #${PANEL_ID} .bsb-export-group { display: flex; gap: 4px; }
+      #${PANEL_ID} .bsb-export-group button {
+        height: 31px; padding: 0 8px; border-radius: 9px; cursor: pointer; font-size: 10.5px;
+        border: 1px solid color-mix(in srgb, var(--ctp-surface2) 58%, transparent);
+        background: color-mix(in srgb, var(--ctp-surface0) 50%, transparent); color: var(--ctp-text);
+      }
+      #${PANEL_ID} .bsb-export-group button.primary {
+        border-color: color-mix(in srgb, var(--ctp-blue) 38%, transparent);
+        background: color-mix(in srgb, var(--ctp-blue) 14%, var(--ctp-surface0));
       }
       #${PANEL_ID} .bsb-transcript-search {
+        flex: 1 1 160px; min-width: 140px;
         height: 31px; display: grid; grid-template-columns: auto minmax(0,1fr) auto;
         align-items: center; gap: 6px; padding: 0 8px; border-radius: 9px;
         border: 1px solid color-mix(in srgb, var(--ctp-surface2) 58%, transparent);
@@ -3743,8 +4002,8 @@
         color: var(--ctp-overlay1); font-size: 11.5px; line-height: 1.55; padding: 20px;
       }
       @media (max-width: 640px) {
-        #${PANEL_ID} .bsb-transcript-tools { grid-template-columns: minmax(0,1fr) auto; }
         #${PANEL_ID} .bsb-transcript-follow { display: none; }
+        #${PANEL_ID} .bsb-library-jobbar { flex-wrap: wrap; }
       }
 
       #${PANEL_ID} .bsb-empty {
@@ -4060,7 +4319,7 @@
       #${PANEL_ID} .bsb-ai-md pre {
         margin: 1.1em 0; padding: 14px 16px; border-radius: 14px;
         overflow: auto; max-height: 420px;
-        background: #11111b;
+        background: var(--ctp-crust);
         border: 1px solid color-mix(in srgb, var(--ctp-surface1) 40%, transparent);
         line-height: 1.55;
       }
@@ -4105,8 +4364,8 @@
         overflow: hidden;
         border-radius: 15px;
         border: 1px solid color-mix(in srgb, var(--ctp-blue) 30%, var(--ctp-surface1));
-        background: #181825;
-        box-shadow: 0 12px 30px rgba(0, 0, 0, .22);
+        background: var(--ctp-mantle);
+        box-shadow: 0 12px 30px color-mix(in srgb, var(--ctp-crust) 45%, transparent);
         content-visibility: visible;
         contain: layout paint style;
       }
@@ -4120,9 +4379,9 @@
         justify-content: space-between;
         gap: 8px;
         padding: 6px 8px 6px 11px;
-        border-bottom: 1px solid rgba(137, 180, 250, .2);
-        background: rgba(24, 24, 37, .96);
-        color: #bac2de;
+        border-bottom: 1px solid color-mix(in srgb, var(--ctp-blue) 22%, transparent);
+        background: color-mix(in srgb, var(--ctp-mantle) 96%, transparent);
+        color: var(--ctp-subtext1);
         backdrop-filter: blur(10px);
         -webkit-backdrop-filter: blur(10px);
       }
@@ -4131,7 +4390,7 @@
         display: inline-flex;
         align-items: center;
         gap: 7px;
-        color: #cdd6f4;
+        color: var(--ctp-text);
         font-size: 11px;
         font-weight: 700;
         letter-spacing: .03em;
@@ -5315,14 +5574,34 @@
       }
       #${PANEL_ID} .bsb-config-list-item {
         width: 100%; text-align: left; border: 1px solid transparent; cursor: pointer;
-        padding: 9px 9px; border-radius: 10px; background: transparent; color: var(--ctp-text);
-        display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; column-gap: 7px; row-gap: 2px;
+        padding: 9px 8px; border-radius: 10px; background: transparent; color: var(--ctp-text);
+        display: grid; grid-template-columns: 14px 10px minmax(0, 1fr) auto; column-gap: 6px; row-gap: 2px;
+        align-items: start; user-select: none;
       }
       #${PANEL_ID} .bsb-config-list-item:hover { background: color-mix(in srgb, var(--ctp-surface0) 55%, transparent); }
       #${PANEL_ID} .bsb-config-list-item.selected {
         border-color: color-mix(in srgb, var(--ctp-blue) 38%, transparent);
         background: color-mix(in srgb, var(--ctp-blue) 12%, var(--ctp-surface0));
       }
+      #${PANEL_ID} .bsb-config-list-item[draggable="true"] { cursor: grab; }
+      #${PANEL_ID} .bsb-config-list-item.dragging {
+        opacity: 0.45; cursor: grabbing;
+        border-color: color-mix(in srgb, var(--ctp-blue) 45%, transparent);
+      }
+      #${PANEL_ID} .bsb-config-list-item.drag-over {
+        border-color: color-mix(in srgb, var(--ctp-sapphire) 55%, transparent);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ctp-sapphire) 35%, transparent);
+        background: color-mix(in srgb, var(--ctp-sapphire) 10%, var(--ctp-surface0));
+      }
+      #${PANEL_ID} .bsb-config-list[data-reorder-locked="1"] .bsb-config-list-item { cursor: pointer; }
+      #${PANEL_ID} .bsb-config-list[data-reorder-locked="1"] .bsb-config-drag { opacity: 0.28; cursor: default; }
+      #${PANEL_ID} .bsb-config-drag {
+        display: inline-flex; align-items: center; justify-content: center;
+        margin-top: 2px; width: 14px; height: 16px; line-height: 1;
+        color: var(--ctp-overlay0); font-size: 12px; letter-spacing: -1px;
+        cursor: grab; touch-action: none;
+      }
+      #${PANEL_ID} .bsb-config-list-item.dragging .bsb-config-drag { cursor: grabbing; }
       #${PANEL_ID} .bsb-config-dot {
         width: 7px; height: 7px; margin-top: 5px; border-radius: 50%;
         background: var(--ctp-overlay0); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ctp-overlay0) 18%, transparent);
@@ -5833,6 +6112,65 @@
 
       /* v6.0.1 · shortcut center */
       #${PANEL_ID} .bsb-shortcut-settings { height:100%; min-height:0; overflow:auto; }
+      #${PANEL_ID} .bsb-appearance-settings {
+        height: 100%; min-height: 0; overflow: auto; padding: 14px 16px 18px;
+      }
+      #${PANEL_ID} .bsb-appearance-head {
+        display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px;
+      }
+      #${PANEL_ID} .bsb-appearance-head strong {
+        font-size: 13.5px; color: var(--ctp-text); font-weight: 750;
+      }
+      #${PANEL_ID} .bsb-appearance-head span {
+        font-size: 11px; color: var(--ctp-overlay1); line-height: 1.45;
+      }
+      #${PANEL_ID} .bsb-theme-grid {
+        display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
+      }
+      #${PANEL_ID} .bsb-theme-card {
+        display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 10px; align-items: center;
+        width: 100%; text-align: left; cursor: pointer; padding: 10px 11px;
+        border-radius: 12px; border: 1px solid color-mix(in srgb, var(--ctp-surface1) 55%, transparent);
+        background: color-mix(in srgb, var(--ctp-base) 55%, transparent); color: var(--ctp-text);
+        transition: border-color .15s ease, background .15s ease, transform .12s ease;
+      }
+      #${PANEL_ID} .bsb-theme-card:hover {
+        border-color: color-mix(in srgb, var(--ctp-lavender) 42%, transparent);
+        background: color-mix(in srgb, var(--ctp-surface0) 45%, transparent);
+        transform: translateY(-1px);
+      }
+      #${PANEL_ID} .bsb-theme-card.selected {
+        border-color: color-mix(in srgb, var(--ctp-lavender) 55%, transparent);
+        background: color-mix(in srgb, var(--ctp-lavender) 12%, var(--ctp-surface0));
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--ctp-lavender) 18%, transparent);
+      }
+      #${PANEL_ID} .bsb-theme-preview {
+        width: 52px; height: 40px; border-radius: 10px; overflow: hidden; position: relative;
+        border: 1px solid color-mix(in srgb, var(--p2) 70%, transparent);
+        background:
+          linear-gradient(135deg, var(--p0) 0 42%, transparent 42%),
+          linear-gradient(225deg, var(--p1) 0 55%, transparent 55%),
+          var(--p2);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tx) 8%, transparent);
+      }
+      #${PANEL_ID} .bsb-theme-preview i {
+        position: absolute; width: 8px; height: 8px; border-radius: 50%;
+        bottom: 6px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--p0) 35%, transparent);
+      }
+      #${PANEL_ID} .bsb-theme-preview i:nth-child(1) { left: 7px; background: var(--a0); }
+      #${PANEL_ID} .bsb-theme-preview i:nth-child(2) { left: 18px; background: var(--a1); }
+      #${PANEL_ID} .bsb-theme-preview i:nth-child(3) { left: 29px; background: var(--a2); }
+      #${PANEL_ID} .bsb-theme-meta { min-width: 0; display: grid; gap: 2px; }
+      #${PANEL_ID} .bsb-theme-meta strong {
+        display: block; font-size: 12px; font-weight: 750; color: var(--ctp-text);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      #${PANEL_ID} .bsb-theme-meta small {
+        display: block; font-size: 10.5px; color: var(--ctp-overlay1); line-height: 1.35;
+      }
+      @media (max-width: 720px) {
+        #${PANEL_ID} .bsb-theme-grid { grid-template-columns: 1fr; }
+      }
       #${PANEL_ID} .bsb-shortcut-page { display:flex; flex-direction:column; gap:10px; max-width:920px; padding:2px 0 14px; }
       #${PANEL_ID} .bsb-shortcut-hero {
         display:flex; align-items:flex-start; justify-content:space-between; gap:18px;
@@ -5966,6 +6304,7 @@
     let hideTimer = null;
 
     state.ui = loadUiGeom();
+    applyCtpFlavor(state.ui.ctpFlavor, { silent: true, persist: false });
 
     function setOpen(open) {
       state.open = open;
@@ -6236,7 +6575,7 @@
     injectStyles();
     root = document.createElement("div");
     root.id = PANEL_ID;
-    root.setAttribute("data-ctp-flavor", "mocha");
+    root.setAttribute("data-ctp-flavor", normalizeCtpFlavor(state.ui?.ctpFlavor || DEFAULT_CTP_FLAVOR));
     root.innerHTML = `
       <button type="button" class="bsb-dock-tab" title="展开 SubBatch 工作台">AI · CC</button>
       <aside class="bsb-sidebar" role="complementary" aria-label="Bili SubBatch Workspace" aria-hidden="true">
@@ -6354,6 +6693,20 @@
 
           <!-- 字幕资源库 -->
           <section class="bsb-view" data-view-panel="subs">
+            <div class="bsb-library-jobbar" data-role="library-jobbar" hidden>
+              <div class="bsb-job-progress">
+                <span class="bsb-job-dot" data-role="job-dot" aria-hidden="true"></span>
+                <div class="bsb-job-copy">
+                  <strong data-role="job-title">准备任务</strong>
+                  <span data-role="job-meta">空闲</span>
+                </div>
+                <div class="bsb-job-meter" aria-hidden="true"><i data-role="job-meter"></i></div>
+              </div>
+              <div class="bsb-job-actions">
+                <button type="button" data-act="job-pause" title="暂停当前扫描或字幕抓取，稍后再继续">暂停</button>
+                <button type="button" data-act="job-stop" title="停止任务，已完成的条目会保留">停止</button>
+              </div>
+            </div>
             <div class="bsb-library-topbar">
               <button type="button" class="bsb-btn primary" data-act="capture-toggle">＋ 采集视频</button>
               <label class="bsb-library-search" title="搜索标题、BV、UP 或来源">
@@ -6423,12 +6776,16 @@
                   </div>
                 </div>
                 <div class="bsb-library-master-foot">
-                  <button type="button" data-act="sel-all">全选</button>
-                  <button type="button" data-act="sel-none">全不选</button>
-                  <button type="button" data-act="clear">清空</button>
-                  <button type="button" data-act="copy-bvid">复制 BV</button>
-                  <button type="button" data-act="fetch-selected">抓取所选</button>
-                  <button type="button" data-act="ai-send">送去 AI</button>
+                  <div class="bsb-library-select-tools">
+                    <button type="button" data-act="sel-all">全选</button>
+                    <button type="button" data-act="sel-none">不选</button>
+                    <button type="button" data-act="clear" title="清空资源库列表">清空</button>
+                    <button type="button" data-act="copy-bvid" title="复制已勾选 BV">复制 BV</button>
+                  </div>
+                  <div class="bsb-library-primary-tools">
+                    <button type="button" class="primary" data-act="fetch-selected" title="抓取勾选项字幕，可随时暂停">抓取字幕</button>
+                    <button type="button" data-act="ai-send" title="把已有字幕送进 AI 工作台">送去 AI</button>
+                  </div>
                 </div>
               </aside>
 
@@ -6439,10 +6796,9 @@
                       <strong data-role="transcript-title">当前视频字幕</strong>
                       <span data-role="transcript-meta">从左侧选择一个视频</span>
                     </div>
-                  </div>
-                  <div class="bsb-detail-tabs" role="tablist" aria-label="当前视频内容">
-                    <button type="button" class="active" role="tab" aria-selected="true">字幕</button>
-                    <button type="button" data-act="open-ai-workspace" role="tab" title="打开该资源库共用的 AI 学习图谱工作区">AI 学习图谱 ↗</button>
+                    <div class="bsb-transcript-head-actions">
+                      <button type="button" class="bsb-transcript-ai-link" data-act="open-ai-workspace" title="打开 AI 学习图谱工作区">AI ↗</button>
+                    </div>
                   </div>
                   <div class="bsb-transcript-tools">
                     <label class="bsb-transcript-search" title="检索当前视频字幕">
@@ -6450,19 +6806,22 @@
                       <input type="search" data-role="transcript-search" placeholder="检索当前字幕…" autocomplete="off">
                       <span class="bsb-transcript-count" data-role="transcript-count"></span>
                     </label>
-                    <select class="bsb-transcript-track" data-role="transcript-track" aria-label="字幕语言" disabled>
-                      <option>自动</option>
-                    </select>
-                    <label class="bsb-transcript-follow"><input type="checkbox" data-role="transcript-follow" checked> 跟随播放</label>
-                    <button type="button" class="bsb-transcript-refresh" data-act="transcript-refresh" title="忽略缓存重新读取">刷新</button>
+                    <div class="bsb-transcript-toolbar-end">
+                      <select class="bsb-transcript-track" data-role="transcript-track" aria-label="字幕语言" disabled>
+                        <option>自动</option>
+                      </select>
+                      <label class="bsb-transcript-follow"><input type="checkbox" data-role="transcript-follow" checked> 跟随</label>
+                      <button type="button" class="bsb-transcript-refresh" data-act="transcript-refresh" title="忽略缓存重新读取">刷新</button>
+                      <span class="bsb-toolbar-sep" aria-hidden="true"></span>
+                      <div class="bsb-export-group" role="group" aria-label="导出字幕">
+                        <button type="button" data-act="copy" title="复制当前字幕全文">复制</button>
+                        <button type="button" data-act="dl-txt" title="下载 TXT">TXT</button>
+                        <button type="button" class="primary" data-act="dl-srt" title="下载 SRT">SRT</button>
+                      </div>
+                    </div>
                   </div>
                   <div class="bsb-transcript-list" data-role="transcript-list">
                     <div class="bsb-transcript-empty">从左侧选择已有字幕的视频即可阅读全文。<br>点击时间可以跳转到播放器对应位置。</div>
-                  </div>
-                  <div class="bsb-actions" style="padding:7px 9px 9px">
-                    <button type="button" class="primary" data-act="dl-srt">下载 SRT</button>
-                    <button type="button" data-act="dl-txt">下载 TXT</button>
-                    <button type="button" data-act="copy">复制全文</button>
                   </div>
                 </section>
               </main>
@@ -6490,6 +6849,7 @@
               <div class="bsb-settings-tabs" role="tablist" aria-label="设置分类">
                 <button type="button" class="active" data-settings-tab="prompt" role="tab">Prompt</button>
                 <button type="button" data-settings-tab="llm" role="tab">LLM</button>
+                <button type="button" data-settings-tab="appearance" role="tab">外观</button>
                 <button type="button" data-settings-tab="shortcuts" role="tab">快捷键</button>
               </div>
 
@@ -6534,6 +6894,10 @@
                   </aside>
                   <main class="bsb-config-editor-shell bsb-ai-config" data-role="ai-editor"></main>
                 </div>
+              </section>
+
+              <section class="bsb-settings-pane" data-settings-pane="appearance">
+                <div class="bsb-appearance-settings" data-role="appearance-settings"></div>
               </section>
 
               <section class="bsb-settings-pane" data-settings-pane="shortcuts">
@@ -6672,6 +7036,7 @@
       state.aiSearch = String(e.target.value || "");
       renderAiList(root);
     }, 60));
+    bindConfigListDrag(root);
     root.querySelector('[data-role="knowledge-search"]')?.addEventListener("input", debounce((e) => {
       state.knowledgeSearch = String(e.target.value || "");
       renderKnowledgeWorkspace().catch(() => {});
@@ -7083,6 +7448,12 @@
         setSettingsTab(settingsTab.dataset.settingsTab);
         return;
       }
+      const flavorPick = e.target.closest?.("[data-ctp-flavor-pick]");
+      if (flavorPick) {
+        e.preventDefault();
+        applyCtpFlavor(flavorPick.dataset.ctpFlavorPick);
+        return;
+      }
       const promptStageTab = e.target.closest?.("[data-prompt-stage-tab]");
       if (promptStageTab) {
         e.preventDefault();
@@ -7092,6 +7463,7 @@
       }
       const promptListItem = e.target.closest?.("[data-prompt-list-id]");
       if (promptListItem) {
+        // 拖拽手柄本身仍可点选该行；真正重排由 drag/drop 负责。
         e.preventDefault();
         savePromptProfilesFromForm({ activeId: state.activePromptId });
         state.promptEditorId = String(promptListItem.dataset.promptListId || "");
@@ -7248,7 +7620,7 @@
 
   function setSettingsTab(tab, opts) {
     const root = ensurePanel();
-    const next = ["prompt", "llm", "shortcuts"].includes(tab) ? tab : "prompt";
+    const next = ["prompt", "llm", "shortcuts", "appearance"].includes(tab) ? tab : "prompt";
     if (next !== "shortcuts" && state.shortcutRecordingId) state.shortcutRecordingId = "";
     if (state.ui) state.ui.settingsTab = next;
     root.querySelectorAll("[data-settings-tab]").forEach((button) => {
@@ -7260,7 +7632,120 @@
       pane.classList.toggle("active", pane.dataset.settingsPane === next);
     });
     if (next === "shortcuts") renderShortcutSettings(root);
+    if (next === "appearance") renderAppearanceSettings(root);
     if (!opts?.silent) saveUiGeom();
+  }
+
+  function mermaidThemeVariablesForFlavor(flavor = state.ui?.ctpFlavor) {
+    const id = normalizeCtpFlavor(flavor);
+    const t = getCtpPalette(id);
+    return {
+      darkMode: id !== "latte",
+      background: t.mantle,
+      primaryColor: t.surface0,
+      primaryTextColor: t.rosewater,
+      primaryBorderColor: t.blue,
+      secondaryColor: t.surface1,
+      secondaryTextColor: t.text,
+      secondaryBorderColor: t.green,
+      tertiaryColor: t.base,
+      tertiaryTextColor: t.text,
+      tertiaryBorderColor: t.mauve,
+      lineColor: t.subtext1,
+      textColor: t.text,
+      mainBkg: t.surface0,
+      nodeBorder: t.blue,
+      clusterBkg: t.base,
+      clusterBorder: t.surface2,
+      edgeLabelBackground: t.mantle,
+      actorBkg: t.surface0,
+      actorBorder: t.blue,
+      actorTextColor: t.rosewater,
+      signalColor: t.subtext1,
+      signalTextColor: t.text,
+      labelBoxBkgColor: t.surface0,
+      labelBoxBorderColor: t.blue,
+      labelTextColor: t.rosewater,
+      loopTextColor: t.text,
+      noteBkgColor: t.surface1,
+      noteBorderColor: t.yellow,
+      noteTextColor: t.rosewater,
+      fontSize: "16px",
+    };
+  }
+
+  function mermaidThemeCssForFlavor(flavor = state.ui?.ctpFlavor) {
+    const t = getCtpPalette(flavor);
+    return `
+          .nodeLabel, .edgeLabel, .label, text { font-size: 16px !important; }
+          .edgeLabel rect { fill: ${t.mantle} !important; opacity: .96 !important; }
+          .flowchart-link { stroke-width: 2px !important; }
+          .marker { fill: ${t.subtext1} !important; stroke: ${t.subtext1} !important; }
+          .cluster rect { rx: 10px; ry: 10px; }
+        `;
+  }
+
+  function refreshMermaidTheme() {
+    if (typeof mermaid === "undefined" || !state.renderLibs?.mermaid) return;
+    try {
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: "base",
+        securityLevel: "strict",
+        fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif',
+        suppressErrorRendering: true,
+        deterministicIds: false,
+        themeVariables: mermaidThemeVariablesForFlavor(),
+        themeCSS: mermaidThemeCssForFlavor(),
+      });
+    } catch (error) {
+      console.warn("[bili-subbatch] mermaid theme refresh", error);
+    }
+  }
+
+  function applyCtpFlavor(flavor, { silent = false, persist = true } = {}) {
+    const next = normalizeCtpFlavor(flavor);
+    if (state.ui) state.ui.ctpFlavor = next;
+    const root = document.getElementById(PANEL_ID) || ensurePanel();
+    root.setAttribute("data-ctp-flavor", next);
+    root.style.colorScheme = next === "latte" ? "light" : "dark";
+    refreshMermaidTheme();
+    if (persist) saveUiGeom();
+    if (document.getElementById(PANEL_ID)?.querySelector('[data-settings-pane="appearance"].active')) {
+      renderAppearanceSettings(root);
+    }
+    if (!silent) {
+      const meta = CTP_FLAVORS.find((f) => f.id === next);
+      setStatus(`主题已切换：Catppuccin ${meta?.label || next}${next === DEFAULT_CTP_FLAVOR ? "（默认）" : ""}`, "ok");
+    }
+    return next;
+  }
+
+  function renderAppearanceSettings(root) {
+    const host = root?.querySelector?.('[data-role="appearance-settings"]');
+    if (!host) return;
+    const current = normalizeCtpFlavor(state.ui?.ctpFlavor || DEFAULT_CTP_FLAVOR);
+    host.innerHTML = `
+      <div class="bsb-appearance-head">
+        <strong>Catppuccin 主题</strong>
+        <span>在 Latte / Frappé / Macchiato / Mocha 间切换。默认 Mocha，选择会保存在本机。</span>
+      </div>
+      <div class="bsb-theme-grid" role="listbox" aria-label="Catppuccin 风格">
+        ${CTP_FLAVORS.map((flavor) => {
+          const p = getCtpPalette(flavor.id);
+          const selected = flavor.id === current;
+          return `<button type="button" class="bsb-theme-card${selected ? " selected" : ""}" data-ctp-flavor-pick="${escapeAttr(flavor.id)}" role="option" aria-selected="${selected ? "true" : "false"}" title="切换到 ${escapeAttr(flavor.label)}">
+            <span class="bsb-theme-preview" style="--p0:${p.base};--p1:${p.mantle};--p2:${p.surface0};--a0:${p.lavender};--a1:${p.mauve};--a2:${p.green};--tx:${p.text}">
+              <i></i><i></i><i></i>
+            </span>
+            <span class="bsb-theme-meta">
+              <strong>${flavor.emoji} ${escapeHtml(flavor.label)}</strong>
+              <small>${escapeHtml(flavor.hint)}${flavor.id === DEFAULT_CTP_FLAVOR ? " · 默认" : ""}</small>
+            </span>
+          </button>`;
+        }).join("")}
+      </div>
+    `;
   }
 
 
@@ -7503,6 +7988,7 @@
     const mainActions = new Set([
       "scan", "sel-all", "sel-none", "ai-send",
       "cancel", "ai-stop", "dock", "collapse",
+      "job-pause", "job-stop",
     ]);
     const batchActions = new Set(["copy", "copy-bvid", "dl-srt", "dl-txt", "dl-ok-only", "fetch-selected"]);
 
@@ -7511,6 +7997,10 @@
       if (act === "cancel") {
         button.style.display = operationBusy() ? "" : "none";
         button.disabled = false;
+        return;
+      }
+      if (act === "job-pause" || act === "job-stop") {
+        button.disabled = !operationBusy();
         return;
       }
       if (mainActions.has(act)) {
@@ -7531,12 +8021,114 @@
 
   function setScanBusy(busy) {
     state.scanBusy = !!busy;
+    if (!busy) state.scanPaused = false;
     syncOperationBusy();
+    updateLibraryJobBar();
   }
 
   function setBatchBusy(busy) {
     state.batchBusy = !!busy;
+    if (!busy) state.batchPaused = false;
     syncOperationBusy();
+    updateLibraryJobBar();
+  }
+
+  function currentLibraryJobKind() {
+    if (state.batchBusy) return "fetch";
+    if (state.scanBusy) return "scan";
+    return "";
+  }
+
+  function isLibraryJobPaused() {
+    if (state.batchBusy) return !!state.batchPaused;
+    if (state.scanBusy) return !!state.scanPaused;
+    return false;
+  }
+
+  function setLibraryJob({ kind, index, total, label } = {}) {
+    const job = state.libraryJob || (state.libraryJob = { kind: "", index: 0, total: 0, label: "" });
+    if (kind != null) job.kind = kind;
+    if (index != null) job.index = Math.max(0, Number(index) || 0);
+    if (total != null) job.total = Math.max(0, Number(total) || 0);
+    if (label != null) job.label = String(label || "");
+    updateLibraryJobBar();
+  }
+
+  function clearLibraryJob() {
+    state.libraryJob = { kind: "", index: 0, total: 0, label: "" };
+    updateLibraryJobBar();
+  }
+
+  function updateLibraryJobBar() {
+    const root = document.getElementById(PANEL_ID);
+    const bar = root?.querySelector?.('[data-role="library-jobbar"]');
+    if (!bar) return;
+    const kind = currentLibraryJobKind();
+    const busy = !!kind;
+    bar.hidden = !busy;
+    bar.classList.toggle("is-on", busy);
+    bar.classList.toggle("is-paused", busy && isLibraryJobPaused());
+    const job = state.libraryJob || {};
+    const title = bar.querySelector('[data-role="job-title"]');
+    const meta = bar.querySelector('[data-role="job-meta"]');
+    const meter = bar.querySelector('[data-role="job-meter"]');
+    const pauseBtn = bar.querySelector('[data-act="job-pause"]');
+    const kindLabel = kind === "fetch" ? "抓取字幕" : kind === "scan" ? "扫描视频" : "任务";
+    const paused = isLibraryJobPaused();
+    if (title) title.textContent = paused ? `${kindLabel}已暂停` : kindLabel;
+    const index = Number(job.index) || 0;
+    const total = Number(job.total) || 0;
+    const parts = [];
+    if (total > 0) parts.push(`${Math.min(index, total)} / ${total}`);
+    if (job.label) parts.push(job.label);
+    if (meta) meta.textContent = parts.join(" · ") || (busy ? "进行中" : "空闲");
+    if (meter) {
+      const pct = total > 0 ? Math.max(0, Math.min(100, (index / total) * 100)) : (busy ? 8 : 0);
+      meter.style.width = `${pct}%`;
+    }
+    if (pauseBtn) {
+      pauseBtn.textContent = paused ? "继续" : "暂停";
+      pauseBtn.setAttribute("aria-pressed", paused ? "true" : "false");
+      pauseBtn.title = paused ? "从暂停处继续" : "暂停当前任务，已完成的条目会保留";
+    }
+  }
+
+  async function waitIfJobPaused() {
+    if (!isLibraryJobPaused()) return;
+    updateLibraryJobBar();
+    while (isLibraryJobPaused() && !state.cancel && !state.cancelScan && !state.cancelBatch) {
+      await sleep(140);
+    }
+  }
+
+  function toggleLibraryJobPause() {
+    if (state.batchBusy) {
+      state.batchPaused = !state.batchPaused;
+      setStatus(
+        state.batchPaused ? "已暂停字幕抓取 · 点「继续」恢复" : "继续抓取字幕…",
+        state.batchPaused ? "ok" : "",
+      );
+    } else if (state.scanBusy) {
+      state.scanPaused = !state.scanPaused;
+      setStatus(
+        state.scanPaused ? "已暂停扫描 · 点「继续」恢复" : "继续扫描…",
+        state.scanPaused ? "ok" : "",
+      );
+    } else {
+      setStatus("当前没有可暂停的扫描或抓取任务", "ok");
+      return;
+    }
+    updateLibraryJobBar();
+  }
+
+  function stopLibraryJob() {
+    state.cancel = true;
+    state.cancelScan = true;
+    state.cancelBatch = true;
+    state.scanPaused = false;
+    state.batchPaused = false;
+    setStatus("正在停止扫描/字幕任务…已完成的条目会保留");
+    updateLibraryJobBar();
   }
 
   // 兼容旧调用；新代码不再使用全局 setBusy。
@@ -8113,11 +8705,12 @@
   }
 
   async function onAction(act) {
-    if (act === "cancel") {
-      state.cancel = true;
-      state.cancelScan = true;
-      state.cancelBatch = true;
-      setStatus("正在停止扫描/字幕任务…");
+    if (act === "cancel" || act === "job-stop") {
+      stopLibraryJob();
+      return;
+    }
+    if (act === "job-pause") {
+      toggleLibraryJobPause();
       return;
     }
     if (act === "ai-stop") {
@@ -9997,17 +10590,22 @@
     return (state.promptProfiles || []).find((p) => p.id === task?.promptId && p.stage === "postprocess") || null;
   }
 
-  function promptListItemHtml(prompt) {
+  function promptListItemHtml(prompt, { draggable = true } = {}) {
     const selected = prompt.id === state.promptEditorId;
     const active = prompt.stage === "preprocess" ? prompt.id === state.activePrePromptId : prompt.stage === "knowledge" ? prompt.id === state.activeKnowledgePromptId : prompt.id === state.activePromptId;
-    return `<button type="button" class="bsb-config-list-item${selected ? " selected" : ""}" data-prompt-list-id="${escapeAttr(prompt.id)}" title="${escapeAttr(prompt.name)}">
+    const dragAttr = draggable ? 'draggable="true"' : 'draggable="false"';
+    const title = draggable
+      ? `${prompt.name} · 拖拽左侧 ⠿ 调整顺序`
+      : `${prompt.name} · 清空搜索后可拖拽排序`;
+    return `<div class="bsb-config-list-item${selected ? " selected" : ""}" role="button" tabindex="0" ${dragAttr} data-prompt-list-id="${escapeAttr(prompt.id)}" title="${escapeAttr(title)}">
+      <span class="bsb-config-drag" aria-hidden="true" title="拖拽排序">⠿</span>
       <span class="bsb-config-dot${active ? " current" : ""}"></span>
       <span class="bsb-config-item-main">
         <span class="bsb-config-item-name">${escapeHtml(prompt.name)}</span>
         <span class="bsb-config-item-sub">${escapeHtml(prompt.hint || "自定义提示词")}</span>
       </span>
-      ${active ? `<span class="bsb-config-badge">${prompt.stage === "preprocess" ? "当前" : prompt.stage === "knowledge" ? "Knowledge" : "默认"}</span>` : ''}
-    </button>`;
+      ${active ? `<span class="bsb-config-badge">${prompt.stage === "preprocess" ? "当前" : prompt.stage === "knowledge" ? "Knowledge" : "默认"}</span>` : ""}
+    </div>`;
   }
 
   function promptEditorHtml(prompt, index) {
@@ -10117,6 +10715,182 @@
     updatePromptUi(root, getActivePromptProfile());
   }
 
+  /** Move `fromId` to the index of `toId` within an id list. */
+  function reorderIds(ids, fromId, toId) {
+    const list = Array.isArray(ids) ? ids.map(String) : [];
+    const from = list.indexOf(String(fromId || ""));
+    const to = list.indexOf(String(toId || ""));
+    if (from < 0 || to < 0 || from === to) return list;
+    const next = list.slice();
+    const [item] = next.splice(from, 1);
+    next.splice(to, 0, item);
+    return next;
+  }
+
+  /** Reorder LLM profiles by visible id order; missing ids keep relative tail. */
+  function applyConfigIdOrder(items, orderedIds) {
+    const list = Array.isArray(items) ? items.slice() : [];
+    const byId = new Map(list.map((item) => [String(item.id), item]));
+    const seen = new Set();
+    const next = [];
+    for (const id of orderedIds || []) {
+      const hit = byId.get(String(id));
+      if (!hit || seen.has(hit.id)) continue;
+      seen.add(hit.id);
+      next.push(hit);
+    }
+    for (const item of list) {
+      if (!seen.has(item.id)) next.push(item);
+    }
+    return next;
+  }
+
+  /**
+   * Reorder Prompt profiles within one stage by visible id order.
+   * Other stages keep their slots; only stage members are reassigned.
+   */
+  function applyPromptStageOrder(prompts, stage, orderedIds) {
+    const list = Array.isArray(prompts) ? prompts.slice() : [];
+    const byId = new Map(list.map((p) => [String(p.id), p]));
+    const ordered = [];
+    const seen = new Set();
+    for (const id of orderedIds || []) {
+      const hit = byId.get(String(id));
+      if (!hit || hit.stage !== stage || seen.has(hit.id)) continue;
+      seen.add(hit.id);
+      ordered.push(hit);
+    }
+    for (const p of list) {
+      if (p.stage === stage && !seen.has(p.id)) ordered.push(p);
+    }
+    let i = 0;
+    return list.map((p) => (p.stage === stage ? ordered[i++] || p : p));
+  }
+
+  function commitConfigListReorder(kind, fromId, toId) {
+    if (!fromId || !toId || fromId === toId) return false;
+    const root = ensurePanel();
+    if (kind === "llm") {
+      try { saveAiProfilesFromForm(); } catch (_) { /* use memory/storage */ }
+      const profiles = state.aiProfiles?.length ? state.aiProfiles.slice() : loadAiProfiles();
+      const ids = profiles.map((p) => p.id);
+      const nextIds = reorderIds(ids, fromId, toId);
+      if (nextIds.join("\0") === ids.join("\0")) return false;
+      const next = applyConfigIdOrder(profiles, nextIds);
+      saveAiProfiles(next);
+      state.aiEditorId = fromId;
+      fillAiConfigForm(root);
+      const name = next.find((p) => p.id === fromId)?.name || "LLM";
+      setStatus(`已调整 LLM 顺序：${name}`, "ok");
+      return true;
+    }
+    if (kind === "prompt") {
+      try { savePromptProfilesFromForm({ activeId: state.activePromptId }); } catch (_) { /* use memory/storage */ }
+      const library = state.promptProfiles?.length
+        ? {
+            prompts: state.promptProfiles.slice(),
+            activeId: state.activePromptId,
+            activePreprocessId: state.activePrePromptId,
+            activeKnowledgeId: state.activeKnowledgePromptId,
+          }
+        : loadPromptProfiles();
+      const stage = state.ui?.promptStage === "postprocess"
+        ? "postprocess"
+        : state.ui?.promptStage === "knowledge"
+          ? "knowledge"
+          : "preprocess";
+      const stageIds = library.prompts.filter((p) => p.stage === stage).map((p) => p.id);
+      const nextStageIds = reorderIds(stageIds, fromId, toId);
+      if (nextStageIds.join("\0") === stageIds.join("\0")) return false;
+      const prompts = applyPromptStageOrder(library.prompts, stage, nextStageIds);
+      savePromptProfiles(prompts, library.activeId, library.activePreprocessId, library.activeKnowledgeId);
+      state.promptEditorId = fromId;
+      fillPromptConfigForm(root);
+      const name = prompts.find((p) => p.id === fromId)?.name || "Prompt";
+      setStatus(`已调整 Prompt 顺序：${name}`, "ok");
+      return true;
+    }
+    return false;
+  }
+
+  function bindConfigListDrag(root) {
+    if (!root || root._bsbConfigDragBound) return;
+    root._bsbConfigDragBound = true;
+    let drag = null; // { kind, id, list }
+
+    const clearDragUi = () => {
+      root.querySelectorAll(".bsb-config-list-item.dragging, .bsb-config-list-item.drag-over").forEach((el) => {
+        el.classList.remove("dragging", "drag-over");
+      });
+    };
+
+    root.addEventListener("dragstart", (e) => {
+      const item = e.target.closest?.(".bsb-config-list-item[draggable='true']");
+      if (!item || !root.contains(item)) return;
+      const list = item.closest?.('[data-role="prompt-list"], [data-role="ai-list"]');
+      if (!list || list.dataset.reorderLocked === "1") {
+        e.preventDefault();
+        return;
+      }
+      const kind = list.getAttribute("data-role") === "prompt-list" ? "prompt" : "llm";
+      const id = String(item.dataset.promptListId || item.dataset.aiListId || "");
+      if (!id) {
+        e.preventDefault();
+        return;
+      }
+      drag = { kind, id, list };
+      item.classList.add("dragging");
+      try {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", id);
+      } catch (_) { /* some hosts reject setData */ }
+    });
+
+    root.addEventListener("dragend", () => {
+      clearDragUi();
+      drag = null;
+    });
+
+    root.addEventListener("dragover", (e) => {
+      if (!drag) return;
+      const item = e.target.closest?.(".bsb-config-list-item[draggable='true']");
+      if (!item) return;
+      const list = item.closest?.('[data-role="prompt-list"], [data-role="ai-list"]');
+      if (!list || list !== drag.list) return;
+      e.preventDefault();
+      try { e.dataTransfer.dropEffect = "move"; } catch (_) { /* ignore */ }
+      list.querySelectorAll(".bsb-config-list-item.drag-over").forEach((el) => {
+        if (el !== item) el.classList.remove("drag-over");
+      });
+      if (String(item.dataset.promptListId || item.dataset.aiListId || "") !== drag.id) {
+        item.classList.add("drag-over");
+      }
+    });
+
+    root.addEventListener("dragleave", (e) => {
+      const item = e.target.closest?.(".bsb-config-list-item");
+      if (!item) return;
+      const related = e.relatedTarget;
+      if (related && item.contains(related)) return;
+      item.classList.remove("drag-over");
+    });
+
+    root.addEventListener("drop", (e) => {
+      if (!drag) return;
+      const item = e.target.closest?.(".bsb-config-list-item[draggable='true']");
+      if (!item) return;
+      const list = item.closest?.('[data-role="prompt-list"], [data-role="ai-list"]');
+      if (!list || list !== drag.list) return;
+      e.preventDefault();
+      const toId = String(item.dataset.promptListId || item.dataset.aiListId || "");
+      const fromId = drag.id;
+      const kind = drag.kind;
+      clearDragUi();
+      drag = null;
+      commitConfigListReorder(kind, fromId, toId);
+    });
+  }
+
   function renderPromptList(root) {
     const host = root?.querySelector('[data-role="prompt-list"]');
     if (!host) return;
@@ -10126,8 +10900,10 @@
     const filtered = q
       ? prompts.filter((p) => `${p.name}\n${p.hint}`.toLocaleLowerCase().includes(q))
       : prompts;
+    const canReorder = !q && filtered.length > 1;
+    host.dataset.reorderLocked = canReorder ? "0" : "1";
     host.innerHTML = filtered.length
-      ? filtered.map(promptListItemHtml).join("")
+      ? filtered.map((p) => promptListItemHtml(p, { draggable: canReorder })).join("")
       : `<div class="bsb-config-list-empty">${prompts.length ? "没有匹配的 Prompt" : (stage === "preprocess" ? "还没有预处理 Prompt" : stage === "knowledge" ? "还没有 Knowledge Prompt" : "还没有后处理 Prompt")}</div>`;
   }
 
@@ -10371,16 +11147,22 @@
     return profiles[index];
   }
 
-  function aiListItemHtml(profile) {
+  function aiListItemHtml(profile, { draggable = true } = {}) {
     const selected = profile.id === state.aiEditorId;
-    return `<button type="button" class="bsb-config-list-item${selected ? " selected" : ""}" data-ai-list-id="${escapeAttr(profile.id)}" title="${escapeAttr(profile.name)}">
+    const name = profile.name || profile.model || "未命名模型";
+    const dragAttr = draggable ? 'draggable="true"' : 'draggable="false"';
+    const title = draggable
+      ? `${name} · 拖拽左侧 ⠿ 调整顺序`
+      : `${name} · 清空搜索后可拖拽排序`;
+    return `<div class="bsb-config-list-item${selected ? " selected" : ""}" role="button" tabindex="0" ${dragAttr} data-ai-list-id="${escapeAttr(profile.id)}" title="${escapeAttr(title)}">
+      <span class="bsb-config-drag" aria-hidden="true" title="拖拽排序">⠿</span>
       <span class="bsb-config-dot${profile.enabled ? " enabled" : ""}"></span>
       <span class="bsb-config-item-main">
-        <span class="bsb-config-item-name">${escapeHtml(profile.name || profile.model || "未命名模型")}</span>
+        <span class="bsb-config-item-name">${escapeHtml(name)}</span>
         <span class="bsb-config-item-sub">${escapeHtml(profile.model || "未填写 model")}</span>
       </span>
-      ${profile.enabled ? '<span class="bsb-config-badge">启用</span>' : ''}
-    </button>`;
+      ${profile.enabled ? '<span class="bsb-config-badge">启用</span>' : ""}
+    </div>`;
   }
 
   function aiEditorHtml(profile, index) {
@@ -10439,8 +11221,10 @@
     const filtered = q
       ? profiles.filter((p) => `${p.name}\n${p.model}\n${p.baseUrl}`.toLocaleLowerCase().includes(q))
       : profiles;
+    const canReorder = !q && filtered.length > 1;
+    host.dataset.reorderLocked = canReorder ? "0" : "1";
     host.innerHTML = filtered.length
-      ? filtered.map(aiListItemHtml).join("")
+      ? filtered.map((p) => aiListItemHtml(p, { draggable: canReorder })).join("")
       : `<div class="bsb-config-list-empty">${profiles.length ? "没有匹配的 LLM" : "还没有 LLM 配置"}</div>`;
   }
 
@@ -11521,46 +12305,8 @@
         fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif',
         suppressErrorRendering: true,
         deterministicIds: false,
-        themeVariables: {
-          darkMode: true,
-          background: "#181825",
-          primaryColor: "#313244",
-          primaryTextColor: "#f5e0dc",
-          primaryBorderColor: "#89b4fa",
-          secondaryColor: "#45475a",
-          secondaryTextColor: "#cdd6f4",
-          secondaryBorderColor: "#a6e3a1",
-          tertiaryColor: "#1e1e2e",
-          tertiaryTextColor: "#cdd6f4",
-          tertiaryBorderColor: "#cba6f7",
-          lineColor: "#bac2de",
-          textColor: "#cdd6f4",
-          mainBkg: "#313244",
-          nodeBorder: "#89b4fa",
-          clusterBkg: "#1e1e2e",
-          clusterBorder: "#585b70",
-          edgeLabelBackground: "#181825",
-          actorBkg: "#313244",
-          actorBorder: "#89b4fa",
-          actorTextColor: "#f5e0dc",
-          signalColor: "#bac2de",
-          signalTextColor: "#cdd6f4",
-          labelBoxBkgColor: "#313244",
-          labelBoxBorderColor: "#89b4fa",
-          labelTextColor: "#f5e0dc",
-          loopTextColor: "#cdd6f4",
-          noteBkgColor: "#45475a",
-          noteBorderColor: "#f9e2af",
-          noteTextColor: "#f5e0dc",
-          fontSize: "16px",
-        },
-        themeCSS: `
-          .nodeLabel, .edgeLabel, .label, text { font-size: 16px !important; }
-          .edgeLabel rect { fill: #181825 !important; opacity: .96 !important; }
-          .flowchart-link { stroke-width: 2px !important; }
-          .marker { fill: #bac2de !important; stroke: #bac2de !important; }
-          .cluster rect { rx: 10px; ry: 10px; }
-        `,
+        themeVariables: mermaidThemeVariablesForFlavor(),
+        themeCSS: mermaidThemeCssForFlavor(),
         flowchart: {
           htmlLabels: false,
           useMaxWidth: false,
@@ -13432,8 +14178,9 @@
   }
 
   async function doAiAnalyze(options = {}) {
+    const automatic = !!options.automatic;
     if (state.aiBusy) {
-      setStatus("已有 AI 批次仍在生成；再次点击“送去 AI”可选择停止并重新分析", "err");
+      if (!automatic) setStatus("已有 AI 批次仍在生成；再次点击“送去 AI”可选择停止并重新分析", "err");
       return;
     }
     if (operationBusy()) {
@@ -13443,28 +14190,35 @@
     }
     const root = ensurePanel();
 
-    // 必须先读取当前表单，再切换工作区。否则旧实现会用存储值覆盖刚输入的 Key / maxTokens。
+    // 手动运行：先读当前表单再切工作区，避免用存储值覆盖刚输入的 Key / maxTokens。
+    // 自动 pipeline：面板可能从未打开，表单为空；只用已保存配置，且不展开面板。
     let profiles;
-    try {
-      profiles = saveAiProfilesFromForm();
-    } catch (_) {
-      profiles = loadAiProfiles();
-      state.aiProfiles = profiles;
-    }
     let promptLibrary;
-    try {
-      promptLibrary = savePromptProfilesFromForm({ activeId: state.activePromptId });
-    } catch (_) {
+    if (automatic) {
+      profiles = state.aiProfiles?.length ? state.aiProfiles : loadAiProfiles();
+      state.aiProfiles = profiles;
       promptLibrary = loadPromptProfiles();
+    } else {
+      try {
+        profiles = saveAiProfilesFromForm();
+      } catch (_) {
+        profiles = loadAiProfiles();
+        state.aiProfiles = profiles;
+      }
+      try {
+        promptLibrary = savePromptProfilesFromForm({ activeId: state.activePromptId });
+      } catch (_) {
+        promptLibrary = loadPromptProfiles();
+      }
     }
     const preprocessPrompt = promptLibrary.prompts.find((p) => p.id === state.activePrePromptId && p.stage === "preprocess") || null;
     if (state.preprocessEnabled && (!preprocessPrompt || (!preprocessPrompt.systemPrompt.trim() && !preprocessPrompt.userPromptTemplate.trim()))) {
       setStatus("输入整理已开启，但没有可用的 PRE Prompt", "err");
-      setWorkspace("settings");
+      if (!automatic) setWorkspace("settings");
       return;
     }
-    toggleAiPanel(true);
-    const configuredTasks = savePostTasks(currentPostTasks()).filter((t) => t.enabled !== false);
+    if (!automatic) toggleAiPanel(true);
+    const configuredTasks = (automatic ? currentPostTasks() : savePostTasks(currentPostTasks())).filter((t) => t.enabled !== false);
     const profileMap = new Map(profiles.map((p) => [p.id, p]));
     const taskPlans = configuredTasks.map((task) => {
       const prompt = promptLibrary.prompts.find((p) => p.id === task.promptId && p.stage === "postprocess") || null;
@@ -13473,22 +14227,24 @@
     }).filter((plan) => plan.prompt && (plan.prompt.systemPrompt.trim() || plan.prompt.userPromptTemplate.trim()) && plan.models.length);
     if (!taskPlans.length) {
       setStatus("当前处理方案没有可运行的产物：请为至少一个 POST Prompt 选择已启用的 LLM", "err");
-      setAiDrawer("flow");
+      if (!automatic) setAiDrawer("flow");
       return;
     }
     const usedProfiles = Array.from(new Map(taskPlans.flatMap((p) => p.models).map((m) => [m.id, m])).values());
     const invalid = usedProfiles.filter((x) => !x.apiKey || !x.baseUrl || !x.model);
     if (invalid.length) {
       setStatus(`以下产物引用的 LLM 配置不完整：${invalid.map((x) => x.name || x.model).join("、")}`, "err");
-      setWorkspace("settings");
-      setSettingsTab("llm");
+      if (!automatic) {
+        setWorkspace("settings");
+        setSettingsTab("llm");
+      }
       return;
     }
 
     const preprocessConfig = state.preprocessEnabled ? getPreprocessModelConfig(profiles) : null;
     if (state.preprocessEnabled && !preprocessConfig) {
       setStatus("预处理已开启，但没有可用的 LLM 配置", "err");
-      setWorkspace("settings");
+      if (!automatic) setWorkspace("settings");
       return;
     }
 
@@ -13718,7 +14474,9 @@
     state.ctx = ctx;
     state.cancel = false;
     state.cancelScan = false;
+    state.scanPaused = false;
     setScanBusy(true);
+    setLibraryJob({ kind: "scan", index: 0, total: 0, label: "识别页面" });
     setStatus("扫描中…");
     try {
       const root = ensurePanel();
@@ -13875,6 +14633,20 @@
         if (ctx.type === "collection") {
           if (!meta.author && ctx.authorHint) meta.author = ctx.authorHint;
           if (!meta.name && ctx.collectionTitleHint) meta.name = ctx.collectionTitleHint;
+          const archiveCount = items.length;
+          setStatus(`展开合集内多分P单元（${archiveCount} 个稿件）…`);
+          items = await expandCollectionArchivesWithParts(items, {
+            delayMs: Math.min(state.delayMs, 280),
+            onProgress: (t) => setStatus(t),
+            shouldCancel: () => state.cancelScan || scanId !== state.scanSeq,
+          });
+          if (items.length > archiveCount) {
+            meta.expandedParts = items.length - archiveCount;
+            meta.hint = [
+              meta.hint,
+              `已展开单元内分P ${archiveCount} → ${items.length} 条`,
+            ].filter(Boolean).join(" · ");
+          }
           // Pure attach: authorHint / collectionTitleHint fill UP + folder label.
           items = attachCollectionGroupMeta(items, meta, ctx);
         }
@@ -13974,7 +14746,9 @@
     } finally {
       if (scanId === state.scanSeq) {
         state.cancelScan = false;
+        state.scanPaused = false;
         setScanBusy(false);
+        clearLibraryJob();
         flushPendingMainAction();
       }
     }
@@ -14014,7 +14788,17 @@
 
     state.cancel = false;
     state.cancelBatch = false;
+    state.batchPaused = false;
     setBatchBusy(true);
+    if (act === "fetch-selected") {
+      try { setWorkspace("subs", { silent: true }); } catch (_) { /* panel not ready */ }
+    }
+    setLibraryJob({
+      kind: "fetch",
+      index: 0,
+      total: targets.length,
+      label: act === "fetch-selected" ? "准备抓取" : "准备导出",
+    });
     // copy / download / fetch-selected 都会在缺字幕时补抓。
     const needData = act !== "copy-bvid";
 
@@ -14022,15 +14806,25 @@
       empty = 0,
       err = 0;
     const delay = state.delayMs;
+    let stoppedAt = -1;
 
     try {
       for (let i = 0; i < targets.length; i++) {
+        await waitIfJobPaused();
         if (state.cancelBatch || state.cancel) {
+          stoppedAt = i;
           setStatus(`已停止 · 完成 ${i}/${targets.length}`, "err");
           break;
         }
         const it = targets[i];
-        setStatus(`字幕 ${i + 1}/${targets.length} · ${it.bvid}${it.page > 1 ? " P" + it.page : ""}…`);
+        const itemLabel = `${it.bvid}${it.page > 1 ? " P" + it.page : ""}`;
+        setLibraryJob({
+          kind: "fetch",
+          index: i + 1,
+          total: targets.length,
+          label: itemLabel,
+        });
+        setStatus(`${state.batchPaused ? "已暂停" : "字幕"} ${i + 1}/${targets.length} · ${itemLabel}…`);
 
         if (needData && (!it.data || it.subStatus !== "ok")) {
           try {
@@ -14051,7 +14845,10 @@
             err++;
           }
           renderList();
-          if (i < targets.length - 1 && !state.cancelBatch && !state.cancel) await sleep(delay);
+          if (i < targets.length - 1 && !state.cancelBatch && !state.cancel) {
+            await sleep(delay);
+            await waitIfJobPaused();
+          }
         } else if (it.subStatus === "ok") {
           ok++;
         }
@@ -14064,7 +14861,11 @@
       }
 
       if (act === "fetch-selected") {
-        setStatus(`字幕抓取完成 · ok=${ok} empty=${empty} err=${err}`, err && !ok ? "err" : "ok");
+        if (stoppedAt >= 0) {
+          setStatus(`已停止抓取 · 完成 ${stoppedAt}/${targets.length} · ok=${ok} empty=${empty} err=${err}`, "ok");
+        } else {
+          setStatus(`字幕抓取完成 · ok=${ok} empty=${empty} err=${err}`, err && !ok ? "err" : "ok");
+        }
         return;
       }
 
@@ -14111,7 +14912,9 @@
       if (batchId === state.batchSeq) {
         state.cancelBatch = false;
         state.cancel = false;
+        state.batchPaused = false;
         setBatchBusy(false);
+        clearLibraryJob();
         renderList();
         flushPendingMainAction();
       }
@@ -14202,9 +15005,15 @@
     }
   }
 
+  /**
+   * 调度当前视频自动抓字幕。
+   * 必须允许在后台标签页运行：用户点进视频后切走、或后台打开视频页时，
+   * 仍应静默抓取并（在开启自动分析时）送入 AI pipeline，不依赖面板保持打开。
+   * 历史 bug：`document.hidden` 会直接 return，导致后台标签页完全不抓字幕。
+   */
   function scheduleAutoCapture(reason, delay = AUTO_CAPTURE_DELAY_MS) {
     clearTimeout(state.autoCaptureTimer);
-    if (!state.autoCaptureEnabled || document.hidden) return;
+    if (!state.autoCaptureEnabled) return;
     state.autoCaptureTimer = window.setTimeout(() => {
       autoCaptureCurrentVideo(reason).catch((error) => {
         if (error?.name !== "AbortError") {
@@ -14465,17 +15274,19 @@
       scheduleAutoCapture("pageshow", 120);
     });
     document.addEventListener("visibilitychange", () => {
+      // 回到前台时补一次路由对齐；真正的抓取不应依赖可见性（见 scheduleAutoCapture）。
       if (document.visibilityState === "visible") {
         onMaybeNavigate();
         scheduleAutoCapture("visible", 120);
       }
     });
-    // History hook 是主路径；低频 URL 比较只为处理少数 B 站站内切换。
+    // History hook 是主路径；低频 URL 比较兜底少数站内切换。
+    // 后台标签页也要跑：用户切走后 SPA 参数变化 / 延迟写入的 BV 仍需触发自动抓取。
     setInterval(() => {
-      if (document.visibilityState === "visible") onMaybeNavigate();
+      onMaybeNavigate();
     }, 2000);
 
-    // 初次打开页面也默认抓取，不要求先打开面板或点击“扫描”。
+    // 初次打开页面也默认抓取：不要求打开面板、不要求标签页在前台、不要求点击“扫描”。
     scheduleAutoCapture("initial", 180);
   }
 
