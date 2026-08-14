@@ -35,10 +35,26 @@ import {
   resolveFolderSegments,
   resolveExportFolderSegments,
   upsertCollectionExportIndex,
-  upsertExportIndexMap,
   upsertIndexForExportItem,
   upsertVideoExportIndex,
+  type LibraryFolderGroup,
+  type LibraryGroupItem,
+  type LibraryRenderNode,
 } from "@subbatch/core";
+
+function expectFolder(node: LibraryRenderNode | undefined): LibraryFolderGroup {
+  expect(node?.type).toBe("folder");
+  if (!node || node.type !== "folder") {
+    throw new Error("expected folder node");
+  }
+  return node;
+}
+
+function requireItem(items: Array<LibraryGroupItem | undefined>, index: number): LibraryGroupItem {
+  const item = items[index];
+  if (!item) throw new Error(`expected library item at ${index}`);
+  return item;
+}
 
 describe("subtitle export layout", () => {
   const blenderPart = {
@@ -290,11 +306,10 @@ describe("library folder groups", () => {
     }));
     const nodes = buildLibraryRenderNodes(selection, {});
     expect(nodes).toHaveLength(1);
-    expect(nodes[0].type).toBe("folder");
-    if (nodes[0].type !== "folder") return;
-    expect(nodes[0].folderLabel).toBe("Kurt Blender教程");
-    expect(nodes[0].checkState).toBe("partial");
-    expect(nodes[0].total).toBe(3);
+    const folder = expectFolder(nodes[0]);
+    expect(folder.folderLabel).toBe("Kurt Blender教程");
+    expect(folder.checkState).toBe("partial");
+    expect(folder.total).toBe(3);
 
     const items = selection.map((e) => e.item);
     setGroupSelection(items, "selection:BV14u41147YH", true);
@@ -303,8 +318,9 @@ describe("library folder groups", () => {
       items.map((item, index) => ({ item, index })),
       { "selection:BV14u41147YH": true },
     );
-    expect(allNodes[0].type === "folder" && allNodes[0].collapsed).toBe(true);
-    expect(allNodes[0].type === "folder" && allNodes[0].checkState).toBe("all");
+    const allFolder = expectFolder(allNodes[0]);
+    expect(allFolder.collapsed).toBe(true);
+    expect(allFolder.checkState).toBe("all");
   });
 
   it("folders same-BV multi-P even without groupType metadata", () => {
@@ -322,12 +338,10 @@ describe("library folder groups", () => {
     }));
     const nodes = buildLibraryRenderNodes(entries, {});
     expect(nodes).toHaveLength(1);
-    expect(nodes[0].type).toBe("folder");
-    if (nodes[0].type === "folder") {
-      expect(nodes[0].groupType).toBe("selection");
-      expect(nodes[0].total).toBe(3);
-      expect(nodes[0].folderLabel).toContain("KurTips");
-    }
+    const folder = expectFolder(nodes[0]);
+    expect(folder.groupType).toBe("selection");
+    expect(folder.total).toBe(3);
+    expect(folder.folderLabel).toContain("KurTips");
   });
 
   it("folders 合集 even for a single episode with collection meta", () => {
@@ -352,12 +366,10 @@ describe("library folder groups", () => {
     ];
     const nodes = buildLibraryRenderNodes(entries, {});
     expect(nodes).toHaveLength(1);
-    expect(nodes[0].type).toBe("folder");
-    if (nodes[0].type === "folder") {
-      expect(nodes[0].groupType).toBe("collection");
-      expect(nodes[0].total).toBe(1);
-      expect(nodes[0].folderLabel).toBe("随意Official 分布式教程");
-    }
+    const folder = expectFolder(nodes[0]);
+    expect(folder.groupType).toBe("collection");
+    expect(folder.total).toBe(1);
+    expect(folder.folderLabel).toBe("随意Official 分布式教程");
   });
 
   it("folders multiple 合集 episodes sharing collectionSid without groupType", () => {
@@ -391,17 +403,15 @@ describe("library folder groups", () => {
     ];
     const nodes = buildLibraryRenderNodes(entries, {});
     expect(nodes).toHaveLength(1);
-    expect(nodes[0].type).toBe("folder");
-    if (nodes[0].type === "folder") {
-      expect(nodes[0].groupType).toBe("collection");
-      expect(nodes[0].total).toBe(2);
-      expect(nodes[0].checkState).toBe("partial");
-      expect(nodes[0].folderLabel).toContain("分布式教程");
-    }
+    const folder = expectFolder(nodes[0]);
+    expect(folder.groupType).toBe("collection");
+    expect(folder.total).toBe(2);
+    expect(folder.checkState).toBe("partial");
+    expect(folder.folderLabel).toContain("分布式教程");
   });
 
   it("attachSelection / attachCollection / ugc_season are pure and reusable", () => {
-    const sel = attachSelectionGroupMeta(
+    const sel = attachSelectionGroupMeta<LibraryGroupItem>(
       [
         { bvid: "BV14u41147YH", page: 1, part: "开场", title: "x - P1【开场】" },
         { bvid: "BV14u41147YH", page: 2, part: "续", title: "x - P2【续】" },
@@ -409,12 +419,12 @@ describe("library folder groups", () => {
       { author: "KurTips", title: "【Kurt】教程" },
     );
     expect(sel).toHaveLength(2);
-    expect(sel[0].groupType).toBe("selection");
-    expect(sel[0].groupKey).toBe("selection:BV14u41147YH");
-    expect(sel[0].groupFolder).toBe("KurTips 【Kurt】教程");
-    expect(sel[1].videoTitle).toBe("【Kurt】教程");
+    expect(sel[0]?.groupType).toBe("selection");
+    expect(sel[0]?.groupKey).toBe("selection:BV14u41147YH");
+    expect(sel[0]?.groupFolder).toBe("KurTips 【Kurt】教程");
+    expect(sel[1]?.videoTitle).toBe("【Kurt】教程");
 
-    const col = attachCollectionGroupMeta(
+    const col = attachCollectionGroupMeta<LibraryGroupItem>(
       [
         { bvid: "BV1AAA", title: "第1集", author: "" },
         { bvid: "BV1BBB", title: "第2集", author: "" },
@@ -422,12 +432,12 @@ describe("library folder groups", () => {
       { mid: "1", season_id: "2", name: "分布式教程", author: "" },
       { authorHint: "随意Official" },
     );
-    expect(col[0].groupType).toBe("collection");
-    expect(col[0].groupKey).toBe("collection:1/2");
-    expect(col[0].author).toBe("随意Official");
-    expect(col[0].groupFolder).toBe("随意Official 分布式教程");
+    expect(col[0]?.groupType).toBe("collection");
+    expect(col[0]?.groupKey).toBe("collection:1/2");
+    expect(col[0]?.author).toBe("随意Official");
+    expect(col[0]?.groupFolder).toBe("随意Official 分布式教程");
 
-    const stamped = applyUgcSeasonToItem(
+    const stamped = applyUgcSeasonToItem<LibraryGroupItem>(
       { bvid: "BV1qms", title: "某一集", author: "" },
       {
         ugc_season: { id: 6622988, mid: 79356601, title: "分布式教程" },
@@ -438,7 +448,7 @@ describe("library folder groups", () => {
     expect(stamped.collectionSid).toBe("6622988");
     expect(stamped.groupFolder).toContain("随意Official");
 
-    const multi = applyUgcSeasonToItems(
+    const multi = applyUgcSeasonToItems<LibraryGroupItem>(
       [{ bvid: "A" }, { bvid: "B" }],
       { ugc_season: { id: 1, mid: 2, title: "合" }, owner: { name: "U" } },
     );
@@ -449,18 +459,18 @@ describe("library folder groups", () => {
       author: "随意Official",
       groupFolder: "随意Official 分布式教程",
     });
-    const patched = applyGroupMetaPatchToItems(
+    const patched = applyGroupMetaPatchToItems<LibraryGroupItem>(
       [
         { bvid: "A", groupKey: "collection:1/2", author: "", groupFolder: "未知UP 分布式教程" },
         { bvid: "Z", groupKey: "other", author: "X" },
       ],
       patch,
     );
-    expect(patched[0].author).toBe("随意Official");
-    expect(patched[0].groupFolder).toBe("随意Official 分布式教程");
-    expect(patched[1].author).toBe("X");
+    expect(patched[0]?.author).toBe("随意Official");
+    expect(patched[0]?.groupFolder).toBe("随意Official 分布式教程");
+    expect(patched[1]?.author).toBe("X");
 
-    const merged = mergeGroupFields(
+    const merged = mergeGroupFields<LibraryGroupItem>(
       { bvid: "A", title: "t" },
       { groupType: "collection", groupKey: "collection:1/2", collectionName: "合" },
     );
@@ -538,14 +548,15 @@ describe("library folder groups", () => {
     ];
     const nodes = buildLibraryRenderNodes(entries, {});
     expect(nodes.map((n) => n.type)).toEqual(["item", "folder"]);
-    if (nodes[1].type === "folder") {
-      expect(nodes[1].children).toHaveLength(2);
-      expect(nodes[1].checkState).toBe("partial");
+    const folder = nodes[1];
+    if (folder?.type === "folder") {
+      expect(folder.children).toHaveLength(2);
+      expect(folder.checkState).toBe("partial");
     }
   });
 
   it("个人主页: UP top folder nests singles / 选集 / 合集; download path mirrors", () => {
-    const space = attachUserSpaceGroupMeta(
+    const space = attachUserSpaceGroupMeta<LibraryGroupItem>(
       [
         { bvid: "BV1SINGLE", page: 1, title: "日常随拍", author: "示例UP", groupType: "single" as const, selected: true },
         { bvid: "BV1SEL", page: 1, title: "教程 - P1【开场】", author: "示例UP", part: "开场", selected: true },
@@ -573,25 +584,25 @@ describe("library folder groups", () => {
 
     // Expand multi-P under space → leaf folder without re-prefixing UP
     const withSel = [
-      space[0],
-      ...attachSelectionGroupMeta([space[1], space[2]], {
+      requireItem(space, 0),
+      ...attachSelectionGroupMeta<LibraryGroupItem>([requireItem(space, 1), requireItem(space, 2)], {
         author: "示例UP",
         title: "完整教程",
       }),
-      ...attachCollectionGroupMeta([space[3], space[4]], {
+      ...attachCollectionGroupMeta<LibraryGroupItem>([requireItem(space, 3), requireItem(space, 4)], {
         mid: "12345",
         season_id: "99",
         name: "进阶合集",
         author: "示例UP",
       }),
     ];
-    expect(withSel[1].groupFolder).toBe("完整教程");
-    expect(withSel[1].parentFolder).toBe("示例UP");
-    expect(withSel[3].groupFolder).toBe("进阶合集");
-    expect(withSel[3].parentFolder).toBe("示例UP");
+    expect(withSel[1]?.groupFolder).toBe("完整教程");
+    expect(withSel[1]?.parentFolder).toBe("示例UP");
+    expect(withSel[3]?.groupFolder).toBe("进阶合集");
+    expect(withSel[3]?.parentFolder).toBe("示例UP");
 
     // 散视频进「视频」桶
-    const withLoose = attachSpaceLooseVideosMeta(withSel);
+    const withLoose = attachSpaceLooseVideosMeta<LibraryGroupItem>(withSel);
     // Path segments
     expect(resolveFolderSegments(withLoose[0])).toEqual(["示例UP", SPACE_LOOSE_VIDEOS_FOLDER]);
     expect(resolveFolderSegments(withLoose[1])).toEqual(["示例UP", "完整教程"]);
@@ -616,14 +627,13 @@ describe("library folder groups", () => {
     const entries = withLoose.map((item, index) => ({ item, index }));
     const nodes = buildLibraryRenderNodes(entries, {});
     expect(nodes).toHaveLength(1);
-    expect(nodes[0].type).toBe("folder");
-    if (nodes[0].type !== "folder") return;
-    expect(nodes[0].groupType).toBe("space");
-    expect(nodes[0].folderLabel).toBe("示例UP");
-    expect(nodes[0].groupKey).toBe("space:12345");
-    expect(nodes[0].total).toBe(5);
-    expect(nodes[0].nodes).toBeDefined();
-    const nested = nodes[0].nodes || [];
+    const spaceFolder = expectFolder(nodes[0]);
+    expect(spaceFolder.groupType).toBe("space");
+    expect(spaceFolder.folderLabel).toBe("示例UP");
+    expect(spaceFolder.groupKey).toBe("space:12345");
+    expect(spaceFolder.total).toBe(5);
+    expect(spaceFolder.nodes).toBeDefined();
+    const nested = spaceFolder.nodes || [];
     expect(nested.every((n) => n.type === "folder")).toBe(true);
     expect(nested).toHaveLength(3);
     const labels = nested.map((n) => (n.type === "folder" ? n.folderLabel : ""));
@@ -645,16 +655,16 @@ describe("library folder groups", () => {
   });
 
   it("attachUserSpaceGroupMeta is pure and reuses author from items", () => {
-    const stamped = attachUserSpaceGroupMeta(
+    const stamped = attachUserSpaceGroupMeta<LibraryGroupItem>(
       [{ bvid: "BV1", title: "a", author: "KurTips" }],
       { mid: "1" },
     );
-    expect(stamped[0].parentFolder).toBe("KurTips");
-    expect(stamped[0].spaceMid).toBe("1");
+    expect(stamped[0]?.parentFolder).toBe("KurTips");
+    expect(stamped[0]?.spaceMid).toBe("1");
   });
 
   it("applySpaceCollectionMembership migrates matching BVs into 合集 under UP", () => {
-    const space = attachUserSpaceGroupMeta(
+    const space = attachUserSpaceGroupMeta<LibraryGroupItem>(
       [
         { bvid: "BV1INCOL", page: 1, title: "合集里的视频", author: "示例UP" },
         { bvid: "BV1ALONE", page: 1, title: "散视频", author: "示例UP" },
@@ -674,36 +684,36 @@ describe("library folder groups", () => {
     const stats = countSpaceCollectionMatches(space, collections);
     expect(stats).toEqual({ matched: 2, collectionCount: 1 });
 
-    const migrated = applySpaceCollectionMembership(space, collections);
-    expect(migrated[0].groupType).toBe("collection");
-    expect(migrated[0].collectionName).toBe("进阶合集");
-    expect(migrated[0].collectionSid).toBe("99");
-    expect(migrated[0].collectionShortUrl).toBe("space.bilibili.com/12345/lists/99");
-    expect(migrated[0].parentFolder).toBe("示例UP");
-    expect(migrated[0].groupFolder).toBe("进阶合集");
+    const migrated = applySpaceCollectionMembership<LibraryGroupItem>(space, collections);
+    expect(migrated[0]?.groupType).toBe("collection");
+    expect(migrated[0]?.collectionName).toBe("进阶合集");
+    expect(migrated[0]?.collectionSid).toBe("99");
+    expect(migrated[0]?.collectionShortUrl).toBe("space.bilibili.com/12345/lists/99");
+    expect(migrated[0]?.parentFolder).toBe("示例UP");
+    expect(migrated[0]?.groupFolder).toBe("进阶合集");
     expect(resolveFolderSegments(migrated[0])).toEqual(["示例UP", "进阶合集"]);
     expect(buildSubtitleExportRelativePath(migrated[0], "txt")).toBe(
       `${SUBTITLE_EXPORT_ROOT}/${safePathSegment("示例UP")}/${safePathSegment("进阶合集")}/${joinFileName("合集里的视频", "txt")}`,
     );
 
     // 未命中的散视频归入 UP/视频
-    const withLoose = attachSpaceLooseVideosMeta(migrated);
-    expect(withLoose[1].groupType).toBe("single");
-    expect(withLoose[1].collectionSid).toBeFalsy();
-    expect(withLoose[1].groupFolder).toBe(SPACE_LOOSE_VIDEOS_FOLDER);
+    const withLoose = attachSpaceLooseVideosMeta<LibraryGroupItem>(migrated);
+    expect(withLoose[1]?.groupType).toBe("single");
+    expect(withLoose[1]?.collectionSid).toBeFalsy();
+    expect(withLoose[1]?.groupFolder).toBe(SPACE_LOOSE_VIDEOS_FOLDER);
     expect(resolveFolderSegments(withLoose[1])).toEqual(["示例UP", SPACE_LOOSE_VIDEOS_FOLDER]);
 
-    expect(withLoose[2].groupType).toBe("collection");
-    expect(withLoose[2].collectionShortUrl).toContain("/lists/99");
+    expect(withLoose[2]?.groupType).toBe("collection");
+    expect(withLoose[2]?.collectionShortUrl).toContain("/lists/99");
 
     const nodes = buildLibraryRenderNodes(
       withLoose.map((item, index) => ({ item, index })),
       {},
     );
     expect(nodes).toHaveLength(1);
-    if (nodes[0].type !== "folder") return;
-    expect(nodes[0].groupType).toBe("space");
-    const nested = nodes[0].nodes || [];
+    const spaceFolder = expectFolder(nodes[0]);
+    expect(spaceFolder.groupType).toBe("space");
+    const nested = spaceFolder.nodes || [];
     // 「视频」文件夹 + 合集文件夹
     expect(nested.every((n) => n.type === "folder")).toBe(true);
     const looseFolder = nested.find((n) => n.type === "folder" && n.folderLabel === SPACE_LOOSE_VIDEOS_FOLDER);

@@ -39,6 +39,8 @@ export interface LibraryGroupItem {
   collectionShortUrl?: string;
   sources?: string[];
   subStatus?: string;
+  /** Multi-P page list from Bilibili view payload (used to infer 选集). */
+  pages?: Array<{ part?: string; cid?: number | string } | null | undefined> | null;
 }
 
 export interface LibraryEntry {

@@ -3,6 +3,7 @@ export const CORE_VERSION = "0.6.0";
 export * from "./ai-session";
 export * from "./commands";
 export * from "./export/subtitle-download";
+export * from "./folio";
 export * from "./knowledge";
 export * from "./library/group-meta";
 export * from "./library/groups";

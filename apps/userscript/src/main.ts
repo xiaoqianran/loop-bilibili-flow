@@ -25,7 +25,7 @@ const runtime = createUserscriptRuntime(host);
  * Product body must call `SubBatch.SubBatchMonorepo.core.*` (or top-level aliases).
  */
 const SubBatchMonorepo = {
-  version: "6.9.6",
+  version: "6.9.7",
   runtime,
   host,
   /** Entire pure core namespace — preferred bridge target. */
@@ -62,6 +62,12 @@ const SubBatchMonorepo = {
   draftHydratedAiRun: core.draftHydratedAiRun,
   draftHydratedPreprocessRun: core.draftHydratedPreprocessRun,
   replaceMermaidBlockAt: core.replaceMermaidBlockAt,
+  slugFolioHeading: core.slugFolioHeading,
+  buildFolioOutline: core.buildFolioOutline,
+  flattenFolioOutline: core.flattenFolioOutline,
+  countFolioOutline: core.countFolioOutline,
+  formatFolioChapterIndex: core.formatFolioChapterIndex,
+  folioOutlineSummary: core.folioOutlineSummary,
   // ── export + library (also on core.* ; aliases for clarity) ──
   safePathSegment: core.safePathSegment,
   joinFileName: core.joinFileName,

@@ -3,6 +3,11 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  buildFolioOutline,
+  countFolioOutline,
+  folioOutlineSummary,
+  formatFolioChapterIndex,
+  slugFolioHeading,
   aiRunIdentityKey,
   aiSessionCacheKey,
   aiSessionCacheTtlMs,
@@ -245,6 +250,19 @@ describe("P2 extracted Pure Core", () => {
       replaced: true,
       value: "```mermaid\nflowchart TD\nA[\"new\"]\n```",
     });
+
+    expect(slugFolioHeading("核心判断：为什么成立", 0)).toBe("folio-核心判断-为什么成立-1");
+    expect(formatFolioChapterIndex(3)).toBe("03");
+    const outline = buildFolioOutline([
+      { id: "folio-a-1", level: 2, text: "问题" },
+      { id: "folio-b-2", level: 3, text: "背景" },
+      { id: "folio-c-3", level: 3, text: "矛盾" },
+      { id: "folio-d-4", level: 2, text: "方法" },
+    ]);
+    expect(outline).toHaveLength(2);
+    expect(outline[0]?.children.map((node) => node.text)).toEqual(["背景", "矛盾"]);
+    expect(countFolioOutline(outline)).toEqual({ chapters: 2, sections: 4 });
+    expect(folioOutlineSummary({ chapters: 2, sections: 4 })).toBe("2 章 · 4 节");
 
     expect(md5("raw transcript")).toBe("cf7b263a3cc99460b01b27ec78c65d16");
     expect(

@@ -275,6 +275,30 @@ export function aiRunIdentityKey(run: PlannedAiRun | null | undefined, inputHash
   ].join(":");
 }
 
+function plannedAiRunFromCache(cached: AiRunCacheSnapshot): PlannedAiRun {
+  const prompt =
+    cached.promptProfile && typeof cached.promptProfile === "object"
+      ? (cached.promptProfile as NonNullable<PlannedAiRun["promptProfile"]>)
+      : null;
+  const config =
+    cached.config && typeof cached.config === "object"
+      ? {
+          baseUrl: String(cached.config.baseUrl || ""),
+          model: String(cached.config.model || ""),
+          temperature: Number(cached.config.temperature),
+          maxTokens: Number(cached.config.maxTokens),
+        }
+      : null;
+  const next: PlannedAiRun = {
+    promptProfile: prompt,
+    config,
+  };
+  if (cached.taskId !== undefined) next.taskId = cached.taskId;
+  if (cached.profileId !== undefined) next.profileId = cached.profileId;
+  if (cached.promptId !== undefined) next.promptId = cached.promptId;
+  return next;
+}
+
 export function partitionPlannedAiRuns(
   planned: PlannedAiRun[] | null | undefined,
   cachedRuns: Array<AiRunCacheSnapshot | null | undefined> | null | undefined,
@@ -286,7 +310,7 @@ export function partitionPlannedAiRuns(
   const byKey = new Map<string, AiRunCacheSnapshot>();
   for (const cached of cachedRuns || []) {
     if (!cached || !String(cached.raw || "").trim()) continue;
-    byKey.set(aiRunIdentityKey(cached, inputHash), cached);
+    byKey.set(aiRunIdentityKey(plannedAiRunFromCache(cached), inputHash), cached);
   }
   const reuse: Array<{ plan: PlannedAiRun; cached: AiRunCacheSnapshot }> = [];
   const generate: PlannedAiRun[] = [];

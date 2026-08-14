@@ -216,7 +216,7 @@ export function applyUgcSeasonToItem<T extends LibraryGroupItem>(
   item: T | null | undefined,
   view: UgcSeasonViewLike | null | undefined,
 ): T {
-  if (!item) return item as T;
+  if (!item) return item as unknown as T;
   if (!view?.ugc_season?.id) return item;
   const season = view.ugc_season;
   const mid = season.mid || view.owner?.mid;
@@ -303,11 +303,11 @@ export function applySpaceCollectionMembership<T extends LibraryGroupItem>(
     const col = key ? byBvid.get(key) : undefined;
     if (!col) return { ...it };
     const stamped = attachCollectionGroupMeta([it], {
-      mid: col.mid,
-      season_id: col.season_id,
+      mid: col.mid ?? "",
+      season_id: col.season_id ?? "",
       name: col.name || col.title || "未命名合集",
-      author: col.author || it.author,
-      parentFolder: it.parentFolder,
+      ...(col.author || it.author ? { author: col.author || it.author } : {}),
+      ...(it.parentFolder ? { parentFolder: it.parentFolder } : {}),
     });
     return stamped[0] || { ...it };
   });
@@ -354,11 +354,11 @@ export function buildGroupMetaPatches(
   const author = String(normalized?.author || "").trim();
   const groupFolder = String(normalized?.groupFolder || "").trim();
   if (!author && !groupFolder) return null;
-  return {
-    groupKey: key,
-    author: author && author !== "未知UP" ? author : undefined,
-    groupFolder: groupFolder && !/^未知UP\b/.test(groupFolder) ? groupFolder : undefined,
-  };
+  const patch: GroupMetaPatch = { groupKey: key };
+  if (author && author !== "未知UP") patch.author = author;
+  if (groupFolder && !/^未知UP\b/.test(groupFolder)) patch.groupFolder = groupFolder;
+  if (!patch.author && !patch.groupFolder) return null;
+  return patch;
 }
 
 /** Apply one patch onto a library list (returns new array; does not mutate). */

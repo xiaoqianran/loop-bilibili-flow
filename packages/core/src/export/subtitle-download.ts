@@ -171,7 +171,7 @@ export function resolveSubtitleFileStem(item: SubtitleExportItem | null | undefi
 export function resolveExportFolderName(item: SubtitleExportItem | null | undefined): string {
   const raw = resolveFolderSegments(item);
   if (raw.length > 1) return raw.join(" / ");
-  if (raw.length === 1) return raw[0];
+  if (raw.length === 1) return raw[0] || "";
   const folder = String(item?.groupFolder || "").trim();
   if (folder && !/^未知UP\b/.test(folder)) return folder;
   return resolveLibraryFolderLabel(item);
@@ -217,9 +217,9 @@ export function parseExportIndexMd(content: string | null | undefined): Subtitle
       /^(.+?)\s+(space\.bilibili\.com\/\d+\/lists\/\d+)\s+(.+)$/i,
     );
     if (col) {
-      const author = col[1].trim();
-      const shortUrl = col[2].trim();
-      const name = col[3].trim();
+      const author = String(col[1] || "").trim();
+      const shortUrl = String(col[2] || "").trim();
+      const name = String(col[3] || "").trim();
       map[collectionIndexKey(shortUrl)] = {
         kind: "collection",
         author,
@@ -243,7 +243,7 @@ export function parseExportIndexMd(content: string | null | undefined): Subtitle
           ? `www.${bare}`
           : bare;
       const bvid = videoIndexKey(vid[3]);
-      const name = vid[4].trim();
+      const name = String(vid[4] || "").trim();
       map[bvid] = {
         kind: "video",
         author,
@@ -257,8 +257,8 @@ export function parseExportIndexMd(content: string | null | undefined): Subtitle
     // Legacy: BV14u41147YH 标题…
     const m = line.match(/^(BV[\w]+)\s+(.+)$/i);
     if (!m) continue;
-    const normalized = videoIndexKey(m[1]);
-    const legacyName = m[2].trim();
+    const normalized = videoIndexKey(m[1] || "");
+    const legacyName = String(m[2] || "").trim();
     map[normalized] = {
       kind: "video",
       author: "",

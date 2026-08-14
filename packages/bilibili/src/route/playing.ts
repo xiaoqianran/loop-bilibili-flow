@@ -186,14 +186,17 @@ export function resolvePlayingVideoRef(
       : playingBvid
         ? input.playing?.source || "player"
         : "url";
-  return {
+  const snapshot: PlayingVideoSnapshot = {
     bvid,
     page,
-    cid: readPositiveNumber(input.playing?.cid),
-    aid: readPositiveNumber(input.playing?.aid),
     key: routeVideoKey(bvid, page),
     source,
   };
+  const cid = readPositiveNumber(input.playing?.cid);
+  if (cid) snapshot.cid = cid;
+  const aid = readPositiveNumber(input.playing?.aid);
+  if (aid) snapshot.aid = aid;
+  return snapshot;
 }
 
 export function playingVideoChanged(

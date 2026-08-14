@@ -32,6 +32,7 @@
 // ==/UserScript==
 
 /**
+ * v6.9.7 — HTML 阅读页目录改成语雀/飞书式分层大纲：层级、当前定位、滚动跟随。
  * v6.9.6 — 后处理按模型复用缓存：只生成身份变化的版本，其余命中缓存。规则在 packages/core。
  * v6.9.5 — 连播切集认播放器身份：URL 未变时按 player/cid 换字幕。规则在 packages/bilibili。
  * v6.9.4 — 后处理会话缓存：刷新只恢复；手动重新生成与 Mermaid 重绘覆盖。规则在 packages/core。
@@ -177,7 +178,7 @@
   const AI_PROFILES_STORE_KEY = "bili-subbatch-ai-profiles-v1";
   const AI_PROFILES_SCHEMA_VERSION = 4;
   const PROMPT_STORE_KEY = "bili-subbatch-prompts-v1";
-  const PROMPT_SCHEMA_VERSION = 8;
+  const PROMPT_SCHEMA_VERSION = 9;
   const DEFAULT_PROMPT_ID = "builtin-mermaid-learning-map";
   const DEFAULT_PREPROCESS_PROMPT_ID = "builtin-subtitle-normalizer";
   const DEFAULT_KNOWLEDGE_PROMPT_ID = "builtin-knowledge-drilldown";
@@ -385,7 +386,8 @@
       "",
       "只输出一个 ```html 代码块，里面恰好一个 <article class=\"bsb-folio\">。",
       "header：一行 kicker + 一个 h1 + 一段 lede（lede 写「看完能明白什么」，不要空套话）。",
-      "每个 section 一个 h2。标签够用即可：p ul ol li strong mark code pre aside table。",
+      "每个大节一个 h2；大节里若有 2 个以上可单独跳转的要点，再用 h3 拆开，让左侧目录能分层。不要为空标题硬拆。",
+      "标签够用即可：p ul ol li strong mark code pre aside table。",
       "关键结论用 <aside data-kind=\"key\">，提醒用 note，风险用 warn。步骤用 <ol class=\"steps\">。",
       "不要 style、script、完整网页、Mermaid、前言后记或思考过程。",
     ].join("\n"),
@@ -4110,27 +4112,127 @@
 
       /* ── HTML Folio：后处理阅读页（模型只产语义，壳负责版式） ── */
       #${PANEL_ID} .bsb-folio-shell {
-        display: grid; grid-template-columns: minmax(0, 11.5rem) minmax(0, 1fr);
+        position: relative;
+        display: grid; grid-template-columns: 16.25rem minmax(0, 1fr);
         gap: 0; min-height: 100%;
         background: var(--ctp-base);
       }
       #${PANEL_ID} .bsb-folio-toc {
-        position: sticky; top: 0; align-self: start;
-        padding: 22px 14px 28px 8px; max-height: 100%; overflow: auto;
-        border-right: 1px solid color-mix(in srgb, var(--ctp-surface0) 80%, transparent);
+        position: sticky; top: 0; align-self: start; z-index: 3;
+        display: flex; flex-direction: column; gap: 12px;
+        min-height: 100%; max-height: 100%; overflow: hidden;
+        padding: 16px 10px 18px 12px;
+        background: color-mix(in srgb, var(--ctp-mantle) 92%, var(--ctp-base));
+        border-right: 1px solid color-mix(in srgb, var(--ctp-surface0) 88%, transparent);
+        box-shadow: inset -1px 0 0 color-mix(in srgb, var(--ctp-lavender) 6%, transparent);
       }
-      #${PANEL_ID} .bsb-folio-toc strong {
-        display: block; margin: 0 0 10px; font-size: 10px; font-weight: 700;
-        letter-spacing: .14em; text-transform: uppercase; color: var(--ctp-overlay0);
+      #${PANEL_ID} .bsb-folio-toc-head { flex: 0 0 auto; padding: 2px 6px 0 4px; }
+      #${PANEL_ID} .bsb-folio-toc-kicker {
+        display: block; margin: 0 0 4px;
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+        font-size: 10px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase;
+        color: var(--ctp-lavender);
       }
-      #${PANEL_ID} .bsb-folio-toc a {
-        display: block; padding: 5px 0 5px 8px; margin: 0;
-        border-left: 1px solid color-mix(in srgb, var(--ctp-overlay0) 28%, transparent);
-        color: var(--ctp-overlay1); text-decoration: none; font-size: 11.5px; line-height: 1.4;
+      #${PANEL_ID} .bsb-folio-toc-title {
+        display: block; margin: 0; font-size: 14px; font-weight: 750; letter-spacing: -.02em;
+        color: var(--ctp-text);
       }
-      #${PANEL_ID} .bsb-folio-toc a:hover { color: var(--ctp-text); }
-      #${PANEL_ID} .bsb-folio-toc a.is-current {
-        color: var(--ctp-text); border-left-color: var(--ctp-lavender);
+      #${PANEL_ID} .bsb-folio-toc-meta {
+        display: block; margin: 5px 0 0; font-style: normal;
+        font-size: 11px; color: var(--ctp-overlay1);
+      }
+      #${PANEL_ID} .bsb-folio-toc-progress {
+        display: block; height: 3px; margin: 10px 0 0; border-radius: 99px; overflow: hidden;
+        background: color-mix(in srgb, var(--ctp-surface0) 80%, transparent);
+      }
+      #${PANEL_ID} .bsb-folio-toc-progress > i {
+        display: block; height: 100%; width: 0%; border-radius: inherit;
+        background: linear-gradient(90deg, var(--ctp-lavender), var(--ctp-sapphire));
+        transition: width .18s ease;
+      }
+      #${PANEL_ID} .bsb-folio-toc-nav {
+        flex: 1 1 auto; min-height: 0; overflow: auto; padding: 2px 2px 8px 0;
+        scrollbar-width: thin;
+      }
+      #${PANEL_ID} .bsb-folio-toc-item { position: relative; margin: 0 0 2px; }
+      #${PANEL_ID} .bsb-folio-toc-row { display: flex; align-items: stretch; gap: 2px; }
+      #${PANEL_ID} .bsb-folio-toc-twist {
+        flex: 0 0 18px; width: 18px; margin: 2px 0; padding: 0; border: 0;
+        background: transparent; color: var(--ctp-overlay0); cursor: pointer; border-radius: 6px;
+      }
+      #${PANEL_ID} .bsb-folio-toc-twist:hover { color: var(--ctp-text); background: var(--ctp-surface0); }
+      #${PANEL_ID} .bsb-folio-toc-twist::before {
+        content: ""; display: block; width: 0; height: 0; margin: 0 auto;
+        border-left: 5px solid currentColor;
+        border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent;
+        transform: rotate(0deg); transition: transform .16s ease;
+      }
+      #${PANEL_ID} .bsb-folio-toc-item.is-open > .bsb-folio-toc-row .bsb-folio-toc-twist::before {
+        transform: rotate(90deg);
+      }
+      #${PANEL_ID} .bsb-folio-toc-item:not(.has-kids) .bsb-folio-toc-twist { visibility: hidden; }
+      #${PANEL_ID} .bsb-folio-toc-link {
+        flex: 1 1 auto; display: flex; align-items: flex-start; gap: 8px;
+        min-width: 0; margin: 0; padding: 6px 8px 6px 6px;
+        border: 0; border-radius: 9px; background: transparent;
+        color: var(--ctp-subtext0); text-decoration: none; text-align: left;
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+        font-size: 12.5px; font-weight: 650; line-height: 1.35; cursor: pointer;
+      }
+      #${PANEL_ID} .bsb-folio-toc-link:hover {
+        color: var(--ctp-text);
+        background: color-mix(in srgb, var(--ctp-surface0) 72%, transparent);
+      }
+      #${PANEL_ID} .bsb-folio-toc-link.is-current {
+        color: var(--ctp-text);
+        background: color-mix(in srgb, var(--ctp-lavender) 16%, var(--ctp-surface0));
+        box-shadow: inset 2px 0 0 var(--ctp-lavender);
+      }
+      #${PANEL_ID} .bsb-folio-toc-index {
+        flex: 0 0 1.35rem; width: 1.35rem; height: 1.35rem; margin-top: 1px;
+        display: inline-flex; align-items: center; justify-content: center;
+        border-radius: 6px; font-size: 9px; font-weight: 800; letter-spacing: .02em;
+        color: var(--ctp-lavender);
+        background: color-mix(in srgb, var(--ctp-lavender) 14%, var(--ctp-surface0));
+      }
+      #${PANEL_ID} .bsb-folio-toc-link.is-current .bsb-folio-toc-index {
+        color: var(--ctp-base); background: var(--ctp-lavender);
+      }
+      #${PANEL_ID} .bsb-folio-toc-label {
+        min-width: 0; overflow: hidden; display: -webkit-box;
+        -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      }
+      #${PANEL_ID} .bsb-folio-toc-kids {
+        display: none; position: relative; margin: 1px 0 6px 27px;
+        padding: 2px 0 2px 10px;
+      }
+      #${PANEL_ID} .bsb-folio-toc-kids::before {
+        content: ""; position: absolute; left: 0; top: 4px; bottom: 4px; width: 1px;
+        background: color-mix(in srgb, var(--ctp-overlay0) 28%, transparent);
+      }
+      #${PANEL_ID} .bsb-folio-toc-item.is-open > .bsb-folio-toc-kids { display: block; }
+      #${PANEL_ID} .bsb-folio-toc-kids .bsb-folio-toc-link {
+        padding: 4px 8px 4px 6px; font-size: 12px; font-weight: 500; color: var(--ctp-overlay1);
+      }
+      #${PANEL_ID} .bsb-folio-toc-dot {
+        flex: 0 0 6px; width: 6px; height: 6px; margin: 6px 2px 0 0; border-radius: 50%;
+        background: color-mix(in srgb, var(--ctp-overlay0) 55%, transparent);
+      }
+      #${PANEL_ID} .bsb-folio-toc-kids .bsb-folio-toc-link.is-current {
+        color: var(--ctp-text);
+        box-shadow: inset 2px 0 0 var(--ctp-sapphire);
+        background: color-mix(in srgb, var(--ctp-sapphire) 12%, var(--ctp-surface0));
+      }
+      #${PANEL_ID} .bsb-folio-toc-kids .bsb-folio-toc-link.is-current .bsb-folio-toc-dot {
+        background: var(--ctp-sapphire);
+      }
+      #${PANEL_ID} .bsb-folio-toc-fab, #${PANEL_ID} .bsb-folio-toc-scrim { display: none; }
+      #${PANEL_ID} .bsb-folio h2.folio-flash, #${PANEL_ID} .bsb-folio h3.folio-flash {
+        animation: bsb-folio-flash .9s ease;
+      }
+      @keyframes bsb-folio-flash {
+        from { background: color-mix(in srgb, var(--ctp-lavender) 22%, transparent); }
+        to { background: transparent; }
       }
       #${PANEL_ID} .bsb-folio-frame { min-width: 0; padding: 28px 28px 64px; }
       #${PANEL_ID} .bsb-folio {
@@ -4154,11 +4256,12 @@
       }
       #${PANEL_ID} .bsb-folio section { margin: 0 0 2.1em; }
       #${PANEL_ID} .bsb-folio h2 {
-        margin: 0 0 .7em; padding-top: .2em;
+        margin: 0 0 .7em; padding-top: .2em; scroll-margin-top: 18px;
         font-size: 1.18em; font-weight: 650; letter-spacing: -.015em;
       }
       #${PANEL_ID} .bsb-folio h3 {
-        margin: 1.2em 0 .45em; font-size: 1.02em; font-weight: 650; color: var(--ctp-subtext1);
+        margin: 1.2em 0 .45em; scroll-margin-top: 18px;
+        font-size: 1.02em; font-weight: 650; color: var(--ctp-subtext1);
       }
       #${PANEL_ID} .bsb-folio p { margin: 0 0 .9em; }
       #${PANEL_ID} .bsb-folio ul, #${PANEL_ID} .bsb-folio ol { margin: 0 0 1em; padding-left: 1.25em; }
@@ -4230,10 +4333,32 @@
         border: 0; height: 1px; margin: 1.8em 0;
         background: color-mix(in srgb, var(--ctp-surface1) 70%, transparent);
       }
-      @media (max-width: 760px) {
+      @media (max-width: 820px) {
         #${PANEL_ID} .bsb-folio-shell { grid-template-columns: 1fr; }
-        #${PANEL_ID} .bsb-folio-toc { display: none; }
-        #${PANEL_ID} .bsb-folio-frame { padding: 18px 16px 48px; }
+        #${PANEL_ID} .bsb-folio-toc {
+          position: absolute; left: 0; top: 0; bottom: 0; width: min(18.5rem, 88vw);
+          transform: translateX(-104%); transition: transform .2s ease;
+          box-shadow: none; border-right: 1px solid var(--ctp-surface0);
+        }
+        #${PANEL_ID} .bsb-folio-shell.is-toc-open .bsb-folio-toc {
+          transform: none;
+          box-shadow: 16px 0 40px rgba(0,0,0,.28);
+        }
+        #${PANEL_ID} .bsb-folio-toc-fab {
+          display: inline-flex; align-items: center; gap: 6px;
+          position: absolute; top: 10px; left: 10px; z-index: 4;
+          height: 30px; padding: 0 10px 0 8px; border-radius: 999px;
+          border: 1px solid color-mix(in srgb, var(--ctp-surface1) 70%, transparent);
+          background: color-mix(in srgb, var(--ctp-mantle) 88%, transparent);
+          color: var(--ctp-text); font-size: 12px; font-weight: 700; cursor: pointer;
+          backdrop-filter: blur(10px);
+        }
+        #${PANEL_ID} .bsb-folio-toc-scrim {
+          display: none; position: absolute; inset: 0; z-index: 2;
+          background: color-mix(in srgb, var(--ctp-crust) 42%, transparent);
+        }
+        #${PANEL_ID} .bsb-folio-shell.is-toc-open .bsb-folio-toc-scrim { display: block; }
+        #${PANEL_ID} .bsb-folio-frame { padding: 48px 16px 48px; }
       }
 
       /* ── AI 工作区（主画布） ── */
@@ -9766,7 +9891,7 @@
   }
 
   function migrateBuiltinHtmlFolioPrompt(prompts, storedVersion) {
-    if (Number(storedVersion || 0) >= 8) return { prompts, changed: false };
+    if (Number(storedVersion || 0) >= 9) return { prompts, changed: false };
     let changed = false;
     const next = (prompts || []).map((prompt) => {
       if (!prompt || prompt.id !== DEFAULT_HTML_FOLIO_PROMPT_ID) return prompt;
@@ -14343,6 +14468,8 @@
   }
 
   function slugFolioHeading(text, index) {
+    const fn = coreFn("slugFolioHeading");
+    if (fn) return fn(text, index);
     const base = String(text || "")
       .toLowerCase()
       .replace(/[^\u4e00-\u9fff\w]+/g, "-")
@@ -14351,55 +14478,189 @@
     return `folio-${base || "s"}-${index + 1}`;
   }
 
+  function collectFolioHeadings(article) {
+    return Array.from(article.querySelectorAll("h2, h3")).map((el, index) => ({
+      el,
+      id: el.id || slugFolioHeading(el.textContent, index),
+      level: el.tagName === "H3" ? 3 : 2,
+      text: String(el.textContent || "").replace(/\s+/g, " ").trim() || "未命名",
+    }));
+  }
+
   function decorateFolioArticle(article) {
     if (!article.classList.contains("bsb-folio")) article.classList.add("bsb-folio");
-    const headings = Array.from(article.querySelectorAll("h2, h3"));
-    headings.forEach((h, i) => {
-      if (!h.id) h.id = slugFolioHeading(h.textContent, i);
+    const headings = collectFolioHeadings(article);
+    headings.forEach((item) => {
+      if (!item.el.id) item.el.id = item.id;
+      item.id = item.el.id;
     });
     article.querySelectorAll("aside").forEach((aside) => {
       const kind = String(aside.getAttribute("data-kind") || "").toLowerCase();
       if (kind && !["key", "note", "warn"].includes(kind)) aside.removeAttribute("data-kind");
       aside.classList.add("callout");
     });
-    return headings.filter((h) => h.tagName === "H2");
+    return headings;
+  }
+
+  function folioOutlineFromHeadings(headings) {
+    const payload = headings.map((item) => ({ id: item.id, level: item.level, text: item.text }));
+    const build = coreFn("buildFolioOutline");
+    if (build) return build(payload);
+    const roots = [];
+    let chapter = null;
+    for (const item of payload) {
+      const node = { ...item, children: [] };
+      if (item.level === 2 || !chapter) {
+        node.level = 2;
+        roots.push(node);
+        chapter = node;
+      } else {
+        chapter.children.push(node);
+      }
+    }
+    return roots;
+  }
+
+  function makeFolioTocLink(node, kind, index) {
+    const link = document.createElement("button");
+    link.type = "button";
+    link.className = `bsb-folio-toc-link is-h${node.level}`;
+    link.dataset.folioJump = node.id;
+    if (kind === "h2") {
+      const num = document.createElement("span");
+      num.className = "bsb-folio-toc-index";
+      num.textContent = coreFn("formatFolioChapterIndex")
+        ? coreFn("formatFolioChapterIndex")(index)
+        : String(index).padStart(2, "0");
+      link.appendChild(num);
+    } else {
+      const dot = document.createElement("span");
+      dot.className = "bsb-folio-toc-dot";
+      link.appendChild(dot);
+    }
+    const label = document.createElement("span");
+    label.className = "bsb-folio-toc-label";
+    label.textContent = node.text;
+    link.appendChild(label);
+    return link;
   }
 
   function buildFolioToc(headings) {
+    const outline = folioOutlineFromHeadings(headings);
+    const stats = coreFn("countFolioOutline")
+      ? coreFn("countFolioOutline")(outline)
+      : { chapters: outline.length, sections: headings.length };
+    const summary = coreFn("folioOutlineSummary")
+      ? coreFn("folioOutlineSummary")(stats)
+      : `${stats.chapters} 章`;
+    const aside = document.createElement("aside");
+    aside.className = "bsb-folio-toc";
+    aside.setAttribute("aria-label", "阅读大纲");
+    const head = document.createElement("header");
+    head.className = "bsb-folio-toc-head";
+    head.innerHTML = `<span class="bsb-folio-toc-kicker">目录</span><strong class="bsb-folio-toc-title">阅读大纲</strong><em class="bsb-folio-toc-meta">${escapeHtml(summary)}</em><span class="bsb-folio-toc-progress" aria-hidden="true"><i data-role="folio-progress"></i></span>`;
     const nav = document.createElement("nav");
-    nav.className = "bsb-folio-toc";
-    nav.setAttribute("aria-label", "本页章节");
-    const label = document.createElement("strong");
-    label.textContent = "章节";
-    nav.appendChild(label);
-    headings.forEach((h) => {
-      const a = document.createElement("a");
-      a.href = `#${h.id}`;
-      a.dataset.folioJump = h.id;
-      a.textContent = (h.textContent || "").trim() || "未命名";
-      nav.appendChild(a);
+    nav.className = "bsb-folio-toc-nav";
+    outline.forEach((chapter, index) => {
+      const item = document.createElement("div");
+      item.className = `bsb-folio-toc-item${chapter.children.length ? " has-kids is-open" : ""}`;
+      item.dataset.folioId = chapter.id;
+      const row = document.createElement("div");
+      row.className = "bsb-folio-toc-row";
+      const twist = document.createElement("button");
+      twist.type = "button";
+      twist.className = "bsb-folio-toc-twist";
+      twist.dataset.folioTwist = "1";
+      twist.setAttribute("aria-label", "展开或收起小节");
+      twist.setAttribute("aria-expanded", chapter.children.length ? "true" : "false");
+      row.append(twist, makeFolioTocLink(chapter, "h2", index + 1));
+      item.appendChild(row);
+      if (chapter.children.length) {
+        const kids = document.createElement("div");
+        kids.className = "bsb-folio-toc-kids";
+        chapter.children.forEach((child) => kids.appendChild(makeFolioTocLink(child, "h3")));
+        item.appendChild(kids);
+      }
+      nav.appendChild(item);
     });
-    return nav;
+    aside.append(head, nav);
+    return aside;
+  }
+
+  function setFolioTocCurrent(shell, id) {
+    const links = shell.querySelectorAll(".bsb-folio-toc-link");
+    links.forEach((link) => {
+      const on = link.dataset.folioJump === id;
+      link.classList.toggle("is-current", on);
+      if (on) {
+        const item = link.closest(".bsb-folio-toc-item");
+        if (item?.classList.contains("has-kids")) {
+          item.classList.add("is-open");
+          item.querySelector(".bsb-folio-toc-twist")?.setAttribute("aria-expanded", "true");
+        }
+        link.scrollIntoView({ block: "nearest" });
+      }
+    });
+  }
+
+  function updateFolioProgress(shell, box) {
+    const bar = shell.querySelector("[data-role='folio-progress']");
+    if (!bar || !box) return;
+    const max = Math.max(1, box.scrollHeight - box.clientHeight);
+    bar.style.width = `${Math.max(0, Math.min(100, (box.scrollTop / max) * 100))}%`;
   }
 
   function bindFolioToc(shell, scrollRoot) {
+    const box = scrollRoot || shell.closest("[data-role='ai-md']");
     shell.addEventListener("click", (e) => {
+      if (e.target.closest?.("[data-folio-twist]")) {
+        const item = e.target.closest(".bsb-folio-toc-item");
+        if (!item?.classList.contains("has-kids")) return;
+        const open = !item.classList.contains("is-open");
+        item.classList.toggle("is-open", open);
+        e.target.closest("[data-folio-twist]").setAttribute("aria-expanded", open ? "true" : "false");
+        return;
+      }
+      if (e.target.closest?.("[data-folio-toc-fab]")) {
+        shell.classList.toggle("is-toc-open");
+        return;
+      }
+      if (e.target.closest?.("[data-folio-toc-scrim]")) {
+        shell.classList.remove("is-toc-open");
+        return;
+      }
       const link = e.target.closest?.("[data-folio-jump]");
       if (!link) return;
       e.preventDefault();
       const target = shell.querySelector(`#${CSS.escape(link.dataset.folioJump || "")}`);
       if (!target) return;
-      const box = scrollRoot || shell.closest("[data-role='ai-md']");
       if (box) {
         const top = target.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 16;
         box.scrollTo({ top, behavior: "smooth" });
       } else {
         target.scrollIntoView({ block: "start", behavior: "smooth" });
       }
-      shell.querySelectorAll(".bsb-folio-toc a").forEach((a) => {
-        a.classList.toggle("is-current", a === link);
-      });
+      target.classList.remove("folio-flash");
+      void target.offsetWidth;
+      target.classList.add("folio-flash");
+      setFolioTocCurrent(shell, link.dataset.folioJump);
+      shell.classList.remove("is-toc-open");
     });
+    if (box) {
+      const onScroll = () => {
+        updateFolioProgress(shell, box);
+        const headings = Array.from(shell.querySelectorAll(".bsb-folio h2, .bsb-folio h3"));
+        if (!headings.length) return;
+        const top = box.getBoundingClientRect().top + 28;
+        let current = headings[0];
+        for (const heading of headings) {
+          if (heading.getBoundingClientRect().top - top <= 0) current = heading;
+        }
+        if (current?.id) setFolioTocCurrent(shell, current.id);
+      };
+      box.addEventListener("scroll", onScroll, { passive: true });
+      onScroll();
+    }
   }
 
   function mountHtmlFolio(host, sourceHtml, scrollRoot) {
@@ -14414,21 +14675,28 @@
       article.append(...tpl.content.childNodes);
     }
     pruneFolioClasses(article);
-    const h2s = decorateFolioArticle(article);
+    const headings = decorateFolioArticle(article);
     const shell = document.createElement("div");
     shell.className = "bsb-folio-shell";
     shell.dataset.role = "html-folio";
-    if (h2s.length >= 2) shell.appendChild(buildFolioToc(h2s));
+    if (headings.length) {
+      const fab = document.createElement("button");
+      fab.type = "button";
+      fab.className = "bsb-folio-toc-fab";
+      fab.dataset.folioTocFab = "1";
+      fab.textContent = "目录";
+      const scrim = document.createElement("div");
+      scrim.className = "bsb-folio-toc-scrim";
+      scrim.dataset.folioTocScrim = "1";
+      shell.append(fab, scrim, buildFolioToc(headings));
+    }
     const frame = document.createElement("div");
     frame.className = "bsb-folio-frame";
     frame.appendChild(article);
     shell.appendChild(frame);
     host.replaceChildren(shell);
     bindFolioToc(shell, scrollRoot);
-    if (h2s[0]) {
-      const first = shell.querySelector(`.bsb-folio-toc a[data-folio-jump="${h2s[0].id}"]`);
-      first?.classList.add("is-current");
-    }
+    if (headings[0]) setFolioTocCurrent(shell, headings[0].id);
     return shell;
   }
 
