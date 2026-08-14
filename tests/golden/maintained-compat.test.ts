@@ -188,6 +188,10 @@ describe("Maintained full-feature compatibility source", () => {
     expect(maintainedSource).toContain("==关键短语==");
     expect(maintainedSource).toContain("PROMPT_SCHEMA_VERSION = 9");
     expect(maintainedSource).toContain("function sendStudioChat(");
+    expect(maintainedSource).toContain("function paintStudioAnswer(");
+    expect(maintainedSource).toContain("data-role=\"studio-answer\"");
+    expect(maintainedSource).toContain("align-self: flex-end");
+    expect(maintainedSource).toContain("NOTE_FONT_DEFAULT = 14");
     expect(maintainedSource).toContain("<strong>对话</strong>");
     expect(maintainedSource).toContain("function flowTaskModelsHtml(");
     expect(maintainedSource).toContain("function bindFlowModelDrag(");
@@ -206,6 +210,10 @@ describe("Maintained full-feature compatibility source", () => {
       'coreFn("buildFolioOutline")',
     );
     expect(extractFunctionSource(maintainedSource, "collectFolioHeadings")).toContain("h2, h3");
+    expect(extractFunctionSource(maintainedSource, "setFolioTocCurrent")).not.toContain("scrollIntoView");
+    expect(extractFunctionSource(maintainedSource, "setFolioTocCurrent")).toContain("scrollFolioTocLinkIntoNav");
+    expect(maintainedSource).toContain("function syncFolioTocViewport(");
+    expect(maintainedSource).toContain("--folio-toc-h");
     // Knowledge MD/math: full-doc prepare + lib ensure before paint.
     expect(maintainedSource).toContain("function ensureKnowledgeRenderLibs(");
     expect(maintainedSource).toContain("function knowledgeChunkToHtml(");
@@ -239,6 +247,12 @@ describe("Maintained full-feature compatibility source", () => {
     expect(extractFunctionSource(maintainedSource, "replaceMermaidBlockAt")).toContain(
       'coreFn("replaceMermaidBlockAt")',
     );
+    expect(extractFunctionSource(maintainedSource, "currentMermaidRepairResolution")).toContain(
+      'coreFn("resolveMermaidRepairConfig")',
+    );
+    expect(extractFunctionSource(maintainedSource, "handleMermaidTool")).toContain('action === "open-llm"');
+    expect(maintainedSource).toContain("打开 设置 → LLM");
+    expect(maintainedSource).toContain("就填在这里，不用去翻设置");
     expect(extractFunctionSource(maintainedSource, "persistRepairedMermaid")).toContain(
       "persistAiSessionCache()",
     );

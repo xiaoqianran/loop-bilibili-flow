@@ -32,6 +32,9 @@
 // ==/UserScript==
 
 /**
+ * v6.9.10 — HTML 阅读页：目录高亮不再 scrollIntoView 抢正文滚动；侧栏高度锁在可视区，可独立下滑。
+ * v6.9.9 — Mermaid 重绘：从设置回填被缓存抹掉的 API Key；失败卡可就地填 Key 或跳到 设置 → LLM。
+ * v6.9.8 — 对话提问条靠右；问答用预处理同款 Markdown 卡片；默认正文字号 14px。
  * v6.9.7 — HTML 阅读页目录改成语雀/飞书式分层大纲：层级、当前定位、滚动跟随。
  * v6.9.6 — 后处理按模型复用缓存：只生成身份变化的版本，其余命中缓存。规则在 packages/core。
  * v6.9.5 — 连播切集认播放器身份：URL 未变时按 player/cid 换字幕。规则在 packages/bilibili。
@@ -261,6 +264,7 @@
   const RENDER_BATCH_SIZE = 24;
   const NOTE_FONT_MIN = 14;
   const NOTE_FONT_MAX = 22;
+  const NOTE_FONT_DEFAULT = 14;
   const WBI_TTL_MS = 600_000;
   const DEFAULT_DELAY_MS = 400;
   const DEFAULT_MAX_PAGES = 20;
@@ -3154,7 +3158,7 @@
       aiStage: "preprocess", // preprocess | chat | postprocess
       settingsTab: "prompt", // prompt | llm | shortcuts | appearance
       promptStage: "preprocess", // preprocess | postprocess | knowledge
-      noteFont: 17,
+      noteFont: NOTE_FONT_DEFAULT,
       ctpFlavor: DEFAULT_CTP_FLAVOR, // latte | frappe | macchiato | mocha
       // Knowledge layout: AI rail width + workspace Navigator width only.
       knowledgeRailW: 400,
@@ -3187,6 +3191,15 @@
     root.dataset.panelView = state.ui.view || "ai";
   }
 
+  function normalizeNoteFont(value, savedDefault) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return NOTE_FONT_DEFAULT;
+    const clamped = Math.max(NOTE_FONT_MIN, Math.min(NOTE_FONT_MAX, n));
+    // 6.9.8: 旧默认 17 → 新默认 14。用户已显式改过的字号（并记下 noteFontDefault）保留。
+    if (Number(savedDefault) !== NOTE_FONT_DEFAULT && clamped === 17) return NOTE_FONT_DEFAULT;
+    return clamped;
+  }
+
   function loadUiGeom() {
     try {
       const raw = localStorage.getItem(UI_STORE_KEY);
@@ -3216,7 +3229,7 @@
         aiStage: ["preprocess", "chat", "postprocess"].includes(o.aiStage) ? o.aiStage : "preprocess",
         settingsTab: ["prompt", "llm", "shortcuts", "appearance"].includes(o.settingsTab) ? o.settingsTab : "prompt",
         promptStage: ["preprocess", "postprocess", "knowledge"].includes(o.promptStage) ? o.promptStage : "preprocess",
-        noteFont: Math.max(NOTE_FONT_MIN, Math.min(NOTE_FONT_MAX, Number(o.noteFont) || 17)),
+        noteFont: normalizeNoteFont(o.noteFont, o.noteFontDefault),
         ctpFlavor: normalizeCtpFlavor(o.ctpFlavor ?? d.ctpFlavor),
         knowledgeRailW: clampKnowledgeRailW(o.knowledgeRailW ?? d.knowledgeRailW, w),
         // Migrate old list width → navigator width if present.
@@ -3248,7 +3261,8 @@
           aiStage: state.ui.aiStage || "preprocess",
           settingsTab: state.ui.settingsTab || "prompt",
           promptStage: state.ui.promptStage || "preprocess",
-          noteFont: state.ui.noteFont || 17,
+          noteFont: normalizeNoteFont(state.ui.noteFont, 14),
+          noteFontDefault: NOTE_FONT_DEFAULT,
           ctpFlavor: normalizeCtpFlavor(state.ui.ctpFlavor),
           knowledgeRailW: clampKnowledgeRailW(state.ui.knowledgeRailW, state.ui.w),
           knowledgeNavW: clampKnowledgeNavW(state.ui.knowledgeNavW, state.ui.w),
@@ -3293,10 +3307,10 @@
         width: 0;
         height: 0;
         z-index: 2147483646;
-        --bsb-note-font: 17px;
+        --bsb-note-font: 14px;
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI",
           "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-        font-size: 12px;
+        font-size: 14px;
         font-synthesis: none;
         isolation: isolate;
         contain: style;
@@ -4111,16 +4125,28 @@
       #${PANEL_ID} .bsb-empty span { font-size: 12px; max-width: 280px; line-height: 1.45; }
 
       /* ── HTML Folio：后处理阅读页（模型只产语义，壳负责版式） ── */
+      #${PANEL_ID} .bsb-ai-md:has([data-role="html-folio"]) {
+        padding-left: 0;
+        padding-right: 0;
+      }
+      #${PANEL_ID} .bsb-ai-md:has([data-role="html-folio"]) .bsb-ai-content {
+        max-width: none;
+        width: 100%;
+        margin: 0;
+      }
       #${PANEL_ID} .bsb-folio-shell {
         position: relative;
         display: grid; grid-template-columns: 16.25rem minmax(0, 1fr);
-        gap: 0; min-height: 100%;
+        align-items: start;
+        gap: 0; min-height: 0;
         background: var(--ctp-base);
       }
       #${PANEL_ID} .bsb-folio-toc {
         position: sticky; top: 0; align-self: start; z-index: 3;
         display: flex; flex-direction: column; gap: 12px;
-        min-height: 100%; max-height: 100%; overflow: hidden;
+        height: var(--folio-toc-h, 100%);
+        max-height: var(--folio-toc-h, 100%);
+        overflow: hidden;
         padding: 16px 10px 18px 12px;
         background: color-mix(in srgb, var(--ctp-mantle) 92%, var(--ctp-base));
         border-right: 1px solid color-mix(in srgb, var(--ctp-surface0) 88%, transparent);
@@ -4151,8 +4177,8 @@
         transition: width .18s ease;
       }
       #${PANEL_ID} .bsb-folio-toc-nav {
-        flex: 1 1 auto; min-height: 0; overflow: auto; padding: 2px 2px 8px 0;
-        scrollbar-width: thin;
+        flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto;
+        padding: 2px 2px 8px 0; scrollbar-width: thin;
       }
       #${PANEL_ID} .bsb-folio-toc-item { position: relative; margin: 0 0 2px; }
       #${PANEL_ID} .bsb-folio-toc-row { display: flex; align-items: stretch; gap: 2px; }
@@ -4337,6 +4363,7 @@
         #${PANEL_ID} .bsb-folio-shell { grid-template-columns: 1fr; }
         #${PANEL_ID} .bsb-folio-toc {
           position: absolute; left: 0; top: 0; bottom: 0; width: min(18.5rem, 88vw);
+          height: auto; max-height: none;
           transform: translateX(-104%); transition: transform .2s ease;
           box-shadow: none; border-right: 1px solid var(--ctp-surface0);
         }
@@ -4513,6 +4540,11 @@
       #${PANEL_ID} .bsb-ai-canvas-wrap.is-studio .bsb-studio-dock { display: block; }
       #${PANEL_ID} .bsb-ai-canvas-wrap.is-studio .bsb-ai-stream { bottom: 88px; }
       #${PANEL_ID} .bsb-ai-canvas-wrap.is-studio .bsb-jump-latest { display: none; }
+      #${PANEL_ID} .bsb-ai-canvas-wrap.is-studio .bsb-ai-content {
+        max-width: none;
+        margin: 0;
+        width: 100%;
+      }
       #${PANEL_ID} .bsb-studio-composer {
         display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; align-items: end;
       }
@@ -4521,7 +4553,7 @@
         padding: 9px 11px; border-radius: 12px; line-height: 1.45;
         border: 1px solid color-mix(in srgb, var(--ctp-surface1) 70%, transparent);
         background: color-mix(in srgb, var(--ctp-base) 70%, transparent);
-        color: var(--ctp-text); font: inherit; font-size: 12.5px;
+        color: var(--ctp-text); font: inherit; font-size: 14px;
       }
       #${PANEL_ID} .bsb-studio-composer textarea:focus {
         outline: 0; border-color: color-mix(in srgb, var(--ctp-lavender) 50%, transparent);
@@ -4549,24 +4581,33 @@
         font-size: 11.5px; font-weight: 750; color: var(--ctp-lavender);
       }
       #${PANEL_ID} .bsb-studio-slash span { font-size: 11px; color: var(--ctp-overlay1); }
-      #${PANEL_ID} .bsb-studio-thread { display: grid; gap: 14px; padding: 8px 4px 20px; }
-      #${PANEL_ID} .bsb-studio-msg { max-width: 92%; }
-      #${PANEL_ID} .bsb-studio-msg.user { justify-self: end; }
+      #${PANEL_ID} .bsb-studio-thread {
+        display: flex; flex-direction: column; gap: 16px;
+        padding: 8px 2px 20px; width: 100%;
+      }
+      #${PANEL_ID} .bsb-studio-msg.user {
+        align-self: flex-end;
+        display: flex; flex-direction: column; align-items: flex-end;
+        width: fit-content; max-width: min(78%, 32rem);
+      }
       #${PANEL_ID} .bsb-studio-msg.user .bsb-studio-bubble {
         padding: 9px 12px; border-radius: 14px 14px 4px 14px;
         background: color-mix(in srgb, var(--ctp-lavender) 16%, var(--ctp-surface0));
-        color: var(--ctp-text); font-size: 13px; line-height: 1.55; white-space: pre-wrap;
+        color: var(--ctp-text); font-size: 14px; line-height: 1.55; white-space: pre-wrap;
       }
-      #${PANEL_ID} .bsb-studio-msg.assistant { justify-self: start; width: min(100%, 44rem); }
-      #${PANEL_ID} .bsb-studio-msg.assistant .bsb-studio-bubble {
-        font-size: 13.5px; line-height: 1.65; color: var(--ctp-text);
+      #${PANEL_ID} .bsb-studio-msg.user .bsb-studio-role { text-align: right; }
+      #${PANEL_ID} .bsb-studio-msg.assistant {
+        align-self: center; width: min(100%, 40em);
+      }
+      #${PANEL_ID} .bsb-studio-msg.assistant .bsb-studio-answer {
+        font-size: 14px; line-height: 1.7; color: var(--ctp-text);
       }
       #${PANEL_ID} .bsb-studio-msg.system {
-        justify-self: center; max-width: 28rem; text-align: center;
-        font-size: 11.5px; color: var(--ctp-overlay1); line-height: 1.5;
+        align-self: center; max-width: 28rem; text-align: center;
+        font-size: 14px; color: var(--ctp-overlay1); line-height: 1.5;
       }
       #${PANEL_ID} .bsb-studio-role {
-        display: block; margin-bottom: 4px; font-size: 10px; font-weight: 750;
+        display: block; margin-bottom: 4px; font-size: 11px; font-weight: 750;
         letter-spacing: .08em; text-transform: uppercase; color: var(--ctp-overlay0);
       }
 
@@ -4607,7 +4648,7 @@
         white-space: pre-wrap;
         word-break: break-word;
         overflow-wrap: anywhere;
-        font-size: 17px;
+        font-size: 14px;
         line-height: 2.15;
         letter-spacing: 0.04em;
         color: var(--ctp-text);
@@ -4749,6 +4790,9 @@
         border-radius: 12px;
         background: color-mix(in srgb, var(--ctp-mantle) 78%, transparent);
       }
+      #${PANEL_ID} .bsb-mermaid-error.is-setup {
+        border-color: color-mix(in srgb, var(--ctp-lavender) 42%, var(--ctp-surface1));
+      }
       #${PANEL_ID} .bsb-mermaid-error-head {
         min-height: 42px;
         display: flex;
@@ -4759,9 +4803,52 @@
         color: var(--ctp-peach);
         border-bottom: 1px solid color-mix(in srgb, var(--ctp-red) 24%, transparent);
       }
+      #${PANEL_ID} .bsb-mermaid-error.is-setup .bsb-mermaid-error-head {
+        color: var(--ctp-lavender);
+        border-bottom-color: color-mix(in srgb, var(--ctp-lavender) 22%, transparent);
+      }
+      #${PANEL_ID} .bsb-mermaid-setup {
+        display: grid; gap: 10px; padding: 12px 13px 14px;
+      }
+      #${PANEL_ID} .bsb-mermaid-setup-copy {
+        margin: 0; color: var(--ctp-subtext0); font-size: 14px; line-height: 1.55;
+      }
+      #${PANEL_ID} .bsb-mermaid-setup-path {
+        display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+        color: var(--ctp-overlay1); font-size: 12px;
+      }
+      #${PANEL_ID} .bsb-mermaid-setup-path b {
+        display: inline-flex; align-items: center; height: 22px; padding: 0 8px;
+        border-radius: 999px; font-weight: 700; color: var(--ctp-text);
+        background: color-mix(in srgb, var(--ctp-lavender) 14%, var(--ctp-surface0));
+      }
+      #${PANEL_ID} .bsb-mermaid-setup-row {
+        display: flex; flex-wrap: wrap; gap: 8px; align-items: end;
+      }
+      #${PANEL_ID} .bsb-mermaid-setup-row label,
+      #${PANEL_ID} .bsb-mermaid-setup-grid label {
+        display: grid; gap: 4px; min-width: 0; color: var(--ctp-overlay1); font-size: 12px;
+      }
+      #${PANEL_ID} .bsb-mermaid-setup-row select,
+      #${PANEL_ID} .bsb-mermaid-setup-grid input {
+        height: 34px; min-width: 12rem; padding: 0 10px; border-radius: 9px;
+        border: 1px solid color-mix(in srgb, var(--ctp-surface1) 70%, transparent);
+        background: color-mix(in srgb, var(--ctp-base) 70%, transparent);
+        color: var(--ctp-text); font: inherit; font-size: 14px;
+      }
+      #${PANEL_ID} .bsb-mermaid-setup-grid {
+        display: grid; gap: 8px;
+        grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+      }
+      #${PANEL_ID} .bsb-mermaid-setup-actions { display: flex; flex-wrap: wrap; gap: 8px; }
       #${PANEL_ID} .bsb-mermaid-error details { padding: 9px 12px 12px; }
       #${PANEL_ID} .bsb-mermaid-error summary { cursor: pointer; color: var(--ctp-overlay1); }
       #${PANEL_ID} .bsb-mermaid-error pre { margin: 10px 0 0; max-height: 280px; overflow: auto; }
+      #${PANEL_ID} .bsb-llm-field-focus {
+        padding: 8px; margin: -8px; border-radius: 10px;
+        outline: 2px solid color-mix(in srgb, var(--ctp-lavender) 55%, transparent);
+        background: color-mix(in srgb, var(--ctp-lavender) 10%, transparent);
+      }
       #${PANEL_ID} .bsb-mermaid-card {
         position: relative;
         display: grid;
@@ -5331,7 +5418,7 @@
       }
       #${PANEL_ID} .bsb-preprocess-block-body {
         color:color-mix(in srgb,var(--ctp-text) 94%,var(--ctp-subtext1));
-        font-size:calc(var(--bsb-note-font) * .96); line-height:1.86; letter-spacing:.018em;
+        font-size:var(--bsb-note-font); line-height:1.86; letter-spacing:.018em;
         white-space:pre-wrap; overflow-wrap:anywhere; text-wrap:pretty;
       }
       /* AI 处理字幕：Markdown / 公式 / ==高亮== 富文本正文 */
@@ -5497,7 +5584,7 @@
       #${PANEL_ID} .bsb-knowledge-card-body {
         white-space:normal;
         color:color-mix(in srgb,var(--ctp-text) 94%,var(--ctp-subtext1));
-        font-size:calc(var(--bsb-note-font) * .96); line-height:1.86; letter-spacing:.018em;
+        font-size:var(--bsb-note-font); line-height:1.86; letter-spacing:.018em;
         overflow-wrap:anywhere; text-wrap:pretty;
       }
       #${PANEL_ID} .bsb-knowledge-card-body > *:first-child { margin-top:0; }
@@ -6682,7 +6769,7 @@
       ? ui.sizePreset
       : panelSizeClassFromWidth(ui.w);
     root.setAttribute("data-panel-size", panelSizeClass);
-    root.style.setProperty("--bsb-note-font", `${Math.max(NOTE_FONT_MIN, Math.min(NOTE_FONT_MAX, Number(ui.noteFont) || 17))}px`);
+    root.style.setProperty("--bsb-note-font", `${normalizeNoteFont(ui.noteFont, NOTE_FONT_DEFAULT)}px`);
     root.querySelectorAll('[data-act="panel-size"]').forEach((button) => {
       const active = isPanelSizePreset(ui.sizePreset) && button.dataset.size === ui.sizePreset;
       button.classList.toggle("active", active);
@@ -9508,7 +9595,7 @@
     }
     if (act === "ai-font-dec" || act === "ai-font-inc") {
       const delta = act === "ai-font-inc" ? 1 : -1;
-      const current = Number(state.ui?.noteFont || 17);
+      const current = normalizeNoteFont(state.ui?.noteFont, NOTE_FONT_DEFAULT);
       const next = Math.max(NOTE_FONT_MIN, Math.min(NOTE_FONT_MAX, current + delta));
       if (state.ui) state.ui.noteFont = next;
       ensurePanel().style.setProperty("--bsb-note-font", `${next}px`);
@@ -12319,15 +12406,27 @@
     if (role === "user") {
       return `<div class="bsb-studio-msg user"><span class="bsb-studio-role">你</span><div class="bsb-studio-bubble">${escapeHtml(msg.content || "")}</div></div>`;
     }
+    const streaming = msg.status === "running";
     const body = msg.content
-      ? (typeof marked !== "undefined"
-        ? sanitizeRenderedHtml(String(marked.parse(msg.content) || ""))
-        : `<p>${escapeHtml(msg.content)}</p>`)
-      : (msg.status === "running" ? "<p>…</p>" : "<p></p>");
-    return `<div class="bsb-studio-msg assistant" data-studio-msg="${escapeAttr(msg.id || "")}"><span class="bsb-studio-role">研读</span><div class="bsb-studio-bubble">${body}</div></div>`;
+      ? renderKnowledgeAnswerCards(msg.content, { streaming })
+      : (streaming
+        ? '<div class="bsb-knowledge-thinking">正在组织回答…</div>'
+        : "<p></p>");
+    return `<div class="bsb-studio-msg assistant" data-studio-msg="${escapeAttr(msg.id || "")}"><span class="bsb-studio-role">研读</span><div class="bsb-studio-answer" data-role="studio-answer">${body}</div></div>`;
   }
 
-  function renderStudioCanvas() {
+  function paintStudioAnswer(msgId, text, streaming) {
+    const cards = document.querySelector(`#${PANEL_ID} [data-studio-msg="${msgId}"] [data-role="studio-answer"]`);
+    if (!cards) return false;
+    cards.innerHTML = String(text || "").trim()
+      ? renderKnowledgeAnswerCards(text, { streaming: !!streaming })
+      : (streaming ? '<div class="bsb-knowledge-thinking">正在组织回答…</div>' : "<p></p>");
+    const box = document.querySelector(`#${PANEL_ID} [data-role="ai-md"]`);
+    if (box) box.scrollTop = box.scrollHeight;
+    return true;
+  }
+
+  async function renderStudioCanvas() {
     const root = ensurePanel();
     if (state.ui) state.ui.aiStage = "chat";
     applyAiWorkbenchStageUi();
@@ -12346,7 +12445,12 @@
       host.innerHTML = `<div class="bsb-empty"><div class="bsb-empty-ico">◎</div><strong>对着这一期提问</strong><span>像聊天一样追问字幕。超长字幕会按问题压缩，旧对话会折进记忆。输入 <code>/</code> 可压缩、看记忆或清空。</span></div>`;
       return;
     }
+    const joined = (state.studioMessages || []).map((m) => m.content || "").join("\n");
+    try { await ensureKnowledgeRenderLibs(joined); } catch (_) { /* fallback inside cards */ }
+    if (currentAiWorkbenchStage() !== "chat") return;
     host.innerHTML = `<div class="bsb-studio-thread">${state.studioMessages.map(studioMessageHtml).join("")}</div>`;
+    try { linkifyTimestamps(host); } catch (_) { /* ignore */ }
+    await hydrateKnowledgeAnswerDom(host, state.renderEpoch);
     const box = root.querySelector('[data-role="ai-md"]');
     if (box) {
       state.aiProgScroll = true;
@@ -12597,9 +12701,7 @@
           onDelta(_delta, full) {
             latest = String(full || "");
             botMsg.content = latest;
-            const bubble = document.querySelector(`#${PANEL_ID} [data-studio-msg="${botMsg.id}"] .bsb-studio-bubble`);
-            if (bubble) bubble.textContent = latest;
-            else renderStudioCanvas();
+            if (!paintStudioAnswer(botMsg.id, latest, true)) renderStudioCanvas();
           },
           onDone(full) { latest = String(full || latest || ""); resolve(); },
           onError(error) { reject(error instanceof Error ? error : new Error(String(error || "对话失败"))); },
@@ -14054,12 +14156,95 @@
     return true;
   }
 
-  function requestMermaidCodeRepair(code, error, idx, targetRun) {
-    // 使用点击时锁定的模型配置，切换结果标签不会改变修复所用模型。
-    const cfg = targetRun?.config || getActiveAiRun()?.config || loadAiConfig();
+  function currentMermaidRepairResolution(targetRun, preferredProfileId) {
+    const run = targetRun || getActiveAiRun();
+    const profiles = state.aiProfiles?.length ? state.aiProfiles : loadAiProfiles();
+    const fn = coreFn("resolveMermaidRepairConfig");
+    if (typeof fn === "function") {
+      return fn({
+        runConfig: run?.config || null,
+        profileId: run?.profileId || run?.config?.id || "",
+        profiles,
+        preferredProfileId: preferredProfileId || "",
+      });
+    }
+    const ready = profiles.filter((p) => p?.apiKey && p?.baseUrl && p?.model);
+    return {
+      config: ready[0] || null,
+      source: ready[0] ? "fallback" : "none",
+      missing: ready[0] ? [] : ["apiKey", "baseUrl", "model"],
+      readyProfiles: ready,
+    };
+  }
+
+  function mermaidSetupError(resolution) {
+    const hintFn = coreFn("mermaidRepairSetupHint");
+    const message = typeof hintFn === "function"
+      ? hintFn(resolution?.missing)
+      : "还没有可用的 LLM。打开 设置 → LLM 填写 API Key。";
+    const err = new Error(message);
+    err.mermaidSetup = true;
+    err.missing = resolution?.missing || [];
+    return err;
+  }
+
+  function openSettingsLlm(profileId) {
+    const root = ensurePanel();
+    if (profileId) state.aiEditorId = profileId;
+    toggleAiPanel(true);
+    setWorkspace("settings");
+    setSettingsTab("llm");
+    fillAiConfigForm(root);
+    requestAnimationFrame(() => {
+      const field = root.querySelector('[data-ai-field="apiKey"]');
+      const label = field?.closest("label");
+      root.querySelectorAll(".bsb-llm-field-focus").forEach((el) => el.classList.remove("bsb-llm-field-focus"));
+      if (label) label.classList.add("bsb-llm-field-focus");
+      field?.focus();
+      field?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+    setStatus("API Key 在「设置 → LLM」这一栏。填好后点保存，再回到笔记重绘。", "ok");
+  }
+
+  function saveInlineMermaidProfile(card) {
+    const get = (name) => card.querySelector(`[data-mermaid-field="${name}"]`);
+    const baseUrl = String(get("baseUrl")?.value || "").trim().replace(/\/+$/, "");
+    const apiKey = String(get("apiKey")?.value || "").trim();
+    const model = String(get("model")?.value || "").trim();
+    if (!baseUrl || !apiKey || !model) {
+      setStatus("Base URL、API Key、Model 都要填", "err");
+      return "";
+    }
+    const profiles = [...(state.aiProfiles?.length ? state.aiProfiles : loadAiProfiles())];
+    const same = profiles.find((p) => String(p.baseUrl || "") === baseUrl && String(p.model || "") === model);
+    if (same) {
+      same.apiKey = apiKey;
+      same.baseUrl = baseUrl;
+      same.model = model;
+      same.enabled = true;
+      saveAiProfiles(profiles);
+      return same.id;
+    }
+    const created = createAiProfile({
+      name: "Mermaid 修复",
+      baseUrl,
+      apiKey,
+      model,
+      enabled: true,
+    }, profiles.length);
+    profiles.push(created);
+    saveAiProfiles(profiles);
+    return created.id;
+  }
+
+  function requestMermaidCodeRepair(code, error, idx, targetRun, preferredProfileId) {
+    // 缓存会抹掉 apiKey；从设置里的 LLM 回填，不要让用户去翻设置。
+    const resolved = currentMermaidRepairResolution(targetRun, preferredProfileId);
+    const cfg = resolved.config;
+    if (!cfg || resolved.source === "none" || !cfg.apiKey || !cfg.baseUrl || !cfg.model) {
+      throw mermaidSetupError(resolved);
+    }
     const runtime = createAiRuntime(`Mermaid 修复 · ${cfg.name || cfg.model || "AI"}`);
-    if (!cfg.apiKey) throw new Error("AI 修复需要先在设置中填写 API Key");
-    if (!cfg.baseUrl) throw new Error("AI 修复需要先在设置中填写 Base URL");
 
     const parseError = String(error?.message || error || "未知渲染错误").slice(0, 4000);
     const originalCode = String(code || "").slice(0, 30000);
@@ -14117,14 +14302,30 @@
 
   async function handleMermaidTool(button) {
     const action = button?.dataset?.mmdAct;
-    const card = button?.closest(".bsb-mermaid-card");
+    const card = button?.closest(".bsb-mermaid-card, .bsb-mermaid-error");
 
-    if (action === "retry") {
+    if (action === "open-llm") {
+      const host = button.closest?.(".mermaid[data-bsb-m]");
+      const resolved = currentMermaidRepairResolution(getActiveAiRun(), host?._bsbMermaidJob?.preferredProfileId);
+      openSettingsLlm(resolved.config?.id || resolved.readyProfiles?.[0]?.id || state.aiEditorId);
+      return;
+    }
+
+    if (action === "retry" || action === "retry-with" || action === "save-inline") {
       const host = button.closest?.(".mermaid[data-bsb-m]") || card?._bsbMermaidHost;
       const job = host?._bsbMermaidJob || card?._bsbMermaidJob;
       if (!host || !job) {
         setStatus("重绘失败：没有找到该图对应的 Mermaid 源码", "err");
         return;
+      }
+      const box = host.querySelector(".bsb-mermaid-error") || card;
+      if (action === "save-inline") {
+        const savedId = saveInlineMermaidProfile(box || host);
+        if (!savedId) return;
+        job.preferredProfileId = savedId;
+      } else {
+        const picked = box?.querySelector?.('[data-role="mermaid-repair-model"]')?.value || "";
+        if (picked) job.preferredProfileId = picked;
       }
       // 重绘只受当前模型约束：其他模型仍在生成时，不阻塞这个已完成模型。
       // 同时锁定目标 run，防止修复过程中切换标签后写错模型。
@@ -14165,7 +14366,7 @@
         // 第二步：原代码稳定失败，说明大概率是语法/兼容性问题；只让 AI 修复此代码块。
         button.textContent = "AI 修复中…";
         setStatus(`Mermaid 图 ${job.idx + 1} 本地重试失败，正在修复代码…`);
-        activeCode = await requestMermaidCodeRepair(originalCode, local.error, job.idx, targetRun);
+        activeCode = await requestMermaidCodeRepair(originalCode, local.error, job.idx, targetRun, job.preferredProfileId);
         if (activeCode.trim() === originalCode.trim()) {
           throw new Error("AI 返回的 Mermaid 代码与原代码相同，未完成修复");
         }
@@ -14205,9 +14406,15 @@
           epoch: job.epoch,
           originalCode: job.originalCode || originalCode,
           repaired: false,
+          preferredProfileId: job.preferredProfileId || "",
         };
         renderMermaidError(host, originalCode, err, job.idx);
-        setStatus(`Mermaid 图 ${job.idx + 1} 重绘失败：${err?.message || err}`, "err");
+        setStatus(
+          err?.mermaidSetup
+            ? String(err.message || "请在这张图里填写 API Key")
+            : `Mermaid 图 ${job.idx + 1} 重绘失败：${err?.message || err}`,
+          err?.mermaidSetup ? "" : "err",
+        );
       } finally {
         if (targetRun) targetRun.mermaidRepairing = false;
         else state.mermaidRepairing = false;
@@ -14309,21 +14516,100 @@
 
   function renderMermaidError(node, code, err, idx) {
     const message = String(err?.message || err || "未知错误");
+    const resolved = currentMermaidRepairResolution(getActiveAiRun(), node?._bsbMermaidJob?.preferredProfileId);
+    const needsSetup = !!(err?.mermaidSetup || resolved.source === "none");
     node.replaceChildren();
 
     const box = document.createElement("section");
-    box.className = "bsb-mermaid-error";
+    box.className = needsSetup ? "bsb-mermaid-error is-setup" : "bsb-mermaid-error";
     const head = document.createElement("div");
     head.className = "bsb-mermaid-error-head";
     const title = document.createElement("strong");
-    title.textContent = `架构流程图 ${idx + 1} 渲染失败`;
+    title.textContent = needsSetup
+      ? `架构图 ${idx + 1} 还差一步：用 LLM 自动修好`
+      : `架构流程图 ${idx + 1} 渲染失败`;
     const retry = document.createElement("button");
     retry.type = "button";
     retry.className = "bsb-mermaid-tool";
     retry.dataset.mmdAct = "retry";
-    retry.textContent = "重绘";
-    retry.title = "先用原代码重试；仍失败则调用现有 AI 配置修复此 Mermaid 代码块";
+    retry.textContent = needsSetup ? "配好后再试" : "重绘";
+    retry.title = needsSetup
+      ? "先在这张卡片里选模型或填写 API Key"
+      : "先用原代码重试；仍失败则用设置里的 LLM 修复此图";
     head.append(title, retry);
+
+    const setup = document.createElement("div");
+    setup.className = "bsb-mermaid-setup";
+    const copy = document.createElement("p");
+    copy.className = "bsb-mermaid-setup-copy";
+    const readyName = String(resolved.config?.name || resolved.config?.model || resolved.readyProfiles[0]?.name || "");
+    copy.textContent = needsSetup
+      ? (resolved.readyProfiles.length
+        ? `笔记缓存不会保存 API Key。选一个已配置的模型（当前：${readyName || "未命名"}），点「用这个模型重绘」。`
+        : "API Key 在「设置 → LLM」，不在这张图的源码里。也可以直接在下面填，不用去翻菜单。")
+      : (readyName
+        ? `点「重绘」会先本地重试，不行就用「${readyName}」自动修语法。`
+        : "点「重绘」会先本地重试，不行再用 LLM 修语法。");
+    setup.appendChild(copy);
+
+    if (needsSetup || !resolved.readyProfiles.length) {
+      const path = document.createElement("div");
+      path.className = "bsb-mermaid-setup-path";
+      path.innerHTML = "<span>入口</span><b>设置</b><span>→</span><b>LLM</b><span>→</span><b>API Key</b>";
+      setup.appendChild(path);
+    }
+
+    if (needsSetup && resolved.readyProfiles.length) {
+      const row = document.createElement("div");
+      row.className = "bsb-mermaid-setup-row";
+      const label = document.createElement("label");
+      label.textContent = "用这个模型修";
+      const select = document.createElement("select");
+      select.dataset.role = "mermaid-repair-model";
+      select.innerHTML = resolved.readyProfiles.map((p) => {
+        const id = String(p.id || "");
+        const name = String(p.name || p.model || "未命名");
+        const selected = id && id === (resolved.config?.id || "");
+        return `<option value="${escapeAttr(id)}"${selected ? " selected" : ""}>${escapeHtml(name)}</option>`;
+      }).join("");
+      label.appendChild(select);
+      const useBtn = document.createElement("button");
+      useBtn.type = "button";
+      useBtn.className = "bsb-btn accent";
+      useBtn.dataset.mmdAct = "retry-with";
+      useBtn.textContent = "用这个模型重绘";
+      row.append(label, useBtn);
+      setup.appendChild(row);
+    }
+
+    if (!resolved.readyProfiles.length) {
+      const grid = document.createElement("div");
+      grid.className = "bsb-mermaid-setup-grid";
+      grid.innerHTML = `
+        <label>Base URL（含 /v1）<input type="text" data-mermaid-field="baseUrl" value="${escapeAttr(resolved.config?.baseUrl || "")}" placeholder="https://api.example.com/v1" autocomplete="off"></label>
+        <label>API Key<input type="password" data-mermaid-field="apiKey" value="" placeholder="就填在这里，不用去翻设置" autocomplete="off"></label>
+        <label>Model<input type="text" data-mermaid-field="model" value="${escapeAttr(resolved.config?.model || "")}" placeholder="gpt-4o-mini" autocomplete="off"></label>
+      `;
+      setup.appendChild(grid);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "bsb-mermaid-setup-actions";
+    if (!resolved.readyProfiles.length) {
+      const saveBtn = document.createElement("button");
+      saveBtn.type = "button";
+      saveBtn.className = "bsb-btn primary";
+      saveBtn.dataset.mmdAct = "save-inline";
+      saveBtn.textContent = "保存到 LLM 并重绘";
+      actions.appendChild(saveBtn);
+    }
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "bsb-btn ghost";
+    openBtn.dataset.mmdAct = "open-llm";
+    openBtn.textContent = "打开 设置 → LLM";
+    actions.appendChild(openBtn);
+    setup.appendChild(actions);
 
     const details = document.createElement("details");
     const summary = document.createElement("summary");
@@ -14333,7 +14619,7 @@
     codeNode.textContent = `${code}\n\n${message}`;
     pre.appendChild(codeNode);
     details.append(summary, pre);
-    box.append(head, details);
+    box.append(head, setup, details);
     node.appendChild(box);
   }
 
@@ -14598,9 +14884,24 @@
           item.classList.add("is-open");
           item.querySelector(".bsb-folio-toc-twist")?.setAttribute("aria-expanded", "true");
         }
-        link.scrollIntoView({ block: "nearest" });
+        scrollFolioTocLinkIntoNav(link);
       }
     });
+  }
+
+  function scrollFolioTocLinkIntoNav(link) {
+    const nav = link?.closest?.(".bsb-folio-toc-nav");
+    if (!nav || !link) return;
+    const navRect = nav.getBoundingClientRect();
+    const linkRect = link.getBoundingClientRect();
+    if (linkRect.top < navRect.top) nav.scrollTop -= navRect.top - linkRect.top + 10;
+    else if (linkRect.bottom > navRect.bottom) nav.scrollTop += linkRect.bottom - navRect.bottom + 10;
+  }
+
+  function syncFolioTocViewport(shell, box) {
+    const toc = shell?.querySelector?.(".bsb-folio-toc");
+    if (!toc || !box) return;
+    toc.style.setProperty("--folio-toc-h", `${Math.max(180, Math.round(box.clientHeight))}px`);
   }
 
   function updateFolioProgress(shell, box) {
@@ -14612,6 +14913,7 @@
 
   function bindFolioToc(shell, scrollRoot) {
     const box = scrollRoot || shell.closest("[data-role='ai-md']");
+    syncFolioTocViewport(shell, box);
     shell.addEventListener("click", (e) => {
       if (e.target.closest?.("[data-folio-twist]")) {
         const item = e.target.closest(".bsb-folio-toc-item");
@@ -14659,6 +14961,16 @@
         if (current?.id) setFolioTocCurrent(shell, current.id);
       };
       box.addEventListener("scroll", onScroll, { passive: true });
+      const onResize = () => {
+        syncFolioTocViewport(shell, box);
+        updateFolioProgress(shell, box);
+      };
+      window.addEventListener("resize", onResize);
+      if (typeof ResizeObserver === "function") {
+        const ro = new ResizeObserver(onResize);
+        ro.observe(box);
+      }
+      onResize();
       onScroll();
     }
   }
@@ -14697,6 +15009,7 @@
     host.replaceChildren(shell);
     bindFolioToc(shell, scrollRoot);
     if (headings[0]) setFolioTocCurrent(shell, headings[0].id);
+    requestAnimationFrame(() => syncFolioTocViewport(shell, scrollRoot || shell.closest("[data-role='ai-md']")));
     return shell;
   }
 

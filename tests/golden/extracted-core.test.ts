@@ -22,6 +22,8 @@ import {
   parseKnowledgeOutput,
   preprocessCacheKey,
   replaceMermaidBlockAt,
+  resolveMermaidRepairConfig,
+  mermaidRepairSetupHint,
   resolveRestoredActiveRunId,
   serializeAiRunForCache,
   shouldRestoreAutomaticAiSession,
@@ -250,6 +252,26 @@ describe("P2 extracted Pure Core", () => {
       replaced: true,
       value: "```mermaid\nflowchart TD\nA[\"new\"]\n```",
     });
+    expect(resolveMermaidRepairConfig({
+      runConfig: { id: "p1", model: "demo", baseUrl: "https://api.example.com/v1", apiKey: "" },
+      profileId: "p1",
+      profiles: [
+        { id: "p1", name: "演示", model: "demo", baseUrl: "https://api.example.com/v1", apiKey: "sk-live", enabled: true },
+      ],
+    })).toMatchObject({
+      source: "profile",
+      missing: [],
+      config: { apiKey: "sk-live", model: "demo" },
+    });
+    expect(resolveMermaidRepairConfig({
+      runConfig: { apiKey: "" },
+      profiles: [{ id: "p2", model: "b", baseUrl: "https://x/v1", apiKey: "sk-2", enabled: true }],
+    }).source).toBe("fallback");
+    expect(resolveMermaidRepairConfig({ profiles: [{ id: "empty", model: "", apiKey: "" }] })).toMatchObject({
+      source: "none",
+      missing: ["apiKey", "baseUrl", "model"],
+    });
+    expect(mermaidRepairSetupHint(["apiKey"])).toContain("设置 → LLM");
 
     expect(slugFolioHeading("核心判断：为什么成立", 0)).toBe("folio-核心判断-为什么成立-1");
     expect(formatFolioChapterIndex(3)).toBe("03");
