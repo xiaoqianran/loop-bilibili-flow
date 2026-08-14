@@ -22,3 +22,22 @@ export function sanitizeMermaidTimestampCitationsInMarkdown(
   );
 }
 
+export function replaceMermaidBlockAt(
+  markdown: string,
+  targetIdx: number,
+  nextCode: string,
+): { value: string; replaced: boolean } {
+  let current = -1;
+  let replaced = false;
+  const value = String(markdown || "").replace(
+    /```mermaid\s*\r?\n([\s\S]*?)```/gi,
+    (full) => {
+      current += 1;
+      if (current !== Number(targetIdx)) return full;
+      replaced = true;
+      return `\`\`\`mermaid\n${stripMermaidTimestampCitations(nextCode)}\n\`\`\``;
+    },
+  );
+  return { value, replaced };
+}
+

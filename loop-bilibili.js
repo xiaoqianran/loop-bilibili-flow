@@ -32,6 +32,9 @@
 // ==/UserScript==
 
 /**
+ * v6.9.6 — 后处理按模型复用缓存：只生成身份变化的版本，其余命中缓存。规则在 packages/core。
+ * v6.9.5 — 连播切集认播放器身份：URL 未变时按 player/cid 换字幕。规则在 packages/bilibili。
+ * v6.9.4 — 后处理会话缓存：刷新只恢复；手动重新生成与 Mermaid 重绘覆盖。规则在 packages/core。
  * v6.9.3 — 流程后处理 LLM 改为有序队列：编号 + 拖拽排序，运行顺序与队列一致。
  * v6.9.2 — 流程抽屉与工作台对齐：预处理 / 对话 / 后处理。
  * v6.9.1 — 对话增加字幕上下文压缩与旧轮记忆压缩；超长不再只砍开头。
@@ -2088,9 +2091,22 @@
   /**
    * 当前播放器视频身份。不要依赖 ctx.type === "video"：B 站合集 /list、收藏夹播放等
    * 页面同样可能承载一个真实的 BV。AI 自动链路只认 BV+P 这个身份键。
+   * 连播时 URL / __INITIAL_STATE__ 会落后于 player，优先走 monorepo 播放器身份。
    */
   function currentRouteVideoRef() {
     const ctx = detectContext(location.href);
+    const resolve = coreFn("resolvePlayingVideoRef");
+    const extract = coreFn("extractPlayingVideoHint");
+    const playing = typeof extract === "function" ? extract(pageWindow) : null;
+    if (typeof resolve === "function") {
+      const ref = resolve({
+        href: location.href,
+        urlBvid: ctx?.bvid || extractBvid(location.href),
+        urlPage: ctx?.page || currentPageNumber(),
+        playing,
+      });
+      if (ref) return { ...ref, ctx };
+    }
     const bvid = String(ctx?.bvid || extractBvid(location.href) || "").trim();
     if (!bvid) return null;
     const page = Math.max(1, Number(ctx?.page || currentPageNumber()) || 1);
@@ -3050,6 +3066,9 @@
     autoAnalyzeKey: "",
     autoAnalyzePendingKey: "",
     autoAnalyzeTimer: 0,
+    aiSessionRouteKey: "",
+    aiSessionRestorePromise: null,
+    aiSessionRestoreKey: "",
     fastViewCache: new Map(),
     fastTrackCache: new Map(),
     fastSubtitleCache: new Map(),
@@ -13000,6 +13019,7 @@
     if (!input?.vars?.subtitle) return null;
     return {
       sessionId: Number(sessionId ?? input.sessionId),
+      routeKey: String(input.routeKey || ""),
       vars: { ...input.vars },
       promptProfile: input.promptProfile ? { ...input.promptProfile } : null, // legacy
       taskSnapshots: Array.isArray(input.taskSnapshots) ? input.taskSnapshots.map((x) => ({ task: x.task ? { ...x.task, modelIds: [...(x.task.modelIds || [])] } : null, prompt: x.prompt ? { ...x.prompt } : null })) : [],
@@ -13021,6 +13041,7 @@
     const done = runs.filter((run) => run.status === "done").length;
     const failed = runs.filter((run) => run.status === "error").length;
     const stopped = runs.filter((run) => run.status === "stopped").length;
+    persistAiSessionCache().catch(() => {});
     setStatus(`${prefix} · 成功 ${done} · 失败 ${failed} · 停止 ${stopped}`, failed ? "err" : "ok");
   }
 
@@ -13761,6 +13782,8 @@
   }
 
   function replaceMermaidBlockAt(markdown, targetIdx, nextCode) {
+    const fn = coreFn("replaceMermaidBlockAt");
+    if (fn) return fn(markdown, targetIdx, nextCode);
     let current = -1;
     let replaced = false;
     const value = String(markdown || "").replace(
@@ -13773,6 +13796,113 @@
       },
     );
     return { value, replaced };
+  }
+
+  async function persistAiSessionCache(routeKey = state.aiSessionRouteKey || currentRouteVideoKey()) {
+    const keyFn = coreFn("aiSessionCacheKey");
+    const buildFn = coreFn("buildAiSessionCachePayload");
+    const usableFn = coreFn("isUsableAiSessionCache");
+    const ttlFn = coreFn("aiSessionCacheTtlMs");
+    if (!keyFn || !buildFn || !usableFn) return false;
+    const key = keyFn(routeKey);
+    if (!key) return false;
+    const payload = buildFn({
+      routeKey,
+      sessionInput: cloneAiSessionInput(state.aiSessionInput, state.aiSessionInput?.sessionId),
+      preprocessRun: state.preprocessRun,
+      runs: state.aiRunOrder.map((id) => state.aiRuns.get(id)).filter(Boolean),
+      activeRunId: state.aiActiveRunId,
+      activeTaskId: state.aiActiveTaskId,
+    });
+    if (!usableFn(payload)) return false;
+    await persistentCacheWrite(key, payload, ttlFn ? ttlFn() : 30 * 24 * 60 * 60_000);
+    return true;
+  }
+
+  async function hydrateAiSessionFromCache(payload, routeKey) {
+    if (currentRouteVideoKey() && currentRouteVideoKey() !== routeKey) return false;
+    const sessionId = ++state.aiSessionSeq;
+    state.aiAbort = false;
+    state.aiRuns = new Map();
+    state.aiRunOrder = [];
+    const savedRuns = Array.isArray(payload?.runs) ? payload.runs : [];
+    for (const saved of savedRuns) {
+      const draft = coreCall("draftHydratedAiRun", saved);
+      if (!draft) continue;
+      const run = createAiRun(
+        latestAiConfigForRun({ profileId: draft.profileId, config: draft.config }),
+        sessionId,
+        draft.taskSnapshot,
+        draft.promptProfile,
+      );
+      Object.assign(run, draft);
+      state.aiRuns.set(run.id, run);
+      state.aiRunOrder.push(run.id);
+    }
+    if (!state.aiRunOrder.length) return false;
+    const savedActive = savedRuns.find((item) => item && item.id === payload.activeRunId) || null;
+    state.aiActiveTaskId = payload.activeTaskId || savedActive?.taskId || "";
+    state.aiActiveRunId = coreCall(
+      "resolveRestoredActiveRunId",
+      state.aiRunOrder.map((id) => state.aiRuns.get(id)),
+      savedActive,
+      state.aiActiveTaskId,
+    );
+    state.aiSessionInput = cloneAiSessionInput(payload.sessionInput, sessionId);
+    if (state.aiSessionInput) state.aiSessionInput.routeKey = routeKey;
+    const preprocess = coreCall("draftHydratedPreprocessRun", payload.preprocessRun);
+    state.preprocessRun = preprocess
+      ? { runtime: null, childRuntimes: new Set(), ...preprocess }
+      : null;
+    state.aiSessionRouteKey = routeKey;
+    state.autoAnalyzeKey = routeKey;
+    state.aiViewingPreprocess = false;
+    syncActiveRunBridge(getActiveAiRun());
+    renderAiResultTabs();
+    renderAiInputDrawer();
+    refreshAiChips();
+    setAiBusy(false);
+    if (currentAiWorkbenchStage() === "postprocess" && state.aiActiveRunId) {
+      await selectAiRun(state.aiActiveRunId);
+    } else if (currentAiWorkbenchStage() === "preprocess") {
+      await renderPreprocessCanvas();
+    }
+    return true;
+  }
+
+  async function restoreAiSessionForRoute(routeKey) {
+    const key = String(routeKey || "").trim();
+    if (!key || state.aiBusy) return false;
+    if (
+      state.aiSessionRouteKey === key &&
+      state.aiRunOrder.some((id) => String(state.aiRuns.get(id)?.raw || "").trim())
+    ) {
+      state.autoAnalyzeKey = key;
+      return true;
+    }
+    if (state.aiSessionRestoreKey === key && state.aiSessionRestorePromise) {
+      return state.aiSessionRestorePromise;
+    }
+    state.aiSessionRestoreKey = key;
+    state.aiSessionRestorePromise = (async () => {
+      try {
+        const cacheKey = coreCall("aiSessionCacheKey", key);
+        if (!cacheKey) return false;
+        const cached = await persistentCacheRead(cacheKey);
+        if (currentRouteVideoKey() && currentRouteVideoKey() !== key) return false;
+        if (!coreCall("isUsableAiSessionCache", cached?.value)) return false;
+        return await hydrateAiSessionFromCache(cached.value, key);
+      } catch (error) {
+        console.warn("[bili-subbatch] restore ai session", error);
+        return false;
+      } finally {
+        if (state.aiSessionRestoreKey === key) {
+          state.aiSessionRestorePromise = null;
+          state.aiSessionRestoreKey = "";
+        }
+      }
+    })();
+    return state.aiSessionRestorePromise;
   }
 
   function persistRepairedMermaid(targetRun, idx, nextCode) {
@@ -13795,6 +13925,7 @@
       state.aiRenderedText = state.aiRaw;
       state.aiPendingText = state.aiRaw;
     }
+    persistAiSessionCache().catch(() => {});
     return true;
   }
 
@@ -13926,6 +14057,9 @@
         if (!repairedResult.ok) throw repairedResult.error || new Error("修复后的代码仍无法渲染");
 
         const persisted = persistRepairedMermaid(targetRun, job.idx, activeCode);
+        if (persisted) {
+          try { await persistAiSessionCache(); } catch (_) { /* ignore */ }
+        }
         const currentJob = host._bsbMermaidJob;
         if (currentJob) {
           currentJob.code = activeCode;
@@ -13934,7 +14068,7 @@
           currentJob.persisted = persisted;
         }
         setStatus(
-          `Mermaid 图 ${job.idx + 1} 修复成功：代码已替换并重新渲染${persisted ? "，已写回笔记源码" : ""}`,
+          `Mermaid 图 ${job.idx + 1} 修复成功：代码已替换并重新渲染${persisted ? "，已写回笔记源码与缓存" : ""}`,
           "ok",
         );
       } catch (err) {
@@ -15502,6 +15636,7 @@ body{padding:48px 20px 80px}
         else await selectAiRun(run.id);
       }
     }
+    if (isCurrentAiRun(run)) persistAiSessionCache().catch(() => {});
     return run;
   }
 
@@ -15515,6 +15650,15 @@ body{padding:48px 20px 80px}
       state.pendingAiSend = true;
       setStatus("扫描或字幕任务仍在运行 · 已排队，结束后自动送入 AI");
       return;
+    }
+    const forceAll = !!state.forcePreprocessOnce || !!options.forceAll;
+    const routeKeyForCache = options.expectedRouteKey || currentRouteVideoKey();
+    let cachedPayload = null;
+    if (!forceAll && routeKeyForCache && coreFn("aiSessionCacheKey") && coreFn("isUsableAiSessionCache")) {
+      try {
+        const rec = await persistentCacheRead(coreFn("aiSessionCacheKey")(routeKeyForCache));
+        if (coreFn("isUsableAiSessionCache")(rec?.value)) cachedPayload = rec.value;
+      } catch (_) { /* ignore cache read */ }
     }
     const root = ensurePanel();
 
@@ -15557,6 +15701,33 @@ body{padding:48px 20px 80px}
       setStatus("当前处理方案没有可运行的产物：请为至少一个 POST Prompt 选择已启用的 LLM", "err");
       if (!automatic) setAiDrawer("flow");
       return;
+    }
+    const plannedRuns = taskPlans.flatMap((plan) => plan.models.map((profile) => ({
+      task: plan.task,
+      prompt: plan.prompt,
+      profile,
+      taskId: plan.task.id,
+      profileId: profile.id,
+      promptId: plan.prompt.id,
+      promptProfile: plan.prompt,
+      config: profile,
+    })));
+    const partitionFn = coreFn("partitionPlannedAiRuns");
+    const skipPrepareFn = coreFn("shouldSkipPrepareForCachedSession");
+    if (!forceAll && cachedPayload && typeof partitionFn === "function") {
+      const preview = partitionFn(plannedRuns, cachedPayload.runs, "");
+      const skipPrepare = typeof skipPrepareFn === "function"
+        ? skipPrepareFn(plannedRuns.length, preview.generate.length, preview.reuse.length, { automatic, force: forceAll })
+        : (automatic && preview.generate.length === 0 && preview.reuse.length === plannedRuns.length);
+      if (skipPrepare) {
+        try {
+          const restored = await restoreAiSessionForRoute(routeKeyForCache);
+          if (restored) {
+            setStatus(`已从缓存恢复 ${preview.reuse.length} 个模型版本 · 改模型后点“运行”只会重跑变化项`, "ok");
+            return;
+          }
+        } catch (_) { /* fall through */ }
+      }
     }
     const usedProfiles = Array.from(new Map(taskPlans.flatMap((p) => p.models).map((m) => [m.id, m])).values());
     const invalid = usedProfiles.filter((x) => !x.apiKey || !x.baseUrl || !x.model);
@@ -15657,8 +15828,11 @@ body{padding:48px 20px 80px}
         preprocessPromptName: preprocessPrompt?.name || "",
         preprocessModelName: preprocessConfig?.name || preprocessConfig?.model || "",
       };
+      const sessionRouteKey = options.expectedRouteKey || currentRouteVideoKey();
+      state.aiSessionRouteKey = sessionRouteKey;
       state.aiSessionInput = cloneAiSessionInput({
         sessionId,
+        routeKey: sessionRouteKey,
         vars,
         taskSnapshots: taskPlans.map((plan) => ({ task: { ...plan.task, modelIds: [...(plan.task.modelIds || [])] }, prompt: { ...plan.prompt } })),
         preprocessPrompt: preprocessPrompt ? { ...preprocessPrompt } : null,
@@ -15675,13 +15849,41 @@ body{padding:48px 20px 80px}
       renderAiInputDrawer();
       refreshAiChips();
       if (currentAiWorkbenchStage() === "preprocess") await renderPreprocessCanvas();
-      setStatus(`开始生成 · ${taskPlans.length} 个产物 · ${state.aiRunOrder.length} 个版本 · ${ready.length} 条字幕${cut.truncated ? " · 输入已截断" : ""}`);
 
-      await Promise.allSettled(state.aiRunOrder.map((id) => {
+      const inputHash = coreFn("aiSessionInputHash") ? coreFn("aiSessionInputHash")(vars) : "";
+      const split = (!forceAll && cachedPayload && typeof partitionFn === "function")
+        ? partitionFn(plannedRuns, cachedPayload.runs, inputHash)
+        : { reuse: [], generate: plannedRuns };
+      const findPlannedRun = (taskId, profileId) =>
+        state.aiRunOrder.map((id) => state.aiRuns.get(id)).find((run) => run?.taskId === taskId && run?.profileId === profileId);
+      let reused = 0;
+      for (const item of split.reuse || []) {
+        const run = findPlannedRun(item.plan.taskId, item.plan.profileId);
+        const draft = coreFn("draftHydratedAiRun") ? coreFn("draftHydratedAiRun")(item.cached) : null;
+        if (!run || !draft) continue;
+        Object.assign(run, draft, { sourceBvids: [...sourceBvids] });
+        reused += 1;
+      }
+      const generateIds = (split.generate || []).map((plan) => findPlannedRun(plan.taskId, plan.profileId)?.id).filter(Boolean);
+      renderAiResultTabs();
+      if (state.aiActiveRunId) {
+        const active = state.aiRuns.get(state.aiActiveRunId);
+        if (active?.raw && !active.busy) syncActiveRunBridge(active);
+      }
+
+      if (!generateIds.length) {
+        setStatus(`已复用缓存 · ${reused} 个模型版本 · 未调用模型`, "ok");
+        if (state.aiActiveRunId) await selectAiRun(state.aiActiveRunId);
+        persistAiSessionCache().catch(() => {});
+        return;
+      }
+
+      setStatus(`复用缓存 ${reused} · 新生成 ${generateIds.length} · ${ready.length} 条字幕${cut.truncated ? " · 输入已截断" : ""}`);
+      await Promise.allSettled(generateIds.map((id) => {
         const run = state.aiRuns.get(id);
         return runAiProfile(run, vars, run.promptProfile, commonMeta);
       }));
-      if (sessionId === state.aiSessionSeq) summarizeAiRuns("全部产物生成结束");
+      if (sessionId === state.aiSessionSeq) summarizeAiRuns(reused ? "部分模型复用缓存后生成结束" : "全部产物生成结束");
     } catch (error) {
       const message = String(error?.message || error);
       if (sessionId === state.aiSessionSeq) {
@@ -15706,6 +15908,7 @@ body{padding:48px 20px 80px}
         if (!anyAiRunBusy()) state.aiAbort = false;
         if (state.aiPaintRaf) { cancelAnimationFrame(state.aiPaintRaf); state.aiPaintRaf = 0; }
         if (state.aiPaintTimer) { clearTimeout(state.aiPaintTimer); state.aiPaintTimer = 0; }
+        persistAiSessionCache().catch(() => {});
       }
     }
   }
@@ -16253,6 +16456,7 @@ body{padding:48px 20px 80px}
    * 字幕抓取成功后的自动分析调度：
    * - 默认开启，行为等同点击“开始分析”；
    * - 同一路由只自动触发一次；
+   * - 该视频已有后处理缓存时只恢复，不重新用字幕生成；
    * - stale revalidate / 静默刷新不重复分析；
    * - AI 配置尚未完成时等待用户保存配置，保存后自动续跑。
    */
@@ -16308,6 +16512,7 @@ body{padding:48px 20px 80px}
     }
     state.aiSessionInput = null;
     state.preprocessRun = null;
+    state.aiSessionRouteKey = "";
     // 强制回到原始字幕视图，避免新视频仍停留在「规范化稿」空态。
     state.aiInputView = "raw";
     state.aiViewingPreprocess = false;
@@ -16547,16 +16752,21 @@ body{padding:48px 20px 80px}
   // ─── SPA watch ──────────────────────────────────────────────────────────
   let lastHref = location.href;
   let lastRouteVideoKey = currentRouteVideoKey();
+  let lastPlayingRef = currentRouteVideoRef();
   function onMaybeNavigate() {
     const href = location.href;
     const nextRef = currentRouteVideoRef();
     const nextVideoKey = nextRef?.key || "";
     const hrefChanged = href !== lastHref;
-    const videoChanged = nextVideoKey !== lastRouteVideoKey;
+    const changedFn = coreFn("playingVideoChanged");
+    const videoChanged = typeof changedFn === "function"
+      ? changedFn(lastPlayingRef, nextRef)
+      : nextVideoKey !== lastRouteVideoKey;
     if (!hrefChanged && !videoChanged) return;
     lastHref = href;
+    lastPlayingRef = nextRef;
 
-    // 只有 BV+P 真正变化才清空 AI/字幕绑定；同一视频的无关 URL 参数变化不扰动阅读。
+    // 只有 BV+P / cid 真正变化才清空 AI/字幕绑定；同一视频的无关 URL 参数变化不扰动阅读。
     if (videoChanged) {
       persistStudioChat(lastRouteVideoKey);
       lastRouteVideoKey = nextVideoKey;
@@ -16576,7 +16786,10 @@ body{padding:48px 20px 80px}
       if (transcriptSearch) transcriptSearch.value = "";
       refreshContextUI();
       renderTranscriptPanel();
-      if (nextVideoKey) scheduleAutoCapture("route-change");
+      if (nextVideoKey) {
+        restoreAiSessionForRoute(nextVideoKey).catch(() => {});
+        scheduleAutoCapture("route-change");
+      }
       return;
     }
 
@@ -16614,13 +16827,17 @@ body{padding:48px 20px 80px}
         scheduleAutoCapture("visible", 120);
       }
     });
-    // History hook 是主路径；低频 URL 比较兜底少数站内切换。
-    // 后台标签页也要跑：用户切走后 SPA 参数变化 / 延迟写入的 BV 仍需触发自动抓取。
+    // History hook 是主路径；播放器连播常先换 cid/BV、后改 URL，所以还要听 media 换源并更勤地对齐身份。
+    document.addEventListener("loadstart", (event) => {
+      if (event.target instanceof HTMLMediaElement) onMaybeNavigate();
+    }, true);
     setInterval(() => {
       onMaybeNavigate();
-    }, 2000);
+    }, 800);
 
     // 初次打开页面也默认抓取：不要求打开面板、不要求标签页在前台、不要求点击“扫描”。
+    const routeKey = currentRouteVideoKey();
+    if (routeKey) restoreAiSessionForRoute(routeKey).catch(() => {});
     scheduleAutoCapture("initial", 180);
   }
 

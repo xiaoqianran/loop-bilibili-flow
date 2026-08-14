@@ -68,6 +68,18 @@ describe("Maintained full-feature compatibility source", () => {
     expect(navigateSource).toContain('state.transcriptQuery = ""');
     expect(navigateSource).toContain("state.transcriptFilteredIndexes = null");
     expect(navigateSource).toContain("transcriptSearch.value = \"\"");
+    expect(navigateSource).toContain('coreFn("playingVideoChanged")');
+  });
+
+  it("resolves the playing video from the player before a stale URL", () => {
+    expect(extractFunctionSource(maintainedSource, "currentRouteVideoRef")).toContain(
+      'coreFn("resolvePlayingVideoRef")',
+    );
+    expect(extractFunctionSource(maintainedSource, "currentRouteVideoRef")).toContain(
+      'coreFn("extractPlayingVideoHint")',
+    );
+    expect(extractFunctionSource(maintainedSource, "boot")).toContain("HTMLMediaElement");
+    expect(extractFunctionSource(maintainedSource, "boot")).toContain("800");
   });
 
   it("resets preprocess view to raw when SPA navigation aborts AI state", () => {
@@ -209,5 +221,35 @@ describe("Maintained full-feature compatibility source", () => {
     expect(captureStart).toBeGreaterThan(0);
     expect(captureEnd).toBeGreaterThan(captureStart);
     expect(maintainedSource.slice(captureStart, captureEnd)).toContain(refreshStatement);
+  });
+
+  it("bridges AI session cache to monorepo core instead of re-implementing rules", () => {
+    expect(maintainedSource).toContain("function persistAiSessionCache(");
+    expect(maintainedSource).toContain("function restoreAiSessionForRoute(");
+    expect(extractFunctionSource(maintainedSource, "persistAiSessionCache")).toContain(
+      'coreFn("buildAiSessionCachePayload")',
+    );
+    expect(extractFunctionSource(maintainedSource, "replaceMermaidBlockAt")).toContain(
+      'coreFn("replaceMermaidBlockAt")',
+    );
+    expect(extractFunctionSource(maintainedSource, "persistRepairedMermaid")).toContain(
+      "persistAiSessionCache()",
+    );
+    expect(extractFunctionSource(maintainedSource, "handleMermaidTool")).toContain(
+      "persistAiSessionCache",
+    );
+    expect(extractFunctionSource(maintainedSource, "boot")).toContain(
+      "restoreAiSessionForRoute(routeKey)",
+    );
+    expect(extractFunctionSource(maintainedSource, "onMaybeNavigate")).toContain(
+      "restoreAiSessionForRoute(nextVideoKey)",
+    );
+    const analyzeStart = maintainedSource.indexOf(
+      "async function doAiAnalyze(options = {})",
+    );
+    const analyzeSlice = maintainedSource.slice(analyzeStart, analyzeStart + 16000);
+    expect(analyzeSlice).toContain("partitionPlannedAiRuns");
+    expect(analyzeSlice).toContain("generateIds");
+    expect(analyzeSlice).toContain("restoreAiSessionForRoute");
   });
 });

@@ -45,6 +45,18 @@ export function routeVideoKey(
   return `${String(bvid || "").toUpperCase()}:P${Math.max(1, Number(page) || 1)}`;
 }
 
+export {
+  extractPlayingVideoHint,
+  pageFromCid,
+  playingVideoChanged,
+  resolvePlayingVideoRef,
+} from "./playing";
+export type {
+  PlayingVideoHint,
+  PlayingVideoSnapshot,
+  ResolvePlayingVideoInput,
+} from "./playing";
+
 export function pickHintIds(hints: BilibiliPageHints = {}): Partial<BilibiliContext> {
   const out: Partial<BilibiliContext> = {};
   if (hints.mid) out.mid = hints.mid;

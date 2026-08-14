@@ -3,10 +3,23 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  aiRunIdentityKey,
+  aiSessionCacheKey,
+  aiSessionCacheTtlMs,
+  aiSessionInputHash,
+  buildAiSessionCachePayload,
+  draftHydratedAiRun,
+  isUsableAiSessionCache,
+  partitionPlannedAiRuns,
+  shouldSkipPrepareForCachedSession,
   knowledgeBranchContext,
   md5,
   parseKnowledgeOutput,
   preprocessCacheKey,
+  replaceMermaidBlockAt,
+  resolveRestoredActiveRunId,
+  serializeAiRunForCache,
+  shouldRestoreAutomaticAiSession,
   renderPromptTemplate,
   sanitizeMermaidTimestampCitationsInMarkdown,
   shortcutChordFromEvent,
@@ -18,7 +31,14 @@ import {
   cuesToTxt,
   type PreprocessItem,
 } from "@subbatch/core";
-import { detectContext, extractBvid, routeVideoKey } from "@subbatch/bilibili";
+import {
+  detectContext,
+  extractBvid,
+  extractPlayingVideoHint,
+  playingVideoChanged,
+  resolvePlayingVideoRef,
+  routeVideoKey,
+} from "@subbatch/bilibili";
 
 function fixture(name: string): string {
   return readFileSync(
@@ -37,6 +57,61 @@ describe("P2 extracted Pure Core", () => {
     expect(detectContext(single.url)).toEqual(single.expected);
     expect(detectContext(collection.url)).toEqual(collection.expected);
     expect(routeVideoKey("bv1Test", 0)).toBe("BV1TEST:P1");
+    expect(
+      resolvePlayingVideoRef({
+        href: "https://www.bilibili.com/video/BV1oldxxxx011?p=1",
+        urlBvid: "BV1oldxxxx011",
+        urlPage: 1,
+        playing: { bvid: "BV1newxxxx011", page: 1, cid: 99, source: "player" },
+      }),
+    ).toMatchObject({
+      bvid: "BV1newxxxx011",
+      page: 1,
+      cid: 99,
+      key: "BV1NEWXXXX011:P1",
+      source: "player",
+    });
+    expect(
+      resolvePlayingVideoRef({
+        href: "https://www.bilibili.com/video/BV1xxxx?p=1",
+        urlBvid: "BV1xxxx",
+        urlPage: 1,
+        playing: { bvid: "BV1xxxx", page: 3, cid: 333, source: "player" },
+      }),
+    ).toMatchObject({ key: "BV1XXXX:P3", page: 3, cid: 333 });
+    expect(
+      extractPlayingVideoHint({
+        player: {
+          getManifest() {
+            return { bvid: "BV1playxx011", cid: 12, aid: 8 };
+          },
+        },
+        __INITIAL_STATE__: {
+          videoData: {
+            bvid: "BV1stalexx011",
+            cid: 1,
+            pages: [{ cid: 1 }, { cid: 12 }],
+          },
+        },
+      }),
+    ).toMatchObject({
+      bvid: "BV1playxx011",
+      cid: 12,
+      page: 2,
+      source: "player",
+    });
+    expect(
+      playingVideoChanged(
+        { key: "BV1X:P1", cid: 1 },
+        { key: "BV1X:P1", cid: 2 },
+      ),
+    ).toBe(true);
+    expect(
+      playingVideoChanged(
+        { key: "BV1X:P1", cid: 1 },
+        { key: "BV1X:P1", cid: 1 },
+      ),
+    ).toBe(false);
 
     const cues = toCues([
       { sid: 9, from: 1.2, to: 3.456, content: "第一行" },
@@ -80,6 +155,96 @@ describe("P2 extracted Pure Core", () => {
         "[BV1TEST P2 02:00] 第四点整理\n\n" +
         "[BV1TEST P2 02:30] 第五点整理",
     );
+
+    expect(aiSessionCacheKey("BV1TEST:P1")).toBe("ai-session:BV1TEST:P1");
+    expect(aiSessionCacheKey("")).toBe("");
+    expect(isUsableAiSessionCache({ runs: [{ raw: "" }, { raw: "  " }] })).toBe(false);
+    expect(isUsableAiSessionCache({ runs: [{ raw: "```mermaid\nflowchart TD\nA[\"ok\"]\n```" }] })).toBe(true);
+    expect(serializeAiRunForCache({
+      id: "1:task:model",
+      profileId: "model",
+      taskId: "task",
+      config: { name: "本地", apiKey: "secret", model: "qwen" },
+      raw: "graph",
+      sourceBvids: ["BV1TEST"],
+    })).toEqual({
+      id: "1:task:model",
+      profileId: "model",
+      taskId: "task",
+      taskSnapshot: null,
+      promptId: "",
+      promptName: "",
+      promptProfile: null,
+      config: { name: "本地", apiKey: "", model: "qwen" },
+      raw: "graph",
+      status: "",
+      statusText: "",
+      error: "",
+      sourceBvids: ["BV1TEST"],
+      startedAt: 0,
+      finishedAt: 0,
+      scrollTop: 0,
+    });
+    expect(resolveRestoredActiveRunId(
+      [
+        { id: "s:t1:m1", profileId: "m1", taskId: "t1" },
+        { id: "s:t1:m2", profileId: "m2", taskId: "t1" },
+      ],
+      { profileId: "m2", taskId: "t1" },
+      "t1",
+    )).toBe("s:t1:m2");
+    expect(shouldRestoreAutomaticAiSession({ automatic: true })).toBe(true);
+    const sharedPrompt = { id: "post", systemPrompt: "sys", userPromptTemplate: "u {{subtitle}}" };
+    const modelA = { baseUrl: "http://x", model: "a", temperature: 0.2, maxTokens: 1000 };
+    const modelB = { baseUrl: "http://x", model: "b", temperature: 0.2, maxTokens: 1000 };
+    const cachedRuns = [
+      { taskId: "t1", profileId: "m1", promptId: "post", promptProfile: sharedPrompt, config: modelA, raw: "note-a" },
+      { taskId: "t1", profileId: "m2", promptId: "post", promptProfile: sharedPrompt, config: modelB, raw: "note-b" },
+    ];
+    const inputHash = aiSessionInputHash({ subtitle: "same-sub" });
+    const split = partitionPlannedAiRuns(
+      [
+        { taskId: "t1", profileId: "m1", promptId: "post", promptProfile: sharedPrompt, config: modelA },
+        { taskId: "t1", profileId: "m2", promptId: "post", promptProfile: sharedPrompt, config: { ...modelB, maxTokens: 8000 } },
+      ],
+      cachedRuns,
+      inputHash,
+    );
+    expect(split.reuse.map((item) => item.plan.profileId)).toEqual(["m1"]);
+    expect(split.generate.map((item) => item.profileId)).toEqual(["m2"]);
+    expect(shouldSkipPrepareForCachedSession(2, 0, 2, { automatic: true })).toBe(true);
+    expect(shouldSkipPrepareForCachedSession(2, 1, 1, { automatic: true })).toBe(false);
+    expect(aiRunIdentityKey(cachedRuns[0], inputHash)).toBe(
+      aiRunIdentityKey(
+        { taskId: "t1", profileId: "m1", promptId: "post", promptProfile: sharedPrompt, config: modelA },
+        inputHash,
+      ),
+    );
+    expect(shouldRestoreAutomaticAiSession({ automatic: true, forcePreprocessOnce: true })).toBe(false);
+    expect(shouldRestoreAutomaticAiSession({ automatic: false })).toBe(false);
+    expect(aiSessionCacheTtlMs()).toBe(30 * 24 * 60 * 60_000);
+    expect(buildAiSessionCachePayload({
+      routeKey: "BV1TEST:P1",
+      sessionInput: { vars: { subtitle: "x" }, preprocessConfig: { apiKey: "secret" } },
+      runs: [{ raw: "note", config: { apiKey: "secret" } }],
+    }).sessionInput).toMatchObject({ preprocessConfig: { apiKey: "" } });
+    expect(isUsableAiSessionCache(buildAiSessionCachePayload({
+      runs: [{ raw: "" }],
+    }))).toBe(false);
+    expect(draftHydratedAiRun({ raw: "graph", status: "running" })).toMatchObject({
+      raw: "graph",
+      status: "done",
+      statusText: "缓存",
+      busy: false,
+    });
+    expect(replaceMermaidBlockAt(
+      "```mermaid\nflowchart TD\nA[\"old [BV1 P1 00:01]\"]\n```",
+      0,
+      "flowchart TD\nA[\"new [BV1 P1 00:01]\"]",
+    )).toEqual({
+      replaced: true,
+      value: "```mermaid\nflowchart TD\nA[\"new\"]\n```",
+    });
 
     expect(md5("raw transcript")).toBe("cf7b263a3cc99460b01b27ec78c65d16");
     expect(
