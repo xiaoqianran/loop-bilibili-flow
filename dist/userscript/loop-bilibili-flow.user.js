@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Bili SubBatch (loop-bilibili)
 // @namespace    https://github.com/loop-bilibili/bili-subbatch
-// @version      6.9.12
+// @version      6.9.13
 // @description  B站知识阅读工作台：字幕预处理、多产物后处理、Anchor 局部追问树与持久 Knowledge Workspace
 // @author       loop-bilibili
 // @match        *://www.bilibili.com/video/*
@@ -33,6 +33,7 @@
 // ==/UserScript==
 
 /**
+ * v6.9.13 — 单独安装 loop-bilibili-flow 时补齐 core 回退，避免字幕库渲染崩溃；打开页面先点开中文字幕。
  * v6.9.12 — 用户提问色条改到右侧；框选/知识问答发送后不再自动滚到底。
  * v6.9.11 — 知识库对话（提问 / 回答卡片 / 对话页）正文字号固定 14px，不再跟笔记 A± 走。
  * v6.9.10 — HTML 阅读页：目录高亮不再 scrollIntoView 抢正文滚动；侧栏高度锁在可视区，可独立下滑。
@@ -110,7 +111,7 @@
    */
 
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.9.12";
+    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.9.13";
   const PANEL_ID = "bili-subbatch-panel";
   const UI_STORE_KEY = "bili-subbatch-ui-v2";
   /** Catppuccin flavors — official palette https://catppuccin.com/palette/ */
@@ -244,6 +245,7 @@
     panel: ".bpx-player-ctrl-subtitle-box",
     item: ".bpx-player-ctrl-subtitle-language-item[data-lan]",
     active: ".bpx-player-ctrl-subtitle-language-item.bpx-state-active",
+    close: ".bpx-player-ctrl-subtitle-close-switch",
   });
   const CACHE_DB_NAME = "bili-subbatch-cache-v2";
   const CACHE_DB_VERSION = 1;
@@ -1346,14 +1348,103 @@
     return typeof fn === "function" ? fn : null;
   }
 
+  /** Standalone install (no SubBatch bootstrap) must still capture subtitles. */
+  const CORE_LOCAL_FALLBACKS = {
+    buildLibraryRenderNodes(entries) {
+      return (entries || []).map((entry) => ({ type: "item", entry, depth: 0 }));
+    },
+    mergeGroupFields(target, source) {
+      if (!source) return target;
+      const next = { ...target };
+      for (const key of [
+        "groupType", "groupKey", "groupFolder", "parentFolder", "spaceMid",
+        "collectionName", "collectionMid", "collectionSid", "collectionShortUrl", "videoTitle",
+      ]) {
+        if (source[key] != null && source[key] !== "") next[key] = source[key];
+      }
+      if (source.author && (!target.author || target.author === "未知UP")) next.author = source.author;
+      return next;
+    },
+    attachCollectionGroupMeta(items, meta = {}, ctx = {}) {
+      const list = items || [];
+      const mid = String(meta.mid || ctx.mid || "").trim();
+      const sid = String(meta.season_id || ctx.season_id || "").trim();
+      const collectionName = String(meta.name || meta.title || ctx.collectionTitleHint || "未命名合集").trim();
+      const author = String(meta.author || ctx.authorHint || list[0]?.author || "").trim();
+      const groupKey = mid && sid ? `collection:${mid}/${sid}` : `collection:${collectionName}`;
+      return list.map((it) => ({
+        ...it,
+        author: String(it.author || "").trim() || author,
+        groupType: "collection",
+        groupKey,
+        groupFolder: collectionName,
+        collectionName,
+        collectionMid: mid,
+        collectionSid: sid,
+      }));
+    },
+    attachSelectionGroupMeta(items) { return items || []; },
+    attachUserSpaceGroupMeta(items) { return items || []; },
+    applySpaceCollectionMembership(items) { return items || []; },
+    attachSpaceLooseVideosMeta(items) { return items || []; },
+    countSpaceCollectionMatches() { return 0; },
+    applyUgcSeasonToItem(item, view) {
+      if (!item || !view?.ugc_season?.id) return item;
+      const season = view.ugc_season;
+      const mid = season.mid || view.owner?.mid;
+      const sid = season.id;
+      if (!mid || !sid) return item;
+      return {
+        ...item,
+        groupType: "collection",
+        groupKey: `collection:${mid}/${sid}`,
+        collectionName: String(season.title || "未命名合集"),
+        collectionMid: String(mid),
+        collectionSid: String(sid),
+      };
+    },
+    applyUgcSeasonToItems(items, view) {
+      return (items || []).map((it) => CORE_LOCAL_FALLBACKS.applyUgcSeasonToItem(it, view));
+    },
+    suggestCaptureMode(item) {
+      if (!item) return "auto";
+      if (item.groupType === "collection" || item.collectionSid) return "collection";
+      if (item.groupType === "selection" || (Array.isArray(item.pages) && item.pages.length > 1)) return "selection";
+      return "auto";
+    },
+    safePathSegment(name, maxLen = 120) {
+      return String(name || "").replace(/[\\/:*?"<>|]/g, "_").slice(0, maxLen) || "untitled";
+    },
+    setGroupSelection(items, groupKey, selected) {
+      return (items || []).map((it) => (it.groupKey === groupKey ? { ...it, selected } : it));
+    },
+    resolveLibraryGroupKey(item) { return item?.groupKey || ""; },
+    normalizeExportItem(item) { return item; },
+    buildGroupMetaPatches() { return null; },
+    applyGroupMetaPatchToItems(items) { return items || []; },
+    upsertIndexForExportItem(map) { return map || {}; },
+    renderExportIndexMd() { return ""; },
+    buildUpFolderLabel(author, name) {
+      return [author, name].filter(Boolean).join(" / ") || name || "";
+    },
+    buildCollectionShortUrl(mid, seasonId) {
+      return mid && seasonId ? `https://space.bilibili.com/${mid}/lists/${seasonId}` : "";
+    },
+    resolveSeriesTitle(item) { return item?.collectionName || item?.title || ""; },
+    buildSubtitleExportRelativePath(item, ext) {
+      const stem = String(item?.title || item?.bvid || "video").replace(/[\\/:*?"<>|]/g, "_");
+      return `${SUBTITLE_EXPORT_ROOT}/${stem}.${String(ext || "srt").replace(/^\./, "")}`;
+    },
+  };
+
   function coreCall(name, ...args) {
     const fn = coreFn(name);
-    if (!fn) {
-      throw new Error(
-        `[bili-subbatch] monorepo core missing "${name}" — install/update script so SubBatch.SubBatchMonorepo.core is present`,
-      );
-    }
-    return fn(...args);
+    if (fn) return fn(...args);
+    const fallback = CORE_LOCAL_FALLBACKS[name];
+    if (typeof fallback === "function") return fallback(...args);
+    throw new Error(
+      `[bili-subbatch] monorepo core missing "${name}" — install/update script so SubBatch.SubBatchMonorepo.core is present`,
+    );
   }
 
   function safeFilename(name) {
@@ -8991,7 +9082,15 @@
     if (!state.libraryFolderCollapsed || typeof state.libraryFolderCollapsed !== "object") {
       state.libraryFolderCollapsed = {};
     }
-    const nodes = buildLibraryRenderNodes(entries, state.libraryFolderCollapsed);
+    let nodes = [];
+    try {
+      nodes = buildLibraryRenderNodes(entries, state.libraryFolderCollapsed);
+    } catch (error) {
+      console.warn("[bili-subbatch] library render fallback", error);
+    }
+    if (!Array.isArray(nodes) || !nodes.length) {
+      nodes = entries.map((entry) => ({ type: "item", entry, depth: 0 }));
+    }
     box.innerHTML = nodes.map((node) => libraryRenderNodeHtml(node, node.depth || 0)).join("");
     // 部分选中：父级勾选消失（不显示半选），与「全选才勾上」一致。
     box.querySelectorAll('input[data-group-check][data-partial="1"]').forEach((el) => {
@@ -9032,13 +9131,15 @@
         panel = await waitForPlayerElement(PLAYER_SUBTITLE_SELECTORS.panel, 2500);
         await sleep(100);
       }
-      const active = panel.querySelector(PLAYER_SUBTITLE_SELECTORS.active);
-      if (!active) {
-        const items = Array.from(panel.querySelectorAll(PLAYER_SUBTITLE_SELECTORS.item));
+      const items = Array.from(panel.querySelectorAll(PLAYER_SUBTITLE_SELECTORS.item));
+      const activeLang = items.find((node) => node.classList.contains("bpx-state-active"));
+      const closeOn = panel.querySelector(`${PLAYER_SUBTITLE_SELECTORS.close}.bpx-state-active`);
+      if (!activeLang || closeOn) {
         if (!items.length) throw new Error("播放器没有可开启字幕");
-        const wanted = String(item?.lan || "");
+        const wanted = String(item?.lan || item?.preferred_language || "");
         const target = (wanted && items.find((node) => node.dataset.lan === wanted))
           || items.find((node) => /^(ai-zh|zh-CN|zh-Hans|zh)$/i.test(node.dataset.lan || ""))
+          || items.find((node) => /中文/.test(node.textContent || ""))
           || items[0];
         target.click();
         await sleep(140);
@@ -17174,6 +17275,9 @@ body{padding:48px 20px 80px}
 
   async function autoCaptureCurrentVideo(reason = "route", options = {}) {
     if (!state.autoCaptureEnabled && !options.forceNetwork) return;
+    if (state.autoEnablePlayerSubtitle) {
+      enablePlayerSubtitle(null).catch(() => {});
+    }
     const ctx = detectContext(location.href);
     const routeRef = options.requestedBvid ? null : currentRouteVideoRef();
     const bvid = options.requestedBvid || routeRef?.bvid || ctx.bvid;
@@ -17449,6 +17553,9 @@ body{padding:48px 20px 80px}
     // 初次打开页面也默认抓取：不要求打开面板、不要求标签页在前台、不要求点击“扫描”。
     const routeKey = currentRouteVideoKey();
     if (routeKey) restoreAiSessionForRoute(routeKey).catch(() => {});
+    if (state.autoEnablePlayerSubtitle) {
+      enablePlayerSubtitle(null).catch(() => {});
+    }
     scheduleAutoCapture("initial", 180);
   }
 
