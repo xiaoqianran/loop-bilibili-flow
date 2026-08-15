@@ -10,7 +10,7 @@ import {
 
 const projectRoot = process.cwd();
 const outputPath = resolve(projectRoot, "dist/userscript/subbatch.user.js");
-const maintainedSourcePath = resolve(projectRoot, "dist/loop-bilibili-flow.user.js");
+const maintainedSourcePath = resolve(projectRoot, "dist/userscript/loop-bilibili-flow.user.js");
 
 const requiredMetadata = [
   "// @version      6.9.10",

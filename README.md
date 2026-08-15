@@ -20,13 +20,13 @@ pnpm verify:compat-dist
 
 | 产物 | 路径 |
 | --- | --- |
-| 本地安装 / 维护版主体 | `dist/loop-bilibili-flow.user.js` |
+| 本地安装 / 维护版主体 | `dist/userscript/loop-bilibili-flow.user.js` |
 | 正式完整功能 userscript | `dist/userscript/subbatch.user.js` |
 | 正式构建兼容别名 | `dist/userscript/subbatch.compat.user.js` |
 | 实验 pure API bundle | `dist/userscript/subbatch.pure.user.js` |
 
 ## Legacy 基线
 
-`legacy/Bili-SubBatch-v6.0.2.user.js` 是来自指定外部基线的只读 Golden Reference。其 SHA-256 记录在 `legacy/SHA256SUMS`。维护版主体是 `dist/loop-bilibili-flow.user.js`，本地油猴也读这个文件。
+`legacy/Bili-SubBatch-v6.0.2.user.js` 是来自指定外部基线的只读 Golden Reference。其 SHA-256 记录在 `legacy/SHA256SUMS`。维护版主体是 `dist/userscript/loop-bilibili-flow.user.js`，本地油猴也读这个文件。
 
 详见 `docs/migration/P4-userscript.md`。
