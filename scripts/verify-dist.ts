@@ -10,7 +10,8 @@ import {
 
 const projectRoot = process.cwd();
 const outputPath = resolve(projectRoot, "dist/userscript/subbatch.user.js");
-const maintainedSourcePath = resolve(projectRoot, "dist/userscript/loop-bilibili-flow.user.js");
+const flowAliasPath = resolve(projectRoot, "dist/userscript/loop-bilibili-flow.user.js");
+const maintainedSourcePath = resolve(projectRoot, "loop-bilibili.js");
 
 const requiredMetadata = [
   "// @version      6.9.13",
@@ -48,11 +49,15 @@ function hash(source: string): string {
 }
 
 async function verify(): Promise<void> {
-  const [output, maintainedSource, outputStats] = await Promise.all([
+  const [output, maintainedSource, flowAlias, outputStats] = await Promise.all([
     readFile(outputPath, "utf8"),
     readFile(maintainedSourcePath, "utf8"),
+    readFile(flowAliasPath, "utf8"),
     stat(outputPath),
   ]);
+  if (output !== flowAlias) {
+    throw new Error("loop-bilibili-flow.user.js must be byte-identical to subbatch.user.js");
+  }
   if (!output.startsWith("// ==UserScript==\n")) {
     throw new Error("Userscript metadata must be the first output bytes");
   }

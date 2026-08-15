@@ -20,13 +20,14 @@ const legacyPath = resolve(
   projectRoot,
   "legacy/Bili-SubBatch-v6.0.2.user.js",
 );
-const maintainedSourcePath = resolve(projectRoot, "dist/userscript/loop-bilibili-flow.user.js");
+const maintainedSourcePath = resolve(projectRoot, "loop-bilibili.js");
 const outputDirectory = resolve(projectRoot, "dist/userscript");
 const buildDirectory = resolve(outputDirectory, ".build");
 const bundlePath = resolve(buildDirectory, "subbatch.bundle.js");
 const productionOutputPath = resolve(outputDirectory, "subbatch.user.js");
 const pureOutputPath = resolve(outputDirectory, "subbatch.pure.user.js");
 const compatOutputPath = resolve(outputDirectory, "subbatch.compat.user.js");
+const flowAliasOutputPath = resolve(outputDirectory, "loop-bilibili-flow.user.js");
 const expectedLegacyHash =
   "370FE4B3D3A02D8091CFA40C4298BA3CC2A5F08794D0F4E010DCC0DED0806762";
 
@@ -130,10 +131,11 @@ async function buildCompatUserscript(): Promise<void> {
   await Promise.all([
     writeFile(productionOutputPath, output, "utf8"),
     writeFile(compatOutputPath, output, "utf8"),
+    writeFile(flowAliasOutputPath, output, "utf8"),
   ]);
   await rm(buildDirectory, { recursive: true, force: true });
   console.log(
-    `Built production ${productionOutputPath} and compat alias (${Buffer.byteLength(output)} bytes, sha256 ${sha256(output)})`,
+    `Built production ${productionOutputPath}, compat alias, and loop-bilibili-flow alias (${Buffer.byteLength(output)} bytes, sha256 ${sha256(output)})`,
   );
 }
 

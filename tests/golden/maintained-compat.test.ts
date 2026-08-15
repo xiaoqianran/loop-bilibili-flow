@@ -12,7 +12,7 @@ import {
 type UnknownFunction = (...args: any[]) => any;
 
 const maintainedSource = readFileSync(
-  fileURLToPath(new URL("../../dist/userscript/loop-bilibili-flow.user.js", import.meta.url)),
+  fileURLToPath(new URL("../../loop-bilibili.js", import.meta.url)),
   "utf8",
 );
 

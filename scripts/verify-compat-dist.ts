@@ -10,8 +10,9 @@ import {
 
 const projectRoot = process.cwd();
 const outputPath = resolve(projectRoot, "dist/userscript/subbatch.compat.user.js");
-const maintainedSourcePath = resolve(projectRoot, "dist/userscript/loop-bilibili-flow.user.js");
+const maintainedSourcePath = resolve(projectRoot, "loop-bilibili.js");
 const productionOutputPath = resolve(projectRoot, "dist/userscript/subbatch.user.js");
+const flowAliasPath = resolve(projectRoot, "dist/userscript/loop-bilibili-flow.user.js");
 
 const requiredMetadata = [
   "// @version      6.9.13",
@@ -36,14 +37,18 @@ function hash(source: string): string {
  * Verify compat userscript: monorepo bootstrap + byte-identical maintained body.
  */
 async function verify(): Promise<void> {
-  const [output, maintainedSource, productionOutput, outputStats] = await Promise.all([
+  const [output, maintainedSource, productionOutput, flowAlias, outputStats] = await Promise.all([
     readFile(outputPath, "utf8"),
     readFile(maintainedSourcePath, "utf8"),
     readFile(productionOutputPath, "utf8"),
+    readFile(flowAliasPath, "utf8"),
     stat(outputPath),
   ]);
   if (output !== productionOutput) {
     throw new Error("Compatibility alias must be byte-identical to the production userscript");
+  }
+  if (output !== flowAlias) {
+    throw new Error("loop-bilibili-flow.user.js must be byte-identical to the production userscript");
   }
   if (!output.startsWith("// ==UserScript==\n")) {
     throw new Error("Userscript metadata must be the first output bytes");

@@ -28,9 +28,2838 @@
 // @grant        GM_download
 // @run-at       document-idle
 // @license      MIT
-// @downloadURL https://update.greasyfork.org/scripts/589638/Bili%20SubBatch%20%28loop-bilibili%29.user.js
-// @updateURL https://update.greasyfork.org/scripts/589638/Bili%20SubBatch%20%28loop-bilibili%29.meta.js
 // ==/UserScript==
+
+// SubBatch Monorepo runtime bootstrap (6.9.13)
+// Build mode: compat — includes maintained full-feature behavior body
+var SubBatch = (function(exports) {
+  "use strict";
+  function extractBvid$1(text) {
+    if (!text) return "";
+    const value = String(text).trim();
+    if (!value) return "";
+    if (/^BV(?!id$)[A-Za-z0-9]+$/i.test(value)) return `BV${value.slice(2)}`;
+    const match = value.match(/BV(?!id\b)[A-Za-z0-9]+/i);
+    return match ? `BV${match[0].slice(2)}` : "";
+  }
+  function routeVideoKey$1(bvid, page) {
+    return `${String(bvid || "").toUpperCase()}:P${Math.max(1, Number(page) || 1)}`;
+  }
+  function asRecord(value) {
+    return value && typeof value === "object" ? value : null;
+  }
+  function readPositiveNumber(value) {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : void 0;
+  }
+  function callMethod(target, name) {
+    if (!target) return null;
+    const fn = target[name];
+    if (typeof fn !== "function") return null;
+    try {
+      return fn.call(target);
+    } catch {
+      return null;
+    }
+  }
+  function pageFromCid(pages, cid) {
+    const target = readPositiveNumber(cid);
+    if (!target || !Array.isArray(pages) || !pages.length) return void 0;
+    const index = pages.findIndex((part) => readPositiveNumber(part?.cid) === target);
+    return index >= 0 ? index + 1 : void 0;
+  }
+  function firstBvid(...values) {
+    for (const value of values) {
+      const id = extractBvid$1(value == null ? "" : String(value));
+      if (id) return id;
+    }
+    return "";
+  }
+  function extractPlayingVideoHint(runtime2) {
+    const root = asRecord(runtime2);
+    if (!root) return {};
+    const player = asRecord(root.player);
+    const manifest = asRecord(callMethod(player, "getManifest")) || asRecord(callMethod(player, "getPlayerInfo")) || asRecord(callMethod(player, "getVideoMessage"));
+    const state = asRecord(root.__INITIAL_STATE__);
+    const playinfo = asRecord(root.__playinfo__) || asRecord(root.__PLAYINFO__);
+    const playData = asRecord(playinfo?.data) || playinfo;
+    const videoData = asRecord(state?.videoData) || asRecord(state?.videoInfo);
+    const epInfo = asRecord(state?.epInfo);
+    const pages = Array.isArray(manifest?.pages) ? manifest.pages : Array.isArray(videoData?.pages) ? videoData.pages : Array.isArray(epInfo?.pages) ? epInfo.pages : null;
+    const hint = {};
+    const playerCid = readPositiveNumber(manifest?.cid) || readPositiveNumber(callMethod(player, "getCid")) || readPositiveNumber(player?.cid);
+    const playerBvid = firstBvid(manifest?.bvid, player?.bvid);
+    const playerAid = readPositiveNumber(manifest?.aid) || readPositiveNumber(player?.aid);
+    const playerPage = pageFromCid(pages, playerCid) || readPositiveNumber(manifest?.p) || readPositiveNumber(player?.p);
+    if (playerBvid) hint.bvid = playerBvid;
+    if (playerCid) hint.cid = playerCid;
+    if (playerAid) hint.aid = playerAid;
+    if (playerPage) hint.page = playerPage;
+    if (playerBvid || playerCid) hint.source = "player";
+    if (!hint.bvid) {
+      const bvid = firstBvid(playData?.bvid);
+      if (bvid) {
+        hint.bvid = bvid;
+        hint.source = hint.source || "playinfo";
+      }
+    }
+    if (!hint.cid) {
+      const cid = readPositiveNumber(playData?.cid);
+      if (cid) hint.cid = cid;
+    }
+    if (!hint.bvid) {
+      const bvid = firstBvid(videoData?.bvid, epInfo?.bvid, state?.bvid);
+      if (bvid) {
+        hint.bvid = bvid;
+        hint.source = hint.source || "initial-state";
+      }
+    }
+    if (!hint.cid) {
+      const cid = readPositiveNumber(videoData?.cid) || readPositiveNumber(epInfo?.cid) || readPositiveNumber(state?.cid);
+      if (cid) hint.cid = cid;
+    }
+    if (!hint.page) {
+      const page = pageFromCid(pages, hint.cid) || readPositiveNumber(state?.p) || readPositiveNumber(videoData?.p);
+      if (page) hint.page = page;
+    }
+    if (!hint.aid) {
+      const aid = readPositiveNumber(videoData?.aid) || readPositiveNumber(epInfo?.aid) || readPositiveNumber(playData?.aid);
+      if (aid) hint.aid = aid;
+    }
+    return hint;
+  }
+  function resolvePlayingVideoRef(input) {
+    const urlBvid = firstBvid(input.urlBvid, input.href);
+    const playingBvid = firstBvid(input.playing?.bvid);
+    const bvid = playingBvid || urlBvid;
+    if (!bvid) return null;
+    const urlPage = Math.max(1, Number(input.urlPage) || 1);
+    const playingPage = Math.max(0, Number(input.playing?.page) || 0);
+    const page = playingPage || urlPage;
+    const source = playingBvid && playingBvid.toUpperCase() !== urlBvid.toUpperCase() ? input.playing?.source || "player" : playingBvid ? input.playing?.source || "player" : "url";
+    const snapshot = {
+      bvid,
+      page,
+      key: routeVideoKey$1(bvid, page),
+      source
+    };
+    const cid = readPositiveNumber(input.playing?.cid);
+    if (cid) snapshot.cid = cid;
+    const aid = readPositiveNumber(input.playing?.aid);
+    if (aid) snapshot.aid = aid;
+    return snapshot;
+  }
+  function playingVideoChanged(prev, next) {
+    const prevKey = prev?.key || (prev?.bvid ? routeVideoKey$1(prev.bvid, prev.page) : "");
+    const nextKey = next?.key || (next?.bvid ? routeVideoKey$1(next.bvid, next.page) : "");
+    if (prevKey !== nextKey) return true;
+    const prevCid = readPositiveNumber(prev?.cid);
+    const nextCid = readPositiveNumber(next?.cid);
+    return !!(prevCid && nextCid && prevCid !== nextCid);
+  }
+  function extractBvid(text) {
+    if (!text) return "";
+    const value = String(text).trim();
+    if (!value) return "";
+    if (/^BV(?!id$)[A-Za-z0-9]+$/i.test(value)) return `BV${value.slice(2)}`;
+    const match = value.match(/BV(?!id\b)[A-Za-z0-9]+/i);
+    return match ? `BV${match[0].slice(2)}` : "";
+  }
+  function routeVideoKey(bvid, page) {
+    return `${String(bvid || "").toUpperCase()}:P${Math.max(1, Number(page) || 1)}`;
+  }
+  function pickHintIds(hints = {}) {
+    const out = {};
+    if (hints.mid) out.mid = hints.mid;
+    if (hints.season_id) out.season_id = hints.season_id;
+    if (hints.media_id) out.media_id = hints.media_id;
+    if (hints.bvid) out.bvid = hints.bvid;
+    if (hints.keyword) out.keyword = hints.keyword;
+    return out;
+  }
+  function extractUrlHints(href) {
+    const hints = {
+      bvid: "",
+      mid: "",
+      season_id: "",
+      media_id: "",
+      keyword: "",
+      fromVideoPath: false
+    };
+    let url;
+    try {
+      url = new URL(href);
+    } catch {
+      return hints;
+    }
+    hints.bvid = extractBvid(url.searchParams.get("bvid") || "") || extractBvid(url.pathname) || "";
+    hints.keyword = (url.searchParams.get("keyword") || "").trim();
+    const sid = url.searchParams.get("sid") || url.searchParams.get("season_id") || url.searchParams.get("business_id") || "";
+    if (sid && /^\d+$/.test(String(sid))) hints.season_id = String(sid);
+    const fid = url.searchParams.get("fid") || "";
+    if (fid && /^\d+$/.test(fid)) hints.media_id = fid;
+    if (/\/video\//i.test(url.pathname)) hints.fromVideoPath = true;
+    let match = url.href.match(/space\.bilibili\.com\/(\d+)/i);
+    if (match?.[1]) hints.mid = match[1];
+    match = url.pathname.match(/^\/list\/(\d+)/i);
+    if (match?.[1]) hints.mid = match[1];
+    match = url.pathname.match(/^\/(\d+)(?:\/|$)/);
+    if (match?.[1] && /space\.bilibili\.com/i.test(url.hostname)) {
+      hints.mid = match[1];
+    }
+    return hints;
+  }
+  function detectContext(href, hints = {}) {
+    let url;
+    try {
+      url = new URL(href);
+    } catch {
+      return { type: "unknown", source: "auto" };
+    }
+    const host2 = url.hostname.toLowerCase();
+    const path = url.pathname;
+    const merged = {
+      ...extractUrlHints(href),
+      ...Object.fromEntries(
+        Object.entries(hints).filter(([, value]) => value != null && value !== "")
+      )
+    };
+    if (host2 === "search.bilibili.com") {
+      if (/^\/(all|video)\/?$/i.test(path)) {
+        const keyword = (url.searchParams.get("keyword") || "").trim() || merged.keyword;
+        if (keyword) {
+          const allowed = /* @__PURE__ */ new Set([
+            "totalrank",
+            "click",
+            "pubdate",
+            "dm",
+            "stow",
+            "scores"
+          ]);
+          const order = (url.searchParams.get("order") || "totalrank").trim().toLowerCase();
+          return {
+            type: "search",
+            source: "auto",
+            keyword,
+            order: allowed.has(order) ? order : "totalrank",
+            page: Math.max(
+              1,
+              Number.parseInt(url.searchParams.get("page") || "1", 10) || 1
+            )
+          };
+        }
+      }
+      return { type: "unknown", source: "auto" };
+    }
+    if (host2 === "space.bilibili.com") {
+      let match = path.match(/^\/(\d+)\/lists\/(\d+)\/?$/i);
+      if (match?.[1] && match[2]) {
+        return {
+          type: "collection",
+          source: "auto",
+          mid: match[1],
+          season_id: match[2]
+        };
+      }
+      match = path.match(/^\/(\d+)\/channel\/collectiondetail\/?$/i);
+      if (match?.[1]) {
+        const seasonId = url.searchParams.get("sid") || url.searchParams.get("season_id") || merged.season_id;
+        if (seasonId && /^\d+$/.test(String(seasonId))) {
+          return {
+            type: "collection",
+            source: "auto",
+            mid: match[1],
+            season_id: String(seasonId)
+          };
+        }
+      }
+      match = path.match(/^\/(\d+)\/channel\/seriesdetail\/?$/i);
+      if (match?.[1]) {
+        const seasonId = url.searchParams.get("sid") || url.searchParams.get("season_id") || merged.season_id;
+        if (seasonId && /^\d+$/.test(String(seasonId))) {
+          return {
+            type: "collection",
+            source: "auto",
+            mid: match[1],
+            season_id: String(seasonId)
+          };
+        }
+      }
+      const mediaId = (url.searchParams.get("fid") || merged.media_id || "").trim();
+      if (mediaId && /^\d+$/.test(mediaId) && /\/favlist\/?$/i.test(path)) {
+        return { type: "favorite", source: "auto", media_id: mediaId };
+      }
+      match = path.match(/^\/(\d+)/);
+      if (match?.[1]) {
+        const segments = path.split("/").filter(Boolean);
+        const mid = match[1];
+        if (segments.length === 1 || segments.length === 2 && /^(video|upload|dynamic|favlist)?$/i.test(segments[1] || "") || segments.length === 3 && segments[1] === "upload" && segments[2] === "video") {
+          if (segments[1] && /^favlist$/i.test(segments[1]) && !mediaId) {
+            return { type: "user", source: "auto", mid, note: "favlist_no_fid" };
+          }
+          return { type: "user", source: "auto", mid };
+        }
+        return {
+          type: "user",
+          source: "auto",
+          mid,
+          note: "space_tab",
+          ...merged.bvid ? { bvid: merged.bvid } : {}
+        };
+      }
+      return { type: "unknown", source: "auto", ...pickHintIds(merged) };
+    }
+    if (/^(www\.)?bilibili\.com$/i.test(host2)) {
+      let match = path.match(/^\/medialist\/(?:detail|play)\/ml(\d+)\/?$/i);
+      if (match?.[1]) {
+        return { type: "favorite", source: "auto", media_id: match[1] };
+      }
+      match = path.match(/^\/list\/ml(\d+)\/?/i);
+      if (match?.[1]) {
+        return { type: "favorite", source: "auto", media_id: match[1] };
+      }
+      match = path.match(/^\/list\/(\d+)\/?/i);
+      if (match?.[1]) {
+        const mid = match[1];
+        const seasonId = url.searchParams.get("sid") || url.searchParams.get("season_id") || merged.season_id;
+        const bvid2 = extractBvid(url.searchParams.get("bvid") || "") || extractBvid(url.pathname) || merged.bvid || "";
+        const page = Math.max(
+          1,
+          Number.parseInt(url.searchParams.get("p") || "1", 10) || 1
+        );
+        if (seasonId && /^\d+$/.test(String(seasonId))) {
+          return {
+            type: "collection",
+            source: "auto",
+            mid,
+            season_id: String(seasonId),
+            ...bvid2 ? { bvid: bvid2 } : {},
+            page
+          };
+        }
+        if (bvid2) {
+          return {
+            type: "video",
+            source: "auto",
+            bvid: bvid2,
+            mid,
+            page,
+            note: "list_without_sid"
+          };
+        }
+        return { type: "user", source: "auto", mid, note: "list_mid_only" };
+      }
+      match = path.match(/^\/(?:fav|list)\/(?:ml)?(\d+)\/?$/i);
+      if (match?.[1] && !path.startsWith("/list/")) {
+        return { type: "favorite", source: "auto", media_id: match[1] };
+      }
+      if (/^\/favlist\/?$/i.test(path)) {
+        const fid = (url.searchParams.get("fid") || merged.media_id || "").trim();
+        if (fid && /^\d+$/.test(fid)) {
+          return { type: "favorite", source: "auto", media_id: fid };
+        }
+      }
+      const bvid = extractBvid(path) || extractBvid(href) || merged.bvid || "";
+      if (bvid && (/\/video\//i.test(path) || merged.fromVideoPath)) {
+        const page = Math.max(
+          1,
+          Number.parseInt(url.searchParams.get("p") || "1", 10) || 1
+        );
+        const ctx = {
+          type: "video",
+          source: "auto",
+          bvid,
+          page
+        };
+        if (merged.mid && merged.season_id) {
+          ctx.mid = merged.mid;
+          ctx.season_id = merged.season_id;
+          ctx.note = "video_has_ugc_season";
+        }
+        return ctx;
+      }
+      if (/\/list\//i.test(path)) {
+        const bvid2 = extractBvid(url.searchParams.get("bvid") || "") || extractBvid(url.pathname) || merged.bvid || "";
+        if (bvid2) {
+          return {
+            type: "video",
+            source: "auto",
+            bvid: bvid2,
+            page: Math.max(
+              1,
+              Number.parseInt(url.searchParams.get("p") || "1", 10) || 1
+            ),
+            ...merged.mid ? { mid: merged.mid } : {},
+            ...merged.season_id ? { season_id: merged.season_id } : {},
+            note: "list_fallback_video"
+          };
+        }
+      }
+    }
+    if (merged.bvid) {
+      return {
+        type: "video",
+        source: "auto",
+        bvid: merged.bvid,
+        page: 1,
+        ...merged.mid ? { mid: merged.mid } : {},
+        ...merged.season_id ? { season_id: merged.season_id } : {},
+        note: "dom_bvid"
+      };
+    }
+    return { type: "unknown", source: "auto", ...pickHintIds(merged) };
+  }
+  const SHIFT = [
+    7,
+    12,
+    17,
+    22,
+    7,
+    12,
+    17,
+    22,
+    7,
+    12,
+    17,
+    22,
+    7,
+    12,
+    17,
+    22,
+    5,
+    9,
+    14,
+    20,
+    5,
+    9,
+    14,
+    20,
+    5,
+    9,
+    14,
+    20,
+    5,
+    9,
+    14,
+    20,
+    4,
+    11,
+    16,
+    23,
+    4,
+    11,
+    16,
+    23,
+    4,
+    11,
+    16,
+    23,
+    4,
+    11,
+    16,
+    23,
+    6,
+    10,
+    15,
+    21,
+    6,
+    10,
+    15,
+    21,
+    6,
+    10,
+    15,
+    21,
+    6,
+    10,
+    15,
+    21
+  ];
+  const TABLE = Array.from(
+    { length: 64 },
+    (_, index) => Math.floor(Math.abs(Math.sin(index + 1)) * 4294967296) >>> 0
+  );
+  function rotateLeft(value, count) {
+    return (value << count | value >>> 32 - count) >>> 0;
+  }
+  function hex32(value) {
+    return [0, 8, 16, 24].map((shift) => (value >>> shift & 255).toString(16).padStart(2, "0")).join("");
+  }
+  function md5(input) {
+    const bytes = new TextEncoder().encode(input);
+    const paddedLength = Math.ceil((bytes.length + 9) / 64) * 64;
+    const padded = new Uint8Array(paddedLength);
+    padded.set(bytes);
+    padded[bytes.length] = 128;
+    const view = new DataView(padded.buffer);
+    const bitLength = BigInt(bytes.length) * 8n;
+    view.setUint32(paddedLength - 8, Number(bitLength & 0xffffffffn), true);
+    view.setUint32(paddedLength - 4, Number(bitLength >> 32n), true);
+    let a0 = 1732584193;
+    let b0 = 4023233417;
+    let c0 = 2562383102;
+    let d0 = 271733878;
+    for (let offset = 0; offset < paddedLength; offset += 64) {
+      const words = Array.from(
+        { length: 16 },
+        (_, index) => view.getUint32(offset + index * 4, true)
+      );
+      let a = a0;
+      let b = b0;
+      let c = c0;
+      let d = d0;
+      for (let index = 0; index < 64; index += 1) {
+        let f;
+        let wordIndex;
+        if (index < 16) {
+          f = b & c | ~b & d;
+          wordIndex = index;
+        } else if (index < 32) {
+          f = d & b | ~d & c;
+          wordIndex = (5 * index + 1) % 16;
+        } else if (index < 48) {
+          f = b ^ c ^ d;
+          wordIndex = (3 * index + 5) % 16;
+        } else {
+          f = c ^ (b | ~d);
+          wordIndex = 7 * index % 16;
+        }
+        const sum = a + f + (TABLE[index] ?? 0) + (words[wordIndex] ?? 0) >>> 0;
+        const nextB = b + rotateLeft(sum, SHIFT[index] ?? 0) >>> 0;
+        a = d;
+        d = c;
+        c = b;
+        b = nextB;
+      }
+      a0 = a0 + a >>> 0;
+      b0 = b0 + b >>> 0;
+      c0 = c0 + c >>> 0;
+      d0 = d0 + d >>> 0;
+    }
+    return hex32(a0) + hex32(b0) + hex32(c0) + hex32(d0);
+  }
+  const AI_SESSION_CACHE_PREFIX = "ai-session:";
+  const AI_SESSION_CACHE_TTL_MS = 30 * 24 * 60 * 6e4;
+  function aiSessionCacheTtlMs() {
+    return AI_SESSION_CACHE_TTL_MS;
+  }
+  function aiSessionCacheKey(routeKey) {
+    const key = String(routeKey || "").trim();
+    return key ? `${AI_SESSION_CACHE_PREFIX}${key}` : "";
+  }
+  function shouldRestoreAutomaticAiSession(options = {}) {
+    return !!options.automatic && !options.forcePreprocessOnce;
+  }
+  function isUsableAiSessionCache(payload) {
+    const runs = Array.isArray(payload?.runs) ? payload.runs : [];
+    return runs.some((run) => String(run?.raw || "").trim());
+  }
+  function serializeAiRunForCache(run) {
+    if (!run) return null;
+    const config = run.config && typeof run.config === "object" ? { ...run.config } : null;
+    if (config && "apiKey" in config) config.apiKey = "";
+    const snapshot = run.taskSnapshot;
+    return {
+      id: String(run.id || ""),
+      profileId: String(run.profileId || ""),
+      taskId: String(run.taskId || ""),
+      taskSnapshot: snapshot && typeof snapshot === "object" ? { ...snapshot, modelIds: [...snapshot.modelIds || []] } : null,
+      promptId: String(run.promptId || ""),
+      promptName: String(run.promptName || ""),
+      promptProfile: run.promptProfile && typeof run.promptProfile === "object" ? { ...run.promptProfile } : null,
+      config,
+      raw: String(run.raw || ""),
+      status: String(run.status || ""),
+      statusText: String(run.statusText || ""),
+      error: String(run.error || ""),
+      sourceBvids: Array.isArray(run.sourceBvids) ? [...run.sourceBvids] : [],
+      startedAt: Number(run.startedAt) || 0,
+      finishedAt: Number(run.finishedAt) || 0,
+      scrollTop: Number(run.scrollTop) || 0
+    };
+  }
+  function serializePreprocessRunForCache(run) {
+    if (!run) return null;
+    return {
+      raw: String(run.raw || ""),
+      preview: String(run.preview || ""),
+      text: String(run.text || run.raw || ""),
+      status: String(run.status || ""),
+      statusText: String(run.statusText || ""),
+      modelName: String(run.modelName || ""),
+      promptName: String(run.promptName || ""),
+      cacheHits: Number(run.cacheHits) || 0,
+      total: Number(run.total) || 0,
+      totalChunks: Number(run.totalChunks) || 0,
+      completedChunks: Number(run.completedChunks) || 0,
+      settings: run.settings && typeof run.settings === "object" ? { ...run.settings } : null
+    };
+  }
+  function sanitizeSessionInputForCache(input) {
+    if (!input || typeof input !== "object") return null;
+    const next = { ...input };
+    const preprocessConfig = next.preprocessConfig;
+    if (preprocessConfig && typeof preprocessConfig === "object") {
+      next.preprocessConfig = {
+        ...preprocessConfig,
+        apiKey: ""
+      };
+    }
+    return next;
+  }
+  function buildAiSessionCachePayload(input) {
+    return {
+      version: 1,
+      routeKey: String(input.routeKey || ""),
+      sessionInput: sanitizeSessionInputForCache(input.sessionInput),
+      preprocessRun: serializePreprocessRunForCache(input.preprocessRun),
+      runs: (input.runs || []).map((run) => serializeAiRunForCache(run)).filter((run) => !!run),
+      activeRunId: String(input.activeRunId || ""),
+      activeTaskId: String(input.activeTaskId || "")
+    };
+  }
+  function resolveRestoredActiveRunId(runs, savedActive, activeTaskId = "") {
+    const list = (runs || []).filter(Boolean);
+    if (savedActive) {
+      const match = list.find(
+        (run) => run.profileId === savedActive.profileId && run.taskId === savedActive.taskId
+      );
+      if (match?.id) return String(match.id);
+    }
+    if (activeTaskId) {
+      const match = list.find((run) => run.taskId === activeTaskId);
+      if (match?.id) return String(match.id);
+    }
+    return String(list[0]?.id || "");
+  }
+  function draftHydratedAiRun(saved) {
+    if (!saved) return null;
+    const raw = String(saved.raw || "");
+    const unfinished = saved.status === "running" || saved.status === "queued";
+    return {
+      profileId: String(saved.profileId || ""),
+      config: saved.config && typeof saved.config === "object" ? { ...saved.config } : null,
+      taskSnapshot: saved.taskSnapshot || null,
+      promptProfile: saved.promptProfile ?? null,
+      raw,
+      status: unfinished ? raw.trim() ? "done" : "stopped" : String(saved.status || "done"),
+      statusText: unfinished ? raw.trim() ? "缓存" : "缓存中无完整结果" : String(saved.statusText || "缓存"),
+      error: String(saved.error || ""),
+      sourceBvids: Array.isArray(saved.sourceBvids) ? [...saved.sourceBvids] : [],
+      startedAt: Number(saved.startedAt) || 0,
+      finishedAt: Number(saved.finishedAt) || 0,
+      scrollTop: Number(saved.scrollTop) || 0,
+      busy: false,
+      mermaidRepairing: false
+    };
+  }
+  function aiSessionInputHash(vars) {
+    return md5(String(vars?.processedSubtitle || vars?.subtitle || ""));
+  }
+  function aiRunIdentityKey(run, inputHash = "") {
+    const prompt = run?.promptProfile || {};
+    const promptSig = md5(`${prompt.systemPrompt || ""}
+---
+${prompt.userPromptTemplate || ""}`);
+    const config = run?.config || {};
+    const modelSig = md5(
+      `${config.baseUrl || ""}|${config.model || ""}|${config.temperature}|${config.maxTokens}`
+    );
+    return [
+      String(run?.taskId || ""),
+      String(run?.profileId || ""),
+      String(run?.promptId || prompt.id || ""),
+      promptSig,
+      modelSig,
+      String(inputHash || "")
+    ].join(":");
+  }
+  function plannedAiRunFromCache(cached) {
+    const prompt = cached.promptProfile && typeof cached.promptProfile === "object" ? cached.promptProfile : null;
+    const config = cached.config && typeof cached.config === "object" ? {
+      baseUrl: String(cached.config.baseUrl || ""),
+      model: String(cached.config.model || ""),
+      temperature: Number(cached.config.temperature),
+      maxTokens: Number(cached.config.maxTokens)
+    } : null;
+    const next = {
+      promptProfile: prompt,
+      config
+    };
+    if (cached.taskId !== void 0) next.taskId = cached.taskId;
+    if (cached.profileId !== void 0) next.profileId = cached.profileId;
+    if (cached.promptId !== void 0) next.promptId = cached.promptId;
+    return next;
+  }
+  function partitionPlannedAiRuns(planned, cachedRuns, inputHash = "") {
+    const byKey = /* @__PURE__ */ new Map();
+    for (const cached of cachedRuns || []) {
+      if (!cached || !String(cached.raw || "").trim()) continue;
+      byKey.set(aiRunIdentityKey(plannedAiRunFromCache(cached), inputHash), cached);
+    }
+    const reuse = [];
+    const generate = [];
+    const used = /* @__PURE__ */ new Set();
+    for (const plan of planned || []) {
+      const key = aiRunIdentityKey(plan, inputHash);
+      const cached = byKey.get(key);
+      if (cached && !used.has(key)) {
+        used.add(key);
+        reuse.push({ plan, cached });
+      } else {
+        generate.push(plan);
+      }
+    }
+    return { reuse, generate };
+  }
+  function shouldSkipPrepareForCachedSession(plannedCount, generateCount, reuseCount, options = {}) {
+    return !!options.automatic && !options.force && plannedCount > 0 && generateCount === 0 && reuseCount === plannedCount;
+  }
+  function draftHydratedPreprocessRun(saved) {
+    if (!saved) return null;
+    return {
+      raw: String(saved.raw || ""),
+      preview: String(saved.preview || ""),
+      text: String(saved.text || saved.raw || ""),
+      status: String(saved.status || "done"),
+      statusText: String(saved.statusText || "缓存"),
+      modelName: String(saved.modelName || ""),
+      promptName: String(saved.promptName || ""),
+      cacheHits: Number(saved.cacheHits) || 0,
+      total: Number(saved.total) || 0,
+      totalChunks: Number(saved.totalChunks) || 0,
+      completedChunks: Number(saved.completedChunks) || 0,
+      settings: saved.settings && typeof saved.settings === "object" ? { ...saved.settings } : null,
+      busy: false
+    };
+  }
+  const SHORTCUT_COMMANDS = [
+    {
+      id: "toggle-panel",
+      label: "召唤 / 隐藏面板",
+      defaultChord: "Ctrl+KeyB"
+    },
+    {
+      id: "open-processed",
+      label: "AI 处理字幕",
+      defaultChord: "Ctrl+Alt+Digit1"
+    },
+    {
+      id: "open-postprocess",
+      label: "后处理结果",
+      defaultChord: "Ctrl+Alt+Digit2"
+    },
+    {
+      id: "toggle-dock",
+      label: "悬浮 / 靠边",
+      defaultChord: "Ctrl+Alt+KeyD"
+    }
+  ];
+  function shortcutChordFromEvent(event) {
+    const code = String(event.code || "");
+    if (!code || /^(Control|Shift|Alt|Meta)(Left|Right)?$/.test(code)) return "";
+    const parts = [];
+    if (event.ctrlKey) parts.push("Ctrl");
+    if (event.altKey) parts.push("Alt");
+    if (event.shiftKey) parts.push("Shift");
+    if (event.metaKey) parts.push("Meta");
+    parts.push(code);
+    return parts.join("+");
+  }
+  function shortcutKeyLabel(code) {
+    const value = String(code || "");
+    if (/^Key[A-Z]$/.test(value)) return value.slice(3);
+    if (/^Digit[0-9]$/.test(value)) return value.slice(5);
+    if (/^Numpad[0-9]$/.test(value)) return `Num ${value.slice(6)}`;
+    const labels = {
+      Space: "Space",
+      Enter: "Enter",
+      Tab: "Tab",
+      Escape: "Esc",
+      Backspace: "Backspace",
+      Delete: "Delete",
+      ArrowUp: "↑",
+      ArrowDown: "↓",
+      ArrowLeft: "←",
+      ArrowRight: "→",
+      Minus: "-",
+      Equal: "=",
+      BracketLeft: "[",
+      BracketRight: "]",
+      Semicolon: ";",
+      Quote: "'",
+      Comma: ",",
+      Period: ".",
+      Slash: "/",
+      Backslash: "\\",
+      Backquote: "`",
+      Home: "Home",
+      End: "End",
+      PageUp: "PgUp",
+      PageDown: "PgDn",
+      Insert: "Insert"
+    };
+    if (labels[value]) return labels[value];
+    if (/^F\d{1,2}$/.test(value)) return value;
+    return value.replace(/^(Arrow|Numpad)/, "") || value;
+  }
+  function shortcutDisplayChord(chord) {
+    const parts = String(chord || "").split("+").filter(Boolean);
+    if (!parts.length) return "未绑定";
+    return parts.map(
+      (part) => ["Ctrl", "Alt", "Shift", "Meta"].includes(part) ? part : shortcutKeyLabel(part)
+    ).join(" + ");
+  }
+  function shortcutHasStrongModifier(chord) {
+    const parts = new Set(String(chord || "").split("+"));
+    return parts.has("Ctrl") || parts.has("Alt") || parts.has("Meta");
+  }
+  function shortcutEditableTarget(target) {
+    if (!target || typeof target.closest !== "function") return false;
+    return !!target.closest(
+      'input, textarea, select, [contenteditable="true"], [contenteditable="plaintext-only"]'
+    );
+  }
+  function shouldIgnoreShortcutEvent(event, options = {}) {
+    if (options.enabled === false) return true;
+    if (event.repeat || event.isComposing) return true;
+    if (event.getModifierState?.("AltGraph")) return true;
+    if (shortcutEditableTarget(event.target ?? null)) return true;
+    return false;
+  }
+  const MULTI_PART_TITLE_RE$2 = /^(.*)\s-\sP(\d+)【([\s\S]*)】\s*$/;
+  function cleanAuthor(author) {
+    const up = String(author || "").trim();
+    if (!up || up === "未知UP") return "";
+    return up;
+  }
+  function cleanParent(parent) {
+    return cleanAuthor(parent);
+  }
+  function buildUpFolderLabel(author, name) {
+    const up = cleanAuthor(author);
+    const n = String(name || "").trim() || "未命名";
+    if (!up) return n;
+    return `${up} ${n}`;
+  }
+  function buildCollectionShortUrl(mid, seasonId) {
+    const m = String(mid || "").trim();
+    const s = String(seasonId || "").trim();
+    if (!m || !s) return "";
+    return `space.bilibili.com/${m}/lists/${s}`;
+  }
+  function inferLibraryGroupType(item) {
+    const explicit = String(item?.groupType || "").trim();
+    if (explicit === "selection" || explicit === "collection" || explicit === "single") {
+      return explicit;
+    }
+    if (item?.collectionSid || item?.collectionName || item?.collectionShortUrl) {
+      return "collection";
+    }
+    const page = Math.max(1, Number(item?.page) || 1);
+    const title = String(item?.title || "");
+    if (page > 1 || item?.part || MULTI_PART_TITLE_RE$2.test(title)) return "selection";
+    return "single";
+  }
+  function resolveSpaceGroupKey(item) {
+    const mid = String(item?.spaceMid || "").trim();
+    if (mid) return `space:${mid}`;
+    const parent = cleanParent(item?.parentFolder);
+    if (parent) return `space:${parent}`;
+    return "";
+  }
+  function resolveLibraryGroupKey(item) {
+    if (item?.groupKey) return String(item.groupKey);
+    const kind = inferLibraryGroupType(item);
+    if (kind === "collection") {
+      const mid = item?.collectionMid;
+      const sid = item?.collectionSid;
+      if (mid && sid) return `collection:${mid}/${sid}`;
+      if (item?.collectionShortUrl) return `collection:${item.collectionShortUrl}`;
+    }
+    if (kind === "selection") {
+      const bvid2 = String(item?.bvid || "").trim();
+      if (bvid2) return `selection:${bvid2}`;
+    }
+    const bvid = String(item?.bvid || "unknown").trim();
+    const page = Math.max(1, Number(item?.page) || 1);
+    return `single:${bvid}:P${page}`;
+  }
+  const SPACE_LOOSE_VIDEOS_FOLDER = "视频";
+  function resolveSpaceLooseVideosKey(item) {
+    const mid = String(item?.spaceMid || "").trim();
+    if (mid) return `space-videos:${mid}`;
+    const parent = cleanParent(item?.parentFolder);
+    if (parent) return `space-videos:${parent}`;
+    return "space-videos:unknown";
+  }
+  function isSpaceLooseVideosKey(groupKey) {
+    return String(groupKey || "").startsWith("space-videos:");
+  }
+  function resolveLibraryFolderLabel(item) {
+    const existing = String(item?.groupFolder || "").trim();
+    const parent = cleanParent(item?.parentFolder);
+    if (existing && !/^未知UP\b/.test(existing)) {
+      if (parent && existing.startsWith(`${parent} `)) {
+        const leaf = existing.slice(parent.length + 1).trim();
+        if (leaf) return leaf;
+      }
+      return existing;
+    }
+    const kind = inferLibraryGroupType(item);
+    const author = item?.author;
+    if (kind === "collection") {
+      const name = String(item?.collectionName || "未命名合集").trim() || "未命名合集";
+      return parent ? name : buildUpFolderLabel(author, name);
+    }
+    if (kind === "selection") {
+      const title = String(item?.videoTitle || "").trim() || String(item?.title || "").replace(/\s-\sP\d+【[\s\S]*】\s*$/, "").trim() || item?.bvid || "未命名视频";
+      return parent ? title : buildUpFolderLabel(author, title);
+    }
+    if (parent) {
+      if (existing && !/^未知UP\b/.test(existing) && existing !== parent) {
+        if (existing.startsWith(`${parent} `)) {
+          const leaf = existing.slice(parent.length + 1).trim();
+          if (leaf) return leaf;
+        } else {
+          return existing;
+        }
+      }
+      return SPACE_LOOSE_VIDEOS_FOLDER;
+    }
+    return buildUpFolderLabel(author, item?.title || item?.bvid || "未命名视频");
+  }
+  function resolveFolderSegments(item) {
+    const parent = cleanParent(item?.parentFolder);
+    const kind = inferLibraryGroupType(item);
+    if (parent) {
+      if (kind === "collection") {
+        const name = String(item?.collectionName || "").trim() || String(item?.groupFolder || "").trim() || "未命名合集";
+        const leaf2 = name.startsWith(`${parent} `) ? name.slice(parent.length + 1).trim() || name : name;
+        return [parent, leaf2 || "未命名合集"];
+      }
+      if (kind === "selection") {
+        const title = String(item?.videoTitle || "").trim() || String(item?.groupFolder || "").trim() || String(item?.title || "").replace(/\s-\sP\d+【[\s\S]*】\s*$/, "").trim() || item?.bvid || "未命名视频";
+        const leaf2 = title.startsWith(`${parent} `) ? title.slice(parent.length + 1).trim() || title : title;
+        return [parent, leaf2 || "未命名视频"];
+      }
+      const loose = String(item?.groupFolder || "").trim() || SPACE_LOOSE_VIDEOS_FOLDER;
+      const leaf = loose.startsWith(`${parent} `) ? loose.slice(parent.length + 1).trim() || SPACE_LOOSE_VIDEOS_FOLDER : loose;
+      return [parent, leaf || SPACE_LOOSE_VIDEOS_FOLDER];
+    }
+    const label = resolveLibraryFolderLabel(item);
+    return label ? [label] : [];
+  }
+  function bvidMultiPageKeys(entries) {
+    const counts = /* @__PURE__ */ new Map();
+    for (const entry of entries) {
+      const bvid = String(entry.item?.bvid || "").trim();
+      if (!bvid) continue;
+      counts.set(bvid, (counts.get(bvid) || 0) + 1);
+    }
+    const multi = /* @__PURE__ */ new Set();
+    for (const [bvid, n] of counts) {
+      if (n > 1) multi.add(bvid);
+    }
+    return multi;
+  }
+  function collectionIdentityKey(item) {
+    if (!item) return "";
+    if (item.groupKey && String(item.groupKey).startsWith("collection:")) {
+      return String(item.groupKey);
+    }
+    const mid = item.collectionMid;
+    const sid = item.collectionSid;
+    if (mid && sid) return `collection:${mid}/${sid}`;
+    if (item.collectionShortUrl) return `collection:${item.collectionShortUrl}`;
+    const name = String(item.collectionName || "").trim();
+    if (name) {
+      const author = String(item.author || "").trim();
+      return `collection:name:${author}|${name}`;
+    }
+    return "";
+  }
+  function collectionFolderKeys(entries) {
+    const keys = /* @__PURE__ */ new Set();
+    for (const entry of entries) {
+      const item = entry.item;
+      const kind = inferLibraryGroupType(item);
+      const id = collectionIdentityKey(item);
+      if (id && (kind === "collection" || item?.collectionSid || item?.collectionName || item?.collectionShortUrl)) {
+        keys.add(id);
+      }
+    }
+    const counts = /* @__PURE__ */ new Map();
+    for (const entry of entries) {
+      const id = collectionIdentityKey(entry.item);
+      if (!id) continue;
+      counts.set(id, (counts.get(id) || 0) + 1);
+    }
+    for (const [id, n] of counts) {
+      if (n > 1) keys.add(id);
+    }
+    return keys;
+  }
+  function effectiveGroupType(item, multiBvids, collectionKeys) {
+    const kind = inferLibraryGroupType(item);
+    if (kind === "collection") return "collection";
+    if (kind === "selection") return "selection";
+    const colId = collectionIdentityKey(item);
+    if (colId && collectionKeys.has(colId)) return "collection";
+    const bvid = String(item?.bvid || "").trim();
+    if (bvid && multiBvids.has(bvid)) return "selection";
+    return "single";
+  }
+  function effectiveGroupKey(item, multiBvids, collectionKeys) {
+    if (item?.groupKey) return String(item.groupKey);
+    const kind = effectiveGroupType(item, multiBvids, collectionKeys);
+    if (kind === "collection") {
+      const id = collectionIdentityKey(item);
+      if (id) return id;
+    }
+    if (kind === "selection") {
+      const bvid = String(item?.bvid || "").trim();
+      if (bvid) return `selection:${bvid}`;
+    }
+    return resolveLibraryGroupKey(item);
+  }
+  function folderCheckState(selectedCount, total) {
+    if (selectedCount === 0) return "none";
+    if (selectedCount === total) return "all";
+    return "partial";
+  }
+  function isFolderedEntry(item, multiBvids, collectionKeys) {
+    const kind = effectiveGroupType(item, multiBvids, collectionKeys);
+    if (kind !== "single") return true;
+    if (isSpaceLooseVideosKey(item?.groupKey)) return true;
+    if (cleanParent(item?.parentFolder) && String(item?.groupFolder || "").trim() === SPACE_LOOSE_VIDEOS_FOLDER) {
+      return true;
+    }
+    return false;
+  }
+  function leafFolderKey(item, multiBvids, collectionKeys) {
+    if (isSpaceLooseVideosKey(item?.groupKey)) return String(item.groupKey);
+    if (cleanParent(item?.parentFolder) && String(item?.groupFolder || "").trim() === SPACE_LOOSE_VIDEOS_FOLDER && effectiveGroupType(item, multiBvids, collectionKeys) === "single") {
+      return resolveSpaceLooseVideosKey(item);
+    }
+    return effectiveGroupKey(item, multiBvids, collectionKeys);
+  }
+  function buildLeafRenderNodes(entries, collapsedMap, depth) {
+    const multiBvids = bvidMultiPageKeys(entries);
+    const collectionKeys = collectionFolderKeys(entries);
+    const folderBuckets = /* @__PURE__ */ new Map();
+    for (const entry of entries) {
+      if (!isFolderedEntry(entry.item, multiBvids, collectionKeys)) continue;
+      const key = leafFolderKey(entry.item, multiBvids, collectionKeys);
+      if (!folderBuckets.has(key)) folderBuckets.set(key, []);
+      folderBuckets.get(key).push(entry);
+    }
+    const nodes = [];
+    const emittedFolders = /* @__PURE__ */ new Set();
+    for (const entry of entries) {
+      if (!isFolderedEntry(entry.item, multiBvids, collectionKeys)) {
+        nodes.push({ type: "item", entry, depth });
+        continue;
+      }
+      const key = leafFolderKey(entry.item, multiBvids, collectionKeys);
+      if (emittedFolders.has(key)) continue;
+      emittedFolders.add(key);
+      const children = folderBuckets.get(key) || [entry];
+      const selectedCount = children.filter((c) => c.item.selected).length;
+      const total = children.length;
+      const labeled = children.map((c) => c.item).find((it) => it.groupFolder && !/^未知UP\b/.test(String(it.groupFolder))) || children.map((c) => c.item).find((it) => String(it.author || "").trim() && it.author !== "未知UP") || children[0]?.item;
+      const kind = effectiveGroupType(labeled, multiBvids, collectionKeys);
+      nodes.push({
+        type: "folder",
+        groupKey: key,
+        groupType: kind,
+        folderLabel: resolveLibraryFolderLabel(labeled),
+        collapsed: !!collapsedMap[key],
+        selectedCount,
+        total,
+        checkState: folderCheckState(selectedCount, total),
+        children,
+        depth
+      });
+    }
+    return nodes;
+  }
+  function buildLibraryRenderNodes(entries, collapsedMap = {}) {
+    const collapsed = collapsedMap || {};
+    const spaceBuckets = /* @__PURE__ */ new Map();
+    const flatEntries = [];
+    for (const entry of entries) {
+      const spaceKey = resolveSpaceGroupKey(entry.item);
+      const parent = cleanParent(entry.item?.parentFolder);
+      if (spaceKey && parent) {
+        if (!spaceBuckets.has(spaceKey)) {
+          spaceBuckets.set(spaceKey, { label: parent, entries: [] });
+        }
+        const bucket = spaceBuckets.get(spaceKey);
+        if (parent && parent !== "未知UP") bucket.label = parent;
+        bucket.entries.push(entry);
+      } else {
+        flatEntries.push(entry);
+      }
+    }
+    const spaceNodeByKey = /* @__PURE__ */ new Map();
+    for (const [spaceKey, bucket] of spaceBuckets) {
+      const nested = buildLeafRenderNodes(bucket.entries, collapsed, 1);
+      const selectedCount = bucket.entries.filter((c) => c.item.selected).length;
+      const total = bucket.entries.length;
+      spaceNodeByKey.set(spaceKey, {
+        type: "folder",
+        groupKey: spaceKey,
+        groupType: "space",
+        folderLabel: bucket.label,
+        collapsed: !!collapsed[spaceKey],
+        selectedCount,
+        total,
+        checkState: folderCheckState(selectedCount, total),
+        children: bucket.entries,
+        nodes: nested,
+        depth: 0
+      });
+    }
+    const flatNodes = buildLeafRenderNodes(flatEntries, collapsed, 0);
+    const nodes = [];
+    const emittedSpace = /* @__PURE__ */ new Set();
+    const emittedFlatKeys = /* @__PURE__ */ new Set();
+    const flatNodeKey = (node) => {
+      if (node.type === "item") return `item:${node.entry.index}`;
+      return `folder:${node.groupKey}`;
+    };
+    const flatOwnerByIndex = /* @__PURE__ */ new Map();
+    for (const node of flatNodes) {
+      if (node.type === "item") {
+        flatOwnerByIndex.set(node.entry.index, node);
+      } else {
+        for (const child of node.children) {
+          flatOwnerByIndex.set(child.index, node);
+        }
+      }
+    }
+    for (const entry of entries) {
+      const spaceKey = resolveSpaceGroupKey(entry.item);
+      if (spaceKey && cleanParent(entry.item?.parentFolder)) {
+        if (emittedSpace.has(spaceKey)) continue;
+        emittedSpace.add(spaceKey);
+        const spaceNode = spaceNodeByKey.get(spaceKey);
+        if (spaceNode) nodes.push(spaceNode);
+        continue;
+      }
+      const owner = flatOwnerByIndex.get(entry.index);
+      if (!owner) continue;
+      const k = flatNodeKey(owner);
+      if (emittedFlatKeys.has(k)) continue;
+      emittedFlatKeys.add(k);
+      nodes.push(owner);
+    }
+    return nodes;
+  }
+  function setGroupSelection(items, groupKey, selected) {
+    const key = String(groupKey || "").trim();
+    if (!key) return;
+    if (key.startsWith("space:") && !key.startsWith("space-videos:")) {
+      for (const item of items) {
+        if (resolveSpaceGroupKey(item) === key) item.selected = selected;
+      }
+      return;
+    }
+    if (isSpaceLooseVideosKey(key)) {
+      for (const item of items) {
+        if (String(item.groupKey || "") === key || resolveSpaceLooseVideosKey(item) === key) {
+          const kind = inferLibraryGroupType(item);
+          if (kind === "collection" || kind === "selection") continue;
+          if (item.collectionSid || item.collectionName) continue;
+          item.selected = selected;
+        }
+      }
+      return;
+    }
+    for (const item of items) {
+      if (resolveLibraryGroupKey(item) === key) item.selected = selected;
+      if (key.startsWith("selection:")) {
+        const bvid = key.slice("selection:".length);
+        if (bvid && String(item.bvid || "").trim() === bvid) {
+          item.selected = selected;
+        }
+      }
+    }
+  }
+  const SUBTITLE_EXPORT_ROOT = "loop-bilibili-subbatch";
+  const SUBTITLE_EXPORT_INDEX_NAME = "index.md";
+  const MULTI_PART_TITLE_RE$1 = /^(.*)\s-\sP(\d+)【([\s\S]*)】\s*$/;
+  function buildVideoShortUrl(bvid) {
+    const id = String(bvid || "").trim();
+    if (!id) return "";
+    const normalized = /^bv/i.test(id) ? `BV${id.slice(2)}` : id;
+    return `www.bilibili.com/video/${normalized}`;
+  }
+  function videoIndexKey(bvid) {
+    const id = String(bvid || "").trim();
+    if (!id) return "";
+    return /^bv/i.test(id) ? `BV${id.slice(2)}` : id;
+  }
+  function safePathSegment(name, maxLen = 120) {
+    const cleaned = String(name || "untitled").replace(/\|/g, "｜").replace(/\./g, "·").replace(/[\\/:*?"<>]+/g, "_").replace(/[？?！!]+/g, "＿").replace(/\s+/g, " ").trim().replace(/^\.+/, "").replace(/[.\s]+$/g, "").slice(0, Math.max(1, maxLen)).replace(/[.\s]+$/g, "");
+    return cleaned || "untitled";
+  }
+  function joinFileName(stem, ext) {
+    const cleanExt = String(ext || "txt").replace(/^\./, "").trim().toLowerCase() || "txt";
+    let base = safePathSegment(stem, 160);
+    base = base.replace(new RegExp(`[·._-]+${cleanExt}$`, "i"), "");
+    if (!base) base = "untitled";
+    return `${base}.${cleanExt}`;
+  }
+  function resolveSeriesTitle(item) {
+    if (item?.videoTitle) return String(item.videoTitle).trim();
+    const title = String(item?.title || "").trim();
+    const multi = title.match(MULTI_PART_TITLE_RE$1);
+    if (multi?.[1]?.trim()) return multi[1].trim();
+    const cut = title.search(/\s-\sP\d+【/);
+    if (cut > 0) return title.slice(0, cut).trim();
+    if (title) return title;
+    return String(item?.bvid || "untitled").trim() || "untitled";
+  }
+  function resolvePartLabel(item) {
+    const explicit = String(item?.part || "").trim();
+    if (explicit) return explicit;
+    const page = Math.max(1, Number(item?.page) || 1);
+    const fromPages = item?.pages?.[page - 1];
+    const pagePart = String(fromPages?.part || "").trim();
+    if (pagePart) return pagePart;
+    const title = String(item?.title || "").trim();
+    const multi = title.match(MULTI_PART_TITLE_RE$1);
+    if (multi?.[3] != null) return String(multi[3]).trim();
+    return "";
+  }
+  function resolveSubtitleFileStem(item) {
+    const kind = inferLibraryGroupType(item);
+    if (kind === "collection") {
+      const title = String(item?.title || "").trim();
+      if (title) return title;
+      return String(item?.bvid || "video").trim() || "video";
+    }
+    const parent = String(item?.parentFolder || "").trim();
+    if (kind === "single" && parent && parent !== "未知UP") {
+      const title = String(item?.title || "").trim();
+      if (title) return title;
+      return String(item?.bvid || "video").trim() || "video";
+    }
+    const page = Math.max(1, Number(item?.page) || 1);
+    const part = resolvePartLabel(item);
+    return part ? `P${page}${part}` : `P${page}`;
+  }
+  function resolveExportFolderName(item) {
+    const raw = resolveFolderSegments(item);
+    if (raw.length > 1) return raw.join(" / ");
+    if (raw.length === 1) return raw[0] || "";
+    const folder = String(item?.groupFolder || "").trim();
+    if (folder && !/^未知UP\b/.test(folder)) return folder;
+    return resolveLibraryFolderLabel(item);
+  }
+  function resolveExportFolderSegments(item) {
+    const raw = resolveFolderSegments(item);
+    return raw.map((s) => safePathSegment(s)).filter(Boolean);
+  }
+  function buildSubtitleExportRelativePath(item, ext) {
+    const segments = resolveExportFolderSegments(item);
+    const fileName = joinFileName(resolveSubtitleFileStem(item), ext);
+    if (!segments.length) return `${SUBTITLE_EXPORT_ROOT}/${fileName}`;
+    return `${SUBTITLE_EXPORT_ROOT}/${segments.join("/")}/${fileName}`;
+  }
+  function buildSubtitleExportIndexPath() {
+    return `${SUBTITLE_EXPORT_ROOT}/${SUBTITLE_EXPORT_INDEX_NAME}`;
+  }
+  function collectionIndexKey(shortUrl) {
+    return `collection:${String(shortUrl || "").trim()}`;
+  }
+  function parseExportIndexMd(content) {
+    const map = {};
+    for (const rawLine of String(content || "").split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#")) continue;
+      const col = line.match(
+        /^(.+?)\s+(space\.bilibili\.com\/\d+\/lists\/\d+)\s+(.+)$/i
+      );
+      if (col) {
+        const author = String(col[1] || "").trim();
+        const shortUrl = String(col[2] || "").trim();
+        const name = String(col[3] || "").trim();
+        map[collectionIndexKey(shortUrl)] = {
+          kind: "collection",
+          author,
+          shortUrl,
+          name
+        };
+        continue;
+      }
+      const vid = line.match(
+        /^(?:(.+?)\s+)?((?:www\.)?bilibili\.com\/video\/(BV[\w]+))\s+(.+)$/i
+      );
+      if (vid) {
+        const author = String(vid[1] || "").trim();
+        const bare = String(vid[2] || "").replace(/^https?:\/\//i, "");
+        const short = bare.startsWith("www.") ? bare : bare.toLowerCase().startsWith("bilibili.com") ? `www.${bare}` : bare;
+        const bvid = videoIndexKey(vid[3]);
+        const name = String(vid[4] || "").trim();
+        map[bvid] = {
+          kind: "video",
+          author,
+          shortUrl: short || buildVideoShortUrl(bvid),
+          bvid,
+          name
+        };
+        continue;
+      }
+      const m = line.match(/^(BV[\w]+)\s+(.+)$/i);
+      if (!m) continue;
+      const normalized = videoIndexKey(m[1] || "");
+      const legacyName = String(m[2] || "").trim();
+      map[normalized] = {
+        kind: "video",
+        author: "",
+        shortUrl: buildVideoShortUrl(normalized),
+        bvid: normalized,
+        name: legacyName
+      };
+    }
+    return map;
+  }
+  function upsertVideoExportIndex(map, author, bvid, videoTitle) {
+    const next = { ...map || {} };
+    const id = videoIndexKey(bvid);
+    if (!id) return next;
+    const up = String(author || "").trim();
+    const name = String(videoTitle || "").trim() || id;
+    const shortUrl = buildVideoShortUrl(id);
+    next[id] = {
+      kind: "video",
+      author: up,
+      shortUrl,
+      bvid: id,
+      name
+    };
+    return next;
+  }
+  function upsertExportIndexMap(map, bvid, seriesTitle, author) {
+    return upsertVideoExportIndex(map, author, bvid, seriesTitle);
+  }
+  function upsertCollectionExportIndex(map, author, shortUrl, collectionName) {
+    const next = { ...map || {} };
+    const url = String(shortUrl || "").trim();
+    if (!url) return next;
+    const up = String(author || "").trim();
+    const name = String(collectionName || "").trim() || "未命名合集";
+    next[collectionIndexKey(url)] = {
+      kind: "collection",
+      author: up,
+      shortUrl: url,
+      name
+    };
+    return next;
+  }
+  function renderExportIndexMd(map) {
+    const videoLines = [];
+    const colLines = [];
+    for (const [key, value] of Object.entries(map || {})) {
+      if (!value) continue;
+      if (typeof value === "string") {
+        const bvid = videoIndexKey(key);
+        const shortUrl = buildVideoShortUrl(bvid);
+        if (bvid && value) videoLines.push(`${shortUrl} ${value}`);
+        continue;
+      }
+      if (value.kind === "video" && value.bvid && value.name) {
+        const shortUrl = value.shortUrl || buildVideoShortUrl(value.bvid);
+        const up = String(value.author || "").trim();
+        videoLines.push(up ? `${up} ${shortUrl} ${value.name}` : `${shortUrl} ${value.name}`);
+        continue;
+      }
+      if (value.kind === "collection" && value.shortUrl && value.name) {
+        const up = String(value.author || "").trim();
+        colLines.push(up ? `${up} ${value.shortUrl} ${value.name}` : `${value.shortUrl} ${value.name}`);
+      }
+    }
+    videoLines.sort((a, b) => a.localeCompare(b, "en"));
+    colLines.sort((a, b) => a.localeCompare(b, "zh"));
+    const lines = [...videoLines, ...colLines];
+    if (!lines.length) return "";
+    return `${lines.join("\n")}
+`;
+  }
+  function normalizeExportItem(item, peers = []) {
+    const base = { ...item || {} };
+    const list = peers || [];
+    const key = String(base.groupKey || "");
+    const sameGroup = key ? list.filter((p) => String(p?.groupKey || "") === key) : list.filter((p) => String(p?.bvid || "") === String(base.bvid || "") && base.bvid);
+    const peerAuthor = sameGroup.map((p) => String(p?.author || "").trim()).find((a) => a && a !== "未知UP");
+    const author = String(base.author || "").trim() && base.author !== "未知UP" ? String(base.author).trim() : peerAuthor || String(base.author || "").trim();
+    if (author) base.author = author;
+    if (!String(base.parentFolder || "").trim() || base.parentFolder === "未知UP") {
+      const peerParent = sameGroup.map((p) => String(p?.parentFolder || "").trim()).find((p) => p && p !== "未知UP");
+      if (peerParent) base.parentFolder = peerParent;
+    }
+    if (base.spaceMid == null || base.spaceMid === "") {
+      const peerMid = sameGroup.map((p) => p?.spaceMid).find((m) => m != null && m !== "");
+      if (peerMid != null && peerMid !== "") base.spaceMid = peerMid;
+    }
+    const peerFolder = sameGroup.map((p) => String(p?.groupFolder || "").trim()).find((f) => f && !/^未知UP\b/.test(f));
+    if (peerFolder) base.groupFolder = peerFolder;
+    else if (!base.groupFolder || /^未知UP\b/.test(String(base.groupFolder))) {
+      base.groupFolder = resolveLibraryFolderLabel(base);
+    }
+    return base;
+  }
+  function resolveIndexVideoTitle(item) {
+    const videoTitle = String(item?.videoTitle || "").trim();
+    if (videoTitle) return videoTitle;
+    return resolveSeriesTitle(item);
+  }
+  function upsertIndexForExportItem(map, item) {
+    const normalized = normalizeExportItem(item, item ? [item] : []);
+    const kind = inferLibraryGroupType(normalized);
+    if (kind === "collection") {
+      const shortUrl = normalized.collectionShortUrl || buildCollectionShortUrl(normalized.collectionMid, normalized.collectionSid);
+      return upsertCollectionExportIndex(
+        map,
+        normalized.author,
+        shortUrl,
+        normalized.collectionName || resolveSeriesTitle(normalized)
+      );
+    }
+    return upsertVideoExportIndex(
+      map,
+      normalized.author,
+      normalized.bvid,
+      resolveIndexVideoTitle(normalized)
+    );
+  }
+  function describeSubtitleExport(item, ext = "txt") {
+    const normalized = normalizeExportItem(item, item ? [item] : []);
+    const seriesTitle = resolveExportFolderName(normalized);
+    const fileStem = resolveSubtitleFileStem(normalized);
+    const folderSegments = resolveExportFolderSegments(normalized);
+    return {
+      bvid: String(normalized.bvid || "").trim(),
+      seriesTitle,
+      fileStem,
+      folderSegment: folderSegments.join("/") || safePathSegment(seriesTitle),
+      folderSegments,
+      fileSegment: safePathSegment(fileStem, 160),
+      relativePath: buildSubtitleExportRelativePath(normalized, ext),
+      indexPath: buildSubtitleExportIndexPath(),
+      groupType: inferLibraryGroupType(normalized)
+    };
+  }
+  function slugFolioHeading(text, index) {
+    const base = String(text || "").toLowerCase().replace(/[^\u4e00-\u9fff\w]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+    return `folio-${base || "s"}-${Math.max(0, Number(index) || 0) + 1}`;
+  }
+  function normalizeFolioHeadingLevel(value) {
+    return Number(value) >= 3 ? 3 : 2;
+  }
+  function buildFolioOutline(headings) {
+    const roots = [];
+    let currentChapter = null;
+    for (const heading of headings || []) {
+      if (!heading) continue;
+      const text = String(heading.text || "").replace(/\s+/g, " ").trim() || "未命名";
+      const id = String(heading.id || "").trim();
+      if (!id) continue;
+      const node = {
+        id,
+        level: normalizeFolioHeadingLevel(heading.level),
+        text,
+        children: []
+      };
+      if (node.level === 2 || !currentChapter) {
+        node.level = 2;
+        roots.push(node);
+        currentChapter = node;
+        continue;
+      }
+      currentChapter.children.push(node);
+    }
+    return roots;
+  }
+  function flattenFolioOutline(nodes) {
+    const out = [];
+    for (const node of nodes || []) {
+      out.push(node);
+      if (node.children?.length) out.push(...flattenFolioOutline(node.children));
+    }
+    return out;
+  }
+  function countFolioOutline(nodes) {
+    const flat = flattenFolioOutline(nodes);
+    return {
+      chapters: (nodes || []).length,
+      sections: flat.length
+    };
+  }
+  function formatFolioChapterIndex(index) {
+    return String(Math.max(1, Number(index) || 1)).padStart(2, "0");
+  }
+  function folioOutlineSummary(stats) {
+    const chapters = Math.max(0, Number(stats?.chapters) || 0);
+    const sections = Math.max(0, Number(stats?.sections) || 0);
+    if (!chapters) return "暂无章节";
+    if (sections <= chapters) return `${chapters} 章`;
+    return `${chapters} 章 · ${sections} 节`;
+  }
+  function parseKnowledgeOutput(raw) {
+    const source = String(raw || "");
+    const match = source.match(/<suggestions>([\s\S]*?)(?:<\/suggestions>|$)/i);
+    const answer = source.replace(/\n?<suggestions>[\s\S]*$/i, "").trim();
+    const suggestions = match ? (match[1] ?? "").split(/\r?\n/).map((item) => item.replace(/^\s*[-*\d.)]+\s*/, "").trim()).filter(Boolean).slice(0, 4) : [];
+    return { answer, suggestions };
+  }
+  function knowledgeBranchContext(parentNode, ancestors = []) {
+    if (!parentNode) return "（这是该锚点下的新分支）";
+    return [...ancestors, parentNode].slice(-6).map((node, index) => {
+      const answer = String(node.answer || "").trim().replace(/\s+/g, " ").slice(0, 1800);
+      return `${index + 1}. 问题：${node.question}
+   回答摘要：${answer || "（尚无回答）"}`;
+    }).join("\n");
+  }
+  const MULTI_PART_TITLE_RE = /^(.*)\s-\sP(\d+)【([\s\S]*)】\s*$/;
+  function cleanUpName(author) {
+    const up = String(author || "").trim();
+    if (!up || up === "未知UP") return "";
+    return up;
+  }
+  function inheritParentFolder(items, explicit) {
+    const fromMeta = cleanUpName(explicit);
+    if (fromMeta) return fromMeta;
+    for (const it of items) {
+      const p = cleanUpName(it?.parentFolder);
+      if (p) return p;
+    }
+    return "";
+  }
+  function resolveSeriesTitleLocal(item) {
+    if (item?.videoTitle) return String(item.videoTitle).trim();
+    const title = String(item?.title || "").trim();
+    const multi = title.match(MULTI_PART_TITLE_RE);
+    if (multi?.[1]?.trim()) return multi[1].trim();
+    const cut = title.search(/\s-\sP\d+【/);
+    if (cut > 0) return title.slice(0, cut).trim();
+    if (title) return title;
+    return String(item?.bvid || "untitled").trim() || "untitled";
+  }
+  function attachUserSpaceGroupMeta(items, meta = {}) {
+    const list = items || [];
+    const author = cleanUpName(meta.author) || cleanUpName(list.find((it) => cleanUpName(it?.author))?.author) || "";
+    const mid = String(meta.mid || "").trim();
+    if (!author && !mid) return list.map((it) => ({ ...it }));
+    const parentFolder = author || String(list[0]?.parentFolder || "").trim();
+    return list.map((it) => {
+      const itemAuthor = cleanUpName(it.author) || author;
+      return {
+        ...it,
+        author: itemAuthor || it.author,
+        parentFolder: parentFolder || it.parentFolder,
+        spaceMid: mid || it.spaceMid
+      };
+    });
+  }
+  function attachSpaceLooseVideosMeta(items) {
+    const list = items || [];
+    return list.map((it) => {
+      const parent = cleanUpName(it.parentFolder);
+      if (!parent) return { ...it };
+      const kind = inferLibraryGroupType(it);
+      if (kind === "collection" || kind === "selection") return { ...it };
+      if (it.collectionSid || it.collectionName || it.collectionShortUrl) return { ...it };
+      return {
+        ...it,
+        groupType: "single",
+        groupKey: resolveSpaceLooseVideosKey(it),
+        groupFolder: SPACE_LOOSE_VIDEOS_FOLDER
+      };
+    });
+  }
+  function attachSelectionGroupMeta(items, meta = {}) {
+    const list = items || [];
+    const author = String(meta.author || list[0]?.author || "").trim();
+    const videoTitle = String(meta.title || "").trim() || resolveSeriesTitleLocal(list[0]) || "";
+    const bvid = String(list[0]?.bvid || "").trim();
+    const groupKey = bvid ? `selection:${bvid}` : "selection:unknown";
+    const parentFolder = inheritParentFolder(list, meta.parentFolder);
+    const groupFolder = parentFolder ? videoTitle || "未命名视频" : buildUpFolderLabel(author, videoTitle);
+    return list.map((it) => ({
+      ...it,
+      author: String(it.author || "").trim() || author,
+      videoTitle,
+      groupType: "selection",
+      groupKey,
+      groupFolder,
+      parentFolder: parentFolder || it.parentFolder,
+      spaceMid: it.spaceMid
+    }));
+  }
+  function attachCollectionGroupMeta(items, meta = {}, ctx = {}) {
+    const list = items || [];
+    const mid = String(meta.mid || ctx.mid || "").trim();
+    const sid = String(meta.season_id || ctx.season_id || "").trim();
+    const shortUrl = buildCollectionShortUrl(mid, sid);
+    const collectionName = String(meta.name || meta.title || ctx.collectionTitleHint || "未命名合集").trim();
+    const author = String(meta.author || "").trim() || String(ctx.authorHint || "").trim() || String(list[0]?.author || "").trim() || "";
+    const groupKey = mid && sid ? `collection:${mid}/${sid}` : `collection:${shortUrl || collectionName}`;
+    const parentFolder = inheritParentFolder(list, meta.parentFolder || ctx.parentFolder);
+    const groupFolder = parentFolder ? collectionName || "未命名合集" : buildUpFolderLabel(author, collectionName);
+    return list.map((it) => ({
+      ...it,
+      author: String(it.author || "").trim() || author,
+      groupType: "collection",
+      groupKey,
+      groupFolder,
+      collectionName,
+      collectionMid: mid,
+      collectionSid: sid,
+      collectionShortUrl: shortUrl,
+      parentFolder: parentFolder || it.parentFolder,
+      spaceMid: it.spaceMid
+    }));
+  }
+  function applyUgcSeasonToItem(item, view) {
+    if (!item) return item;
+    if (!view?.ugc_season?.id) return item;
+    const season = view.ugc_season;
+    const mid = season.mid || view.owner?.mid;
+    const sid = season.id;
+    if (!mid || !sid) return item;
+    const author = String(item.author || view.owner?.name || "").trim();
+    const collectionName = String(season.title || item.collectionName || "未命名合集").trim();
+    const shortUrl = buildCollectionShortUrl(mid, sid);
+    const groupKey = `collection:${mid}/${sid}`;
+    const parentFolder = cleanUpName(item.parentFolder);
+    const groupFolder = parentFolder ? collectionName : buildUpFolderLabel(author, collectionName);
+    return {
+      ...item,
+      author: author || item.author,
+      groupType: "collection",
+      groupKey,
+      groupFolder,
+      collectionName,
+      collectionMid: String(mid),
+      collectionSid: String(sid),
+      collectionShortUrl: shortUrl,
+      parentFolder: parentFolder || item.parentFolder
+    };
+  }
+  function applyUgcSeasonToItems(items, view) {
+    return (items || []).map((it) => applyUgcSeasonToItem(it, view));
+  }
+  function normalizeBvidKey(bvid) {
+    const id = String(bvid || "").trim();
+    if (!id) return "";
+    const body = /^bv/i.test(id) ? id.slice(2) : id;
+    return `BV${body.toUpperCase()}`;
+  }
+  function applySpaceCollectionMembership(items, collections) {
+    const list = items || [];
+    const cols = collections || [];
+    if (!list.length || !cols.length) return list.map((it) => ({ ...it }));
+    const byBvid = /* @__PURE__ */ new Map();
+    for (const col of cols) {
+      const sid = String(col?.season_id || "").trim();
+      if (!sid) continue;
+      for (const raw of col.bvids || []) {
+        const key = normalizeBvidKey(raw);
+        if (!key || byBvid.has(key)) continue;
+        byBvid.set(key, col);
+      }
+    }
+    if (!byBvid.size) return list.map((it) => ({ ...it }));
+    return list.map((it) => {
+      const key = normalizeBvidKey(it.bvid);
+      const col = key ? byBvid.get(key) : void 0;
+      if (!col) return { ...it };
+      const stamped = attachCollectionGroupMeta([it], {
+        mid: col.mid ?? "",
+        season_id: col.season_id ?? "",
+        name: col.name || col.title || "未命名合集",
+        ...col.author || it.author ? { author: col.author || it.author } : {},
+        ...it.parentFolder ? { parentFolder: it.parentFolder } : {}
+      });
+      return stamped[0] || { ...it };
+    });
+  }
+  function countSpaceCollectionMatches(items, collections) {
+    const list = items || [];
+    const cols = (collections || []).filter((c) => String(c?.season_id || "").trim());
+    if (!list.length || !cols.length) return { matched: 0, collectionCount: cols.length };
+    const memberKeys = /* @__PURE__ */ new Set();
+    for (const col of cols) {
+      for (const raw of col.bvids || []) {
+        const key = normalizeBvidKey(raw);
+        if (key) memberKeys.add(key);
+      }
+    }
+    let matched = 0;
+    for (const it of list) {
+      const key = normalizeBvidKey(it.bvid);
+      if (key && memberKeys.has(key)) matched += 1;
+    }
+    return { matched, collectionCount: cols.length };
+  }
+  function buildGroupMetaPatches(normalized) {
+    const key = String(normalized?.groupKey || "").trim();
+    if (!key) return null;
+    const author = String(normalized?.author || "").trim();
+    const groupFolder = String(normalized?.groupFolder || "").trim();
+    if (!author && !groupFolder) return null;
+    const patch = { groupKey: key };
+    if (author && author !== "未知UP") patch.author = author;
+    if (groupFolder && !/^未知UP\b/.test(groupFolder)) patch.groupFolder = groupFolder;
+    if (!patch.author && !patch.groupFolder) return null;
+    return patch;
+  }
+  function applyGroupMetaPatchToItems(items, patch) {
+    const list = items || [];
+    if (!patch?.groupKey) return list.slice();
+    return list.map((row) => {
+      if (String(row.groupKey || "") !== patch.groupKey) return row;
+      const next = { ...row };
+      if (patch.author && (!row.author || row.author === "未知UP")) next.author = patch.author;
+      if (patch.groupFolder && (!row.groupFolder || /^未知UP\b/.test(String(row.groupFolder)))) {
+        next.groupFolder = patch.groupFolder;
+      }
+      return next;
+    });
+  }
+  function mergeGroupFields(target, source) {
+    if (!source) return target;
+    const next = { ...target };
+    if (source.groupType) next.groupType = source.groupType;
+    if (source.groupKey) next.groupKey = source.groupKey;
+    if (source.groupFolder) next.groupFolder = source.groupFolder;
+    if (source.parentFolder) next.parentFolder = source.parentFolder;
+    if (source.spaceMid != null && source.spaceMid !== "") next.spaceMid = source.spaceMid;
+    if (source.collectionName) next.collectionName = source.collectionName;
+    if (source.collectionMid != null) next.collectionMid = source.collectionMid;
+    if (source.collectionSid != null) next.collectionSid = source.collectionSid;
+    if (source.collectionShortUrl) next.collectionShortUrl = source.collectionShortUrl;
+    if (source.videoTitle) next.videoTitle = source.videoTitle;
+    if (source.author && (!target.author || target.author === "未知UP")) {
+      next.author = source.author;
+    }
+    return next;
+  }
+  function refreshGroupFolder(item) {
+    const folder = String(item.groupFolder || "").trim();
+    if (folder && !/^未知UP\b/.test(folder)) return item;
+    return { ...item, groupFolder: resolveLibraryFolderLabel(item) };
+  }
+  function suggestCaptureMode(item) {
+    if (!item) return "auto";
+    if (item.groupType === "collection" || item.collectionSid || item.collectionShortUrl || item.collectionName) {
+      return "collection";
+    }
+    const pageCount = Array.isArray(item.pages) ? item.pages.length : 0;
+    if (item.groupType === "selection" || pageCount > 1) {
+      return "selection";
+    }
+    return "auto";
+  }
+  function stripMermaidTimestampCitations(code) {
+    return String(code || "").replace(
+      /[ \t]*\[\s*(?:BV(?:号|[A-Za-z0-9]+)?\s+)?P(?:号|\d+)\s+(?:mm:ss|\d{1,2}:\d{2}(?::\d{2})?)\s*\]/gi,
+      ""
+    ).replace(
+      /[ \t]*\[\s*BV(?:号|[A-Za-z0-9]+)?\s+(?:mm:ss|\d{1,2}:\d{2}(?::\d{2})?)\s*\]/gi,
+      ""
+    ).replace(/[ \t]+(?=\r?\n|$)/g, "").trim();
+  }
+  function sanitizeMermaidTimestampCitationsInMarkdown(markdown) {
+    return String(markdown || "").replace(
+      /```mermaid\s*\r?\n([\s\S]*?)```/gi,
+      (_, code) => `\`\`\`mermaid
+${stripMermaidTimestampCitations(code)}
+\`\`\``
+    );
+  }
+  function mermaidField(value) {
+    return String(value ?? "").trim();
+  }
+  function isReadyMermaidModel(model) {
+    return !!(mermaidField(model?.apiKey) && mermaidField(model?.baseUrl) && mermaidField(model?.model));
+  }
+  function mergeMermaidRepairModel(base, fill) {
+    const next = {};
+    const id = mermaidField(base?.id) || mermaidField(fill?.id);
+    const name = mermaidField(base?.name) || mermaidField(fill?.name);
+    const baseUrl = mermaidField(base?.baseUrl) || mermaidField(fill?.baseUrl);
+    const model = mermaidField(base?.model) || mermaidField(fill?.model);
+    const apiKey = mermaidField(base?.apiKey) || mermaidField(fill?.apiKey);
+    if (id) next.id = id;
+    if (name) next.name = name;
+    if (baseUrl) next.baseUrl = baseUrl;
+    if (model) next.model = model;
+    if (apiKey) next.apiKey = apiKey;
+    const temperature = base?.temperature ?? fill?.temperature;
+    if (temperature !== void 0 && Number.isFinite(Number(temperature))) {
+      next.temperature = Number(temperature);
+    }
+    const maxTokens = base?.maxTokens ?? fill?.maxTokens;
+    if (maxTokens !== void 0 && Number.isFinite(Number(maxTokens))) {
+      next.maxTokens = Number(maxTokens);
+    }
+    const stream = base?.stream ?? fill?.stream;
+    if (stream !== void 0) next.stream = !!stream;
+    return next;
+  }
+  function missingMermaidFields(model) {
+    const missing = [];
+    if (!mermaidField(model?.apiKey)) missing.push("apiKey");
+    if (!mermaidField(model?.baseUrl)) missing.push("baseUrl");
+    if (!mermaidField(model?.model)) missing.push("model");
+    return missing;
+  }
+  function resolveMermaidRepairConfig(input = {}) {
+    const profiles = (input.profiles || []).filter(
+      (item) => !!item && typeof item === "object"
+    );
+    const enabledReady = profiles.filter((item) => item.enabled !== false && isReadyMermaidModel(item));
+    const anyReady = profiles.filter((item) => isReadyMermaidModel(item));
+    const readyProfiles = enabledReady.length ? enabledReady : anyReady;
+    const run = input.runConfig && typeof input.runConfig === "object" ? input.runConfig : null;
+    const profileId = mermaidField(input.profileId) || mermaidField(run?.id);
+    const preferredId = mermaidField(input.preferredProfileId);
+    const matched = preferredId && profiles.find((item) => item.id === preferredId) || profileId && profiles.find((item) => item.id === profileId) || null;
+    let merged = mergeMermaidRepairModel(run, matched);
+    let source = "none";
+    if (isReadyMermaidModel(merged)) {
+      source = mermaidField(run?.apiKey) ? "run" : matched ? "profile" : "run";
+    } else if (readyProfiles[0]) {
+      const preferred = preferredId ? readyProfiles.find((item) => item.id === preferredId) : void 0;
+      merged = mergeMermaidRepairModel(preferred || readyProfiles[0], null);
+      source = "fallback";
+    }
+    const missing = missingMermaidFields(merged);
+    if (missing.length) {
+      return { config: Object.keys(merged).length ? merged : null, source: "none", missing, readyProfiles };
+    }
+    return { config: merged, source, missing: [], readyProfiles };
+  }
+  function mermaidRepairSetupHint(missing) {
+    const list = Array.isArray(missing) ? missing : [];
+    if (list.includes("apiKey") && (list.includes("baseUrl") || list.includes("model"))) {
+      return "还没有可用的 LLM。在这张图里填写 Base URL / API Key / Model，或打开 设置 → LLM。";
+    }
+    if (list.includes("apiKey")) return "这个模型还没有 API Key。在这张图里填写，或打开 设置 → LLM。";
+    if (list.includes("baseUrl")) return "这个模型还没有 Base URL。在这张图里填写，或打开 设置 → LLM。";
+    if (list.includes("model")) return "这个模型还没有 Model 名。在这张图里填写，或打开 设置 → LLM。";
+    return "还没有可用的 LLM。打开 设置 → LLM 配好后再重绘。";
+  }
+  function replaceMermaidBlockAt(markdown, targetIdx, nextCode) {
+    let current = -1;
+    let replaced = false;
+    const value = String(markdown || "").replace(
+      /```mermaid\s*\r?\n([\s\S]*?)```/gi,
+      (full) => {
+        current += 1;
+        if (current !== Number(targetIdx)) return full;
+        replaced = true;
+        return `\`\`\`mermaid
+${stripMermaidTimestampCitations(nextCode)}
+\`\`\``;
+      }
+    );
+    return { value, replaced };
+  }
+  function parseSeconds(value) {
+    if (value == null) return 0;
+    if (typeof value === "number") return value;
+    const parsed = Number(String(value).trim().replace(/s$/i, ""));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  function toCues(body) {
+    return (body ?? []).map((cue, position) => {
+      const from = Number(cue.from) || 0;
+      const to = Number(cue.to) || 0;
+      const sid = cue.sid == null ? Number.NaN : Number(cue.sid);
+      return {
+        index: Number.isFinite(sid) ? sid : position + 1,
+        from: `${from.toFixed(2)}s`,
+        to: `${to.toFixed(2)}s`,
+        from_sec: from,
+        to_sec: to,
+        content: String(cue.content || "")
+      };
+    });
+  }
+  function formatSrtTimestamp(seconds) {
+    const totalMs = Math.round(Math.max(0, seconds) * 1e3);
+    const hours = Math.floor(totalMs / 36e5);
+    const minuteRemainder = totalMs % 36e5;
+    const minutes = Math.floor(minuteRemainder / 6e4);
+    const secondRemainder = minuteRemainder % 6e4;
+    const secs = Math.floor(secondRemainder / 1e3);
+    const milliseconds = secondRemainder % 1e3;
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")},${String(milliseconds).padStart(3, "0")}`;
+  }
+  function cuesToSrt(cues) {
+    const lines = [];
+    let sequence = 0;
+    for (const cue of cues) {
+      const text = String(cue.content || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+      if (!text) continue;
+      sequence += 1;
+      lines.push(String(sequence));
+      lines.push(
+        `${formatSrtTimestamp(parseSeconds(cue.from_sec ?? cue.from))} --> ${formatSrtTimestamp(parseSeconds(cue.to_sec ?? cue.to))}`
+      );
+      lines.push(text, "");
+    }
+    return lines.join("\n");
+  }
+  function cuesToTxt(cues) {
+    return cues.map((cue) => String(cue.content || "").trim()).filter(Boolean).join("\n");
+  }
+  function formatClock(seconds) {
+    const total = Math.max(0, Math.floor(Number(seconds) || 0));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor(total % 3600 / 60);
+    const secs = total % 60;
+    return hours > 0 ? `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}` : `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  }
+  function cuesToAiText(cues, bvid, page) {
+    const rows = [];
+    let previous = "";
+    for (const cue of cues) {
+      const content = String(cue.content || "").replace(/\s+/g, " ").trim();
+      if (!content || content === previous) continue;
+      previous = content;
+      rows.push(
+        `[${bvid || "BV"} P${Math.max(1, Number(page) || 1)} ${formatClock(cue.from_sec ?? parseSeconds(cue.from))}] ${content}`
+      );
+    }
+    return rows.join("\n");
+  }
+  function cueTextLength(cue, bvid, page) {
+    return String(
+      `[${bvid} P${Math.max(1, Number(page) || 1)} ${formatClock(cue.from_sec ?? parseSeconds(cue.from))}] ${String(cue.content || "").trim()}
+`
+    ).length;
+  }
+  function splitCuesForPreprocess(item, settings) {
+    const cues = (item.data ?? []).filter(
+      (cue) => String(cue.content || "").trim()
+    );
+    if (!cues.length) return [];
+    const page = item.page || 1;
+    const bvid = item.bvid || "BV";
+    const targetSeconds = Math.max(120, settings.targetMinutes * 60);
+    const overlapSeconds = Math.max(0, settings.overlapSeconds);
+    const hardChars = Math.max(8e3, settings.maxChars);
+    const specs = [];
+    let coreStartIndex = 0;
+    while (coreStartIndex < cues.length) {
+      const firstCue = cues[coreStartIndex];
+      if (!firstCue) break;
+      const coreStartSeconds = Number(
+        firstCue.from_sec ?? parseSeconds(firstCue.from)
+      );
+      let endIndex = coreStartIndex;
+      let chars = 0;
+      while (endIndex < cues.length) {
+        const cue = cues[endIndex];
+        if (!cue) break;
+        const nextChars = chars + cueTextLength(cue, bvid, page);
+        const cueEnd = Number(cue.to_sec ?? parseSeconds(cue.to));
+        const duration = Math.max(0, cueEnd - coreStartSeconds);
+        if (endIndex > coreStartIndex && (nextChars > hardChars || duration >= targetSeconds)) {
+          break;
+        }
+        chars = nextChars;
+        endIndex += 1;
+      }
+      if (endIndex <= coreStartIndex) endIndex = coreStartIndex + 1;
+      let overlapStartIndex = coreStartIndex;
+      if (specs.length && overlapSeconds > 0) {
+        const wanted = coreStartSeconds - overlapSeconds;
+        while (overlapStartIndex > 0) {
+          const previous = cues[overlapStartIndex - 1];
+          if (!previous) break;
+          const previousSeconds = Number(
+            previous.from_sec ?? parseSeconds(previous.from)
+          );
+          if (previousSeconds < wanted) break;
+          overlapStartIndex -= 1;
+        }
+      }
+      let chunkText = cuesToAiText(
+        cues.slice(overlapStartIndex, endIndex),
+        bvid,
+        page
+      );
+      while (chunkText.length > hardChars && overlapStartIndex < coreStartIndex) {
+        overlapStartIndex += 1;
+        chunkText = cuesToAiText(
+          cues.slice(overlapStartIndex, endIndex),
+          bvid,
+          page
+        );
+      }
+      if (chunkText.length > hardChars) chunkText = chunkText.slice(0, hardChars);
+      const overlapCue = cues[overlapStartIndex];
+      const lastCue = cues[Math.max(coreStartIndex, endIndex - 1)];
+      if (!overlapCue || !lastCue) break;
+      specs.push({
+        text: chunkText,
+        coreStartSec: coreStartSeconds,
+        chunkStartSec: Number(
+          overlapCue.from_sec ?? parseSeconds(overlapCue.from)
+        ),
+        endSec: Number(lastCue.to_sec ?? parseSeconds(lastCue.to)),
+        coreStartIdx: coreStartIndex,
+        overlapStartIdx: overlapStartIndex,
+        endIdx: endIndex
+      });
+      coreStartIndex = endIndex;
+    }
+    return specs;
+  }
+  function parseEvidenceTimestampSeconds(text) {
+    const match = String(text || "").match(
+      /\[[^\]\n]*?\b(?:(\d{1,2}):)?(\d{2}):(\d{2})\]/
+    );
+    if (!match) return null;
+    const hours = Number(match[1] || 0);
+    const minutes = Number(match[2] || 0);
+    const seconds = Number(match[3] || 0);
+    return [hours, minutes, seconds].every(Number.isFinite) ? hours * 3600 + minutes * 60 + seconds : null;
+  }
+  function trimProcessedOverlap(text, coreStartSec) {
+    const source = String(text || "").trim();
+    if (!source || !(coreStartSec > 0)) return source;
+    const blocks = source.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+    const kept = [];
+    let pending = [];
+    let sawKeptTimestamp = false;
+    let sawAnyTimestamp = false;
+    for (const block of blocks) {
+      const seconds = parseEvidenceTimestampSeconds(block);
+      if (seconds == null) {
+        if (sawKeptTimestamp) kept.push(block);
+        else pending.push(block);
+        continue;
+      }
+      sawAnyTimestamp = true;
+      if (seconds + 0.75 < coreStartSec) {
+        pending = [];
+        continue;
+      }
+      if (!sawKeptTimestamp && pending.length) kept.push(...pending);
+      pending = [];
+      kept.push(block);
+      sawKeptTimestamp = true;
+    }
+    if (!sawAnyTimestamp || !sawKeptTimestamp) return source;
+    return kept.join("\n\n").trim();
+  }
+  function dedupeExactBlocks(text) {
+    const seen = /* @__PURE__ */ new Set();
+    const output = [];
+    for (const block of String(text || "").split(/\n{2,}/).map((value) => value.trim()).filter(Boolean)) {
+      const key = block.replace(/\s+/g, " ").trim().toLocaleLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      output.push(block);
+    }
+    return output.join("\n\n").trim();
+  }
+  function stitchPreprocessChunks(chunkSpecs, outputs) {
+    const parts = [];
+    for (let index = 0; index < chunkSpecs.length; index += 1) {
+      const spec = chunkSpecs[index];
+      if (!spec) continue;
+      const cleaned = index === 0 ? String(outputs[index] || "").trim() : trimProcessedOverlap(String(outputs[index] || ""), spec.coreStartSec);
+      if (cleaned) parts.push(cleaned);
+    }
+    return dedupeExactBlocks(parts.join("\n\n"));
+  }
+  function preprocessCacheKey(item, raw, prompt, config, settings) {
+    const source = `${item.bvid || "BV"}:P${item.page || 1}`;
+    const promptSignature = md5(
+      `${prompt.systemPrompt}
+---
+${prompt.userPromptTemplate}`
+    );
+    const modelSignature = md5(
+      `${config.baseUrl}|${config.model}|${config.temperature}|${config.maxTokens}`
+    );
+    const chunkSignature = md5(
+      `${settings.targetMinutes}|${settings.overlapSeconds}|${settings.maxChars}`
+    );
+    return `ai-preprocess:${source}:${md5(raw)}:${promptSignature}:${modelSignature}:${chunkSignature}`;
+  }
+  const PROMPT_KEYS = [
+    "title",
+    "bvid",
+    "author",
+    "subtitle",
+    "rawSubtitle",
+    "processedSubtitle",
+    "chunkIndex",
+    "chunkCount",
+    "chunkStart",
+    "coreStart",
+    "chunkEnd",
+    "anchorText",
+    "sourceContext",
+    "ancestorPath",
+    "question"
+  ];
+  const PROMPT_KEY_PATTERN = /\{\{\s*(title|bvid|author|subtitle|rawSubtitle|processedSubtitle|chunkIndex|chunkCount|chunkStart|coreStart|chunkEnd|anchorText|sourceContext|ancestorPath|question)\s*\}\}/g;
+  function renderPromptTemplate(template, variables) {
+    const values = Object.fromEntries(
+      // Legacy uses `value || ""`; retain false/zero compatibility while the
+      // new chunk boundary variables extend the supported key set.
+      PROMPT_KEYS.map((key) => [key, String(variables?.[key] || "")])
+    );
+    return String(template || "").replace(
+      PROMPT_KEY_PATTERN,
+      (_, key) => values[key] ?? ""
+    );
+  }
+  const CORE_VERSION = "0.6.0";
+  const core = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    AI_SESSION_CACHE_PREFIX,
+    AI_SESSION_CACHE_TTL_MS,
+    CORE_VERSION,
+    PROMPT_KEYS,
+    SHORTCUT_COMMANDS,
+    SPACE_LOOSE_VIDEOS_FOLDER,
+    SUBTITLE_EXPORT_INDEX_NAME,
+    SUBTITLE_EXPORT_ROOT,
+    aiRunIdentityKey,
+    aiSessionCacheKey,
+    aiSessionCacheTtlMs,
+    aiSessionInputHash,
+    applyGroupMetaPatchToItems,
+    applySpaceCollectionMembership,
+    applyUgcSeasonToItem,
+    applyUgcSeasonToItems,
+    attachCollectionGroupMeta,
+    attachSelectionGroupMeta,
+    attachSpaceLooseVideosMeta,
+    attachUserSpaceGroupMeta,
+    buildAiSessionCachePayload,
+    buildCollectionShortUrl,
+    buildFolioOutline,
+    buildGroupMetaPatches,
+    buildLibraryRenderNodes,
+    buildSubtitleExportIndexPath,
+    buildSubtitleExportRelativePath,
+    buildUpFolderLabel,
+    buildVideoShortUrl,
+    collectionIndexKey,
+    countFolioOutline,
+    countSpaceCollectionMatches,
+    cuesToAiText,
+    cuesToSrt,
+    cuesToTxt,
+    dedupeExactBlocks,
+    describeSubtitleExport,
+    draftHydratedAiRun,
+    draftHydratedPreprocessRun,
+    flattenFolioOutline,
+    folioOutlineSummary,
+    formatClock,
+    formatFolioChapterIndex,
+    formatSrtTimestamp,
+    inferLibraryGroupType,
+    isSpaceLooseVideosKey,
+    isUsableAiSessionCache,
+    joinFileName,
+    knowledgeBranchContext,
+    md5,
+    mergeGroupFields,
+    mermaidRepairSetupHint,
+    normalizeExportItem,
+    normalizeFolioHeadingLevel,
+    parseEvidenceTimestampSeconds,
+    parseExportIndexMd,
+    parseKnowledgeOutput,
+    parseSeconds,
+    partitionPlannedAiRuns,
+    preprocessCacheKey,
+    refreshGroupFolder,
+    renderExportIndexMd,
+    renderPromptTemplate,
+    replaceMermaidBlockAt,
+    resolveExportFolderName,
+    resolveExportFolderSegments,
+    resolveFolderSegments,
+    resolveIndexVideoTitle,
+    resolveLibraryFolderLabel,
+    resolveLibraryGroupKey,
+    resolveMermaidRepairConfig,
+    resolvePartLabel,
+    resolveRestoredActiveRunId,
+    resolveSeriesTitle,
+    resolveSpaceGroupKey,
+    resolveSpaceLooseVideosKey,
+    resolveSubtitleFileStem,
+    safePathSegment,
+    sanitizeMermaidTimestampCitationsInMarkdown,
+    sanitizeSessionInputForCache,
+    serializeAiRunForCache,
+    serializePreprocessRunForCache,
+    setGroupSelection,
+    shortcutChordFromEvent,
+    shortcutDisplayChord,
+    shortcutEditableTarget,
+    shortcutHasStrongModifier,
+    shortcutKeyLabel,
+    shouldIgnoreShortcutEvent,
+    shouldRestoreAutomaticAiSession,
+    shouldSkipPrepareForCachedSession,
+    slugFolioHeading,
+    splitCuesForPreprocess,
+    stitchPreprocessChunks,
+    stripMermaidTimestampCitations,
+    suggestCaptureMode,
+    toCues,
+    trimProcessedOverlap,
+    upsertCollectionExportIndex,
+    upsertExportIndexMap,
+    upsertIndexForExportItem,
+    upsertVideoExportIndex,
+    videoIndexKey
+  }, Symbol.toStringTag, { value: "Module" }));
+  const BILIBILI_SOURCE = "bilibili";
+  const bilibili = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    BILIBILI_SOURCE,
+    cuesToAiText,
+    cuesToSrt,
+    cuesToTxt,
+    detectContext,
+    extractBvid,
+    extractPlayingVideoHint,
+    extractUrlHints,
+    formatClock,
+    formatSrtTimestamp,
+    pageFromCid,
+    parseSeconds,
+    pickHintIds,
+    playingVideoChanged,
+    resolvePlayingVideoRef,
+    routeVideoKey,
+    toCues
+  }, Symbol.toStringTag, { value: "Module" }));
+  function createUserscriptRuntime(host2) {
+    return {
+      storage: {
+        async get(key, fallback) {
+          const value = await host2.storageGet(key, fallback);
+          return value === void 0 ? fallback : value;
+        },
+        async set(key, value) {
+          await host2.storageSet(key, value);
+        },
+        async remove(key) {
+          await host2.storageRemove(key);
+        }
+      },
+      network: {
+        request(url, request) {
+          return host2.request(url, request);
+        },
+        async json(url, request) {
+          const response = await host2.request(url, request);
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${url}`);
+          }
+          return JSON.parse(response.text);
+        }
+      },
+      clipboard: {
+        async writeText(text) {
+          await host2.writeClipboard(text);
+        }
+      },
+      style: {
+        add(css) {
+          host2.addStyle(css);
+        }
+      },
+      shortcuts: {
+        register(bindings, options) {
+          return host2.registerShortcuts(bindings, options);
+        }
+      },
+      page: {
+        href: () => host2.pageHref(),
+        window: () => host2.pageWindow,
+        onNavigate: (listener) => host2.onNavigate(listener)
+      },
+      hub: {
+        available: () => host2.hubAvailable(),
+        send: (path, payload) => host2.hubSend(path, payload)
+      }
+    };
+  }
+  const historyPatches = /* @__PURE__ */ new WeakMap();
+  function subscribeHistoryPatch(history, callback) {
+    let patch = historyPatches.get(history);
+    if (!patch) {
+      const originalPush = history.pushState;
+      const originalReplace = history.replaceState;
+      const callbacks = /* @__PURE__ */ new Set();
+      const notify = () => {
+        for (const subscriber of [...callbacks]) subscriber();
+      };
+      const wrappedPush = function wrappedPush2(...args) {
+        const result = originalPush.apply(this, args);
+        notify();
+        return result;
+      };
+      const wrappedReplace = function wrappedReplace2(...args) {
+        const result = originalReplace.apply(this, args);
+        notify();
+        return result;
+      };
+      patch = {
+        originalPush,
+        originalReplace,
+        wrappedPush,
+        wrappedReplace,
+        callbacks
+      };
+      history.pushState = wrappedPush;
+      history.replaceState = wrappedReplace;
+      historyPatches.set(history, patch);
+    }
+    patch.callbacks.add(callback);
+    return () => {
+      const current = historyPatches.get(history);
+      if (!current) return;
+      current.callbacks.delete(callback);
+      if (current.callbacks.size) return;
+      if (history.pushState === current.wrappedPush) {
+        history.pushState = current.originalPush;
+      }
+      if (history.replaceState === current.wrappedReplace) {
+        history.replaceState = current.originalReplace;
+      }
+      historyPatches.delete(history);
+    };
+  }
+  function installSpaNavigateAdapter(options, listener) {
+    const historyWindow = options.historyWindow;
+    const eventWindow = options.eventWindow ?? historyWindow;
+    const documentRef = options.documentRef ?? null;
+    const getHref = options.getHref ?? (() => String(eventWindow.location?.href || historyWindow.location?.href || ""));
+    const pollIntervalMs = options.pollIntervalMs === void 0 ? 2e3 : options.pollIntervalMs;
+    const setIntervalFn = options.setIntervalFn ?? setInterval;
+    const clearIntervalFn = options.clearIntervalFn ?? clearInterval;
+    const setTimeoutFn = options.setTimeoutFn ?? setTimeout;
+    let lastHref = getHref();
+    let disposed = false;
+    const check = () => {
+      if (disposed) return;
+      const href = getHref();
+      if (href === lastHref) return;
+      lastHref = href;
+      listener();
+    };
+    const scheduleCheck = () => {
+      setTimeoutFn(() => check(), 0);
+    };
+    const unsubscribeHistory = subscribeHistoryPatch(
+      historyWindow.history,
+      scheduleCheck
+    );
+    const onPopState = () => check();
+    const onHashChange = () => check();
+    const onPageShow = () => check();
+    const onVisibility = () => {
+      if (!documentRef || documentRef.visibilityState === "visible") check();
+    };
+    eventWindow.addEventListener("popstate", onPopState);
+    eventWindow.addEventListener("hashchange", onHashChange);
+    eventWindow.addEventListener("pageshow", onPageShow);
+    documentRef?.addEventListener("visibilitychange", onVisibility);
+    let pollTimer = null;
+    if (pollIntervalMs > 0) {
+      pollTimer = setIntervalFn(() => {
+        if (!documentRef || documentRef.visibilityState === "visible") check();
+      }, pollIntervalMs);
+    }
+    return {
+      check,
+      dispose: () => {
+        if (disposed) return;
+        disposed = true;
+        unsubscribeHistory();
+        eventWindow.removeEventListener("popstate", onPopState);
+        eventWindow.removeEventListener("hashchange", onHashChange);
+        eventWindow.removeEventListener("pageshow", onPageShow);
+        documentRef?.removeEventListener("visibilitychange", onVisibility);
+        if (pollTimer != null) clearIntervalFn(pollTimer);
+      }
+    };
+  }
+  function registerShortcutRuntime(bindings, options = {}) {
+    const target = options.target;
+    if (!target) {
+      throw new Error("registerShortcutRuntime requires a target EventTarget");
+    }
+    const capture = options.capture !== false;
+    const protectInput = options.protectInput !== false;
+    const stopOnMatch = options.stopOnMatch !== false;
+    const enabled = options.enabled !== false;
+    const listener = (event) => {
+      if (protectInput && shouldIgnoreShortcutEvent(event, { enabled })) {
+        return;
+      }
+      if (!protectInput && options.enabled === false) return;
+      const chord = shortcutChordFromEvent(event);
+      if (!chord) return;
+      const binding = bindings.find((candidate) => candidate.chord === chord);
+      if (!binding) return;
+      if (stopOnMatch) {
+        const native = event;
+        native.preventDefault?.();
+        native.stopImmediatePropagation?.();
+      }
+      try {
+        void Promise.resolve(binding.handler()).catch((error) => {
+          options.onError?.(error);
+        });
+      } catch (error) {
+        options.onError?.(error);
+      }
+    };
+    target.addEventListener("keydown", listener, capture);
+    return () => target.removeEventListener("keydown", listener, capture);
+  }
+  const PROMPT_STAGES = [
+    "preprocess",
+    "postprocess",
+    "knowledge"
+  ];
+  function isPromptStage(value) {
+    return value === "preprocess" || value === "postprocess" || value === "knowledge";
+  }
+  function normalizePromptStage(value) {
+    if (value === "postprocess" || value === "postprocessing") return "postprocess";
+    if (value === "knowledge") return "knowledge";
+    if (value === "preprocess" || value === "preprocessing") return "preprocess";
+    return "postprocess";
+  }
+  const V6_STORAGE_KEYS = {
+    ui: "bili-subbatch-ui-v2",
+    aiLegacy: "bili-subbatch-ai-v2",
+    aiProfiles: "bili-subbatch-ai-profiles-v1",
+    /** @deprecated Use aiProfiles. Kept as a source-compatible alias. */
+    aiConfig: "bili-subbatch-ai-profiles-v1",
+    prompts: "bili-subbatch-prompts-v1",
+    shortcuts: "bili-subbatch-shortcuts-v1",
+    postTasks: "bili-subbatch-post-tasks-v1",
+    knowledgeModel: "bili-subbatch-knowledge-model-v1",
+    preprocessEnabled: "bili-subbatch-preprocess-enabled-v1",
+    preprocessModel: "bili-subbatch-preprocess-model-v1",
+    preprocessConcurrency: "bili-subbatch-preprocess-concurrency-v1",
+    preprocessTargetMinutes: "bili-subbatch-preprocess-target-minutes-v1",
+    preprocessOverlapSeconds: "bili-subbatch-preprocess-overlap-seconds-v1",
+    preprocessMaxChars: "bili-subbatch-preprocess-max-chars-v1",
+    preprocessRetries: "bili-subbatch-preprocess-retries-v1",
+    autoCapture: "bili-subbatch-auto-capture-v1",
+    autoAnalyze: "bili-subbatch-auto-analyze-v1",
+    transcriptFollow: "bili-subbatch-transcript-follow-v2",
+    playerSubtitle: "bili-subbatch-player-subtitle-v2"
+  };
+  const V6_SCHEMA_VERSIONS = {
+    aiProfiles: 4,
+    prompts: 5,
+    shortcuts: 2,
+    postTasks: 1
+  };
+  const V6_BUILTIN_PROMPT_IDS = {
+    preprocess: "builtin-subtitle-normalizer",
+    postprocess: "builtin-mermaid-learning-map",
+    knowledge: "builtin-knowledge-drilldown"
+  };
+  const V6_KNOWLEDGE_DB = {
+    name: "bili-subbatch-knowledge-v1",
+    version: 1,
+    anchorStore: "anchors",
+    nodeStore: "nodes"
+  };
+  const V6_SHORTCUT_COMMAND_IDS = [
+    "toggle-panel",
+    "open-processed",
+    "open-postprocess",
+    "toggle-dock"
+  ];
+  const SCHEMA_VERSION = 1;
+  const schemas = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    PROMPT_STAGES,
+    SCHEMA_VERSION,
+    V6_BUILTIN_PROMPT_IDS,
+    V6_KNOWLEDGE_DB,
+    V6_SCHEMA_VERSIONS,
+    V6_SHORTCUT_COMMAND_IDS,
+    V6_STORAGE_KEYS,
+    isPromptStage,
+    normalizePromptStage
+  }, Symbol.toStringTag, { value: "Module" }));
+  function parseResponseHeaders(raw) {
+    const headers = {};
+    for (const line of String(raw || "").split(/\r?\n/)) {
+      const separator = line.indexOf(":");
+      if (separator <= 0) continue;
+      headers[line.slice(0, separator).trim().toLowerCase()] = line.slice(separator + 1).trim();
+    }
+    return headers;
+  }
+  async function readFetchStream(response, onChunk, signal) {
+    if (!onChunk) {
+      return response.text();
+    }
+    if (!response.body) {
+      const text2 = await response.text();
+      if (text2) onChunk(text2);
+      return text2;
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    try {
+      while (true) {
+        if (signal?.aborted) {
+          await reader.cancel();
+          throw new DOMException("Aborted", "AbortError");
+        }
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        text += chunk;
+        onChunk(chunk);
+      }
+      const tail = decoder.decode();
+      if (tail) {
+        text += tail;
+        onChunk(tail);
+      }
+      return text;
+    } catch (error) {
+      try {
+        await reader.cancel();
+      } catch {
+      }
+      throw error;
+    }
+  }
+  class FetchNetworkError extends Error {
+    cause;
+    constructor(cause) {
+      super(cause instanceof Error ? cause.message : String(cause));
+      this.name = "FetchNetworkError";
+      this.cause = cause;
+    }
+  }
+  async function fetchRequest(pageWindow, url, request = {}) {
+    let response;
+    try {
+      const fetchFn = pageWindow.fetch || fetch;
+      response = await fetchFn.call(pageWindow, url, {
+        ...request.method ? { method: request.method } : {},
+        ...request.headers ? { headers: request.headers } : {},
+        ...request.body !== void 0 ? { body: request.body } : {},
+        ...request.signal ? { signal: request.signal } : {},
+        ...request.credentials ? { credentials: request.credentials } : {},
+        ...request.cache ? { cache: request.cache } : {}
+      });
+    } catch (error) {
+      throw new FetchNetworkError(error);
+    }
+    const headers = Object.fromEntries(response.headers.entries());
+    const useStream = request.stream === true && typeof request.onChunk === "function";
+    const text = useStream ? await readFetchStream(response, request.onChunk, request.signal) : await response.text();
+    return {
+      status: response.status,
+      ok: response.ok,
+      text,
+      headers
+    };
+  }
+  function privilegedRequest(url, request = {}) {
+    if (typeof GM_xmlhttpRequest !== "function") {
+      return Promise.reject(new Error("GM_xmlhttpRequest is unavailable"));
+    }
+    if (request.signal?.aborted) {
+      return Promise.reject(new DOMException("Aborted", "AbortError"));
+    }
+    const useStream = request.stream === true && typeof request.onChunk === "function";
+    return new Promise((resolve, reject) => {
+      let lastLength = 0;
+      let settled = false;
+      const requestHandle = {};
+      const onAbort = () => {
+        try {
+          requestHandle.current?.abort?.();
+        } catch {
+        }
+        fail(new DOMException("Aborted", "AbortError"));
+      };
+      const cleanup = () => request.signal?.removeEventListener("abort", onAbort);
+      const finish = (response) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(response);
+      };
+      const fail = (error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+      const emitChunk = (chunk) => {
+        if (!chunk || settled) return !settled;
+        try {
+          request.onChunk?.(chunk);
+          return true;
+        } catch (error) {
+          fail(error);
+          try {
+            requestHandle.current?.abort?.();
+          } catch {
+          }
+          return false;
+        }
+      };
+      const details = {
+        url,
+        ...request.method ? { method: request.method } : {},
+        ...request.headers ? { headers: request.headers } : {},
+        ...request.body !== void 0 ? { data: request.body } : {},
+        onload: (response) => {
+          const text = String(response.responseText || "");
+          if (useStream && text.length > lastLength) {
+            if (!emitChunk(text.slice(lastLength))) return;
+            lastLength = text.length;
+          }
+          finish({
+            status: response.status,
+            ok: response.status >= 200 && response.status < 300,
+            text,
+            headers: parseResponseHeaders(response.responseHeaders)
+          });
+        },
+        onerror: (error) => fail(error),
+        onabort: () => fail(new DOMException("Aborted", "AbortError"))
+      };
+      if (useStream) {
+        details.responseType = "text";
+        details.onprogress = (response) => {
+          const full = String(response.responseText || "");
+          if (full.length > lastLength) {
+            if (!emitChunk(full.slice(lastLength))) return;
+            lastLength = full.length;
+          }
+        };
+      }
+      request.signal?.addEventListener("abort", onAbort, { once: true });
+      requestHandle.current = GM_xmlhttpRequest(details);
+      if (settled) cleanup();
+    });
+  }
+  function mayRetryHttpFailure(request) {
+    if (request.fallback !== "network-or-http") return false;
+    const method = String(request.method || "GET").toUpperCase();
+    return method === "GET" || method === "HEAD" || method === "OPTIONS";
+  }
+  function registerShortcuts(bindings, options = {}) {
+    return registerShortcutRuntime(bindings, {
+      ...options,
+      target: document,
+      capture: true,
+      stopOnMatch: true
+    });
+  }
+  function resolvePageWindow() {
+    return typeof unsafeWindow !== "undefined" && unsafeWindow ? unsafeWindow : window;
+  }
+  function pageHrefOf(pageWindow) {
+    try {
+      return String(pageWindow.location?.href || location.href);
+    } catch {
+      return location.href;
+    }
+  }
+  function onNavigate(listener) {
+    const pageWindow = resolvePageWindow();
+    const handle = installSpaNavigateAdapter(
+      {
+        historyWindow: pageWindow,
+        eventWindow: pageWindow,
+        documentRef: document,
+        // Prefer page/unsafeWindow location so SPA history and href stay aligned.
+        getHref: () => pageHrefOf(pageWindow),
+        pollIntervalMs: 2e3
+      },
+      listener
+    );
+    return () => handle.dispose();
+  }
+  function createUserscriptHost() {
+    const pageWindow = resolvePageWindow();
+    return {
+      storageGet: (key, fallback) => typeof GM_getValue === "function" ? GM_getValue(key, fallback) : fallback,
+      storageSet: (key, value) => {
+        if (typeof GM_setValue === "function") GM_setValue(key, value);
+      },
+      storageRemove: (key) => {
+        if (typeof GM_deleteValue === "function") GM_deleteValue(key);
+      },
+      request: async (url, request) => {
+        try {
+          const response = await fetchRequest(pageWindow, url, request);
+          if (!response.ok && mayRetryHttpFailure(request ?? {})) {
+            return privilegedRequest(url, request);
+          }
+          return response;
+        } catch (error) {
+          if (request?.signal?.aborted) throw error;
+          if (error instanceof FetchNetworkError && request?.fallback !== "never") {
+            return privilegedRequest(url, request);
+          }
+          throw error;
+        }
+      },
+      writeClipboard: async (text) => {
+        if (typeof GM_setClipboard === "function") GM_setClipboard(text);
+        else await navigator.clipboard.writeText(text);
+      },
+      addStyle: (css) => {
+        if (typeof GM_addStyle === "function") {
+          GM_addStyle(css);
+          return;
+        }
+        const style = document.createElement("style");
+        style.textContent = css;
+        document.head.appendChild(style);
+      },
+      pageWindow,
+      pageHref: () => pageHrefOf(pageWindow),
+      registerShortcuts,
+      onNavigate,
+      hubAvailable: async () => false,
+      hubSend: async () => {
+        throw new Error("Local Hub 尚未启用");
+      }
+    };
+  }
+  const host = createUserscriptHost();
+  const runtime = createUserscriptRuntime(host);
+  const SubBatchMonorepo = {
+    version: "6.9.13",
+    runtime,
+    host,
+    /** Entire pure core namespace — preferred bridge target. */
+    core,
+    bilibili,
+    schemas,
+    detectContext(href, hints) {
+      return detectContext(href ?? runtime.page.href(), hints);
+    },
+    extractBvid,
+    extractUrlHints,
+    routeVideoKey,
+    extractPlayingVideoHint,
+    resolvePlayingVideoRef,
+    playingVideoChanged,
+    pageFromCid,
+    renderPromptTemplate,
+    splitCuesForPreprocess,
+    stitchPreprocessChunks,
+    preprocessCacheKey,
+    aiSessionCacheKey,
+    aiSessionCacheTtlMs,
+    shouldRestoreAutomaticAiSession,
+    shouldSkipPrepareForCachedSession,
+    aiRunIdentityKey,
+    aiSessionInputHash,
+    partitionPlannedAiRuns,
+    isUsableAiSessionCache,
+    serializeAiRunForCache,
+    serializePreprocessRunForCache,
+    sanitizeSessionInputForCache,
+    buildAiSessionCachePayload,
+    resolveRestoredActiveRunId,
+    draftHydratedAiRun,
+    draftHydratedPreprocessRun,
+    replaceMermaidBlockAt,
+    resolveMermaidRepairConfig,
+    mermaidRepairSetupHint,
+    slugFolioHeading,
+    buildFolioOutline,
+    flattenFolioOutline,
+    countFolioOutline,
+    formatFolioChapterIndex,
+    folioOutlineSummary,
+    // ── export + library (also on core.* ; aliases for clarity) ──
+    safePathSegment,
+    joinFileName,
+    resolveSeriesTitle,
+    resolvePartLabel,
+    resolveSubtitleFileStem,
+    resolveExportFolderName,
+    buildSubtitleExportRelativePath,
+    buildSubtitleExportIndexPath,
+    buildVideoShortUrl,
+    upsertVideoExportIndex,
+    upsertExportIndexMap,
+    upsertCollectionExportIndex,
+    upsertIndexForExportItem,
+    resolveIndexVideoTitle,
+    normalizeExportItem,
+    renderExportIndexMd,
+    parseExportIndexMd,
+    buildUpFolderLabel,
+    buildCollectionShortUrl,
+    buildLibraryRenderNodes,
+    resolveLibraryGroupKey,
+    resolveLibraryFolderLabel,
+    attachSelectionGroupMeta,
+    attachCollectionGroupMeta,
+    attachUserSpaceGroupMeta,
+    attachSpaceLooseVideosMeta,
+    applySpaceCollectionMembership,
+    countSpaceCollectionMatches,
+    applyUgcSeasonToItem,
+    applyUgcSeasonToItems,
+    buildGroupMetaPatches,
+    applyGroupMetaPatchToItems,
+    mergeGroupFields,
+    setGroupSelection,
+    resolveSpaceGroupKey,
+    resolveFolderSegments,
+    resolveExportFolderSegments,
+    suggestCaptureMode,
+    shortcutCommands: SHORTCUT_COMMANDS,
+    shouldIgnoreShortcutEvent
+  };
+  exports.SubBatchMonorepo = SubBatchMonorepo;
+  exports.host = host;
+  exports.runtime = runtime;
+  Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
+  return exports;
+})({});
+
+// ---- SubBatch maintained full-feature compatibility runtime ----
 
 /**
  * v6.9.13 — 单独安装 loop-bilibili-flow 时补齐 core 回退，避免字幕库渲染崩溃；打开页面先点开中文字幕。
