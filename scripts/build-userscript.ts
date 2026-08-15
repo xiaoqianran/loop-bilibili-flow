@@ -20,7 +20,7 @@ const legacyPath = resolve(
   projectRoot,
   "legacy/Bili-SubBatch-v6.0.2.user.js",
 );
-const maintainedSourcePath = resolve(projectRoot, "loop-bilibili.js");
+const maintainedSourcePath = resolve(projectRoot, "dist/loop-bilibili-flow.user.js");
 const outputDirectory = resolve(projectRoot, "dist/userscript");
 const buildDirectory = resolve(outputDirectory, ".build");
 const bundlePath = resolve(buildDirectory, "subbatch.bundle.js");

@@ -1,6 +1,7 @@
 node_modules/
 .pnpm-store/
-dist/
+dist/**
+!dist/loop-bilibili-flow.user.js
 coverage/
 *.tsbuildinfo
 *.log

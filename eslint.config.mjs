@@ -7,7 +7,6 @@ export default tseslint.config(
     ignores: [
       "dist/**",
       "legacy/**",
-      "loop-bilibili.js",
       "apps/userscript/src/legacy/**",
     ],
   },

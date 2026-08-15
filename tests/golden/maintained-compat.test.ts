@@ -12,7 +12,7 @@ import {
 type UnknownFunction = (...args: any[]) => any;
 
 const maintainedSource = readFileSync(
-  fileURLToPath(new URL("../../loop-bilibili.js", import.meta.url)),
+  fileURLToPath(new URL("../../dist/loop-bilibili-flow.user.js", import.meta.url)),
   "utf8",
 );
 
@@ -178,6 +178,11 @@ describe("Maintained full-feature compatibility source", () => {
     );
     // Knowledge answers reuse AI 处理字幕 segmented card chrome.
     expect(maintainedSource).toContain("function knowledgeAnswerReadingBlocks(");
+    expect(maintainedSource).toContain("inset:9px 0 9px auto");
+    expect(maintainedSource).toContain("function pinKnowledgeScrollTop(");
+    expect(extractFunctionSource(maintainedSource, "renderKnowledgeRail")).not.toContain("stickBottom");
+    expect(extractFunctionSource(maintainedSource, "renderKnowledgeWorkspace")).not.toContain("stickBottom");
+    expect(extractFunctionSource(maintainedSource, "paintStudioAnswer")).not.toContain("scrollHeight");
     expect(maintainedSource).toContain("function renderKnowledgeAnswerCards(");
     expect(maintainedSource).toContain("bsb-knowledge-answer-card");
     expect(maintainedSource).toContain("bsb-preprocess-block bsb-knowledge-answer-card");
@@ -192,6 +197,8 @@ describe("Maintained full-feature compatibility source", () => {
     expect(maintainedSource).toContain("data-role=\"studio-answer\"");
     expect(maintainedSource).toContain("align-self: flex-end");
     expect(maintainedSource).toContain("NOTE_FONT_DEFAULT = 14");
+    expect(maintainedSource).toContain("--bsb-knowledge-font: 14px");
+    expect(maintainedSource).toContain("font-size:var(--bsb-knowledge-font)");
     expect(maintainedSource).toContain("<strong>对话</strong>");
     expect(maintainedSource).toContain("function flowTaskModelsHtml(");
     expect(maintainedSource).toContain("function bindFlowModelDrag(");
