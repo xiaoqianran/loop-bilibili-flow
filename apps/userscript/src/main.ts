@@ -25,7 +25,7 @@ const runtime = createUserscriptRuntime(host);
  * Product body must call `SubBatch.SubBatchMonorepo.core.*` (or top-level aliases).
  */
 const SubBatchMonorepo = {
-  version: "6.9.13",
+  version: "6.9.14",
   runtime,
   host,
   /** Entire pure core namespace — preferred bridge target. */

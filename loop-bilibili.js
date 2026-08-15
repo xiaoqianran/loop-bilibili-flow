@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Bili SubBatch (loop-bilibili)
 // @namespace    https://github.com/loop-bilibili/bili-subbatch
-// @version      6.9.13
+// @version      6.9.14
 // @description  B站知识阅读工作台：字幕预处理、多产物后处理、Anchor 局部追问树与持久 Knowledge Workspace
 // @author       loop-bilibili
 // @match        *://www.bilibili.com/video/*
@@ -33,6 +33,7 @@
 // ==/UserScript==
 
 /**
+ * v6.9.14 — 工作台可见文字默认统一 14px。
  * v6.9.13 — 单独安装 loop-bilibili-flow 时补齐 core 回退，避免字幕库渲染崩溃；打开页面先点开中文字幕。
  * v6.9.12 — 用户提问色条改到右侧；框选/知识问答发送后不再自动滚到底。
  * v6.9.11 — 知识库对话（提问 / 回答卡片 / 对话页）正文字号固定 14px，不再跟笔记 A± 走。
@@ -111,7 +112,7 @@
    */
 
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.9.13";
+    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.9.14";
   const PANEL_ID = "bili-subbatch-panel";
   const UI_STORE_KEY = "bili-subbatch-ui-v2";
   /** Catppuccin flavors — official palette https://catppuccin.com/palette/ */
@@ -3404,6 +3405,7 @@
         z-index: 2147483646;
         --bsb-note-font: 14px;
         --bsb-knowledge-font: 14px;
+        --bsb-ui-font: 14px;
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI",
           "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
         font-size: 14px;
@@ -4361,29 +4363,29 @@
         max-width: 40rem; margin: 0 auto;
         color: var(--ctp-text);
         font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Songti SC", "Source Han Serif SC", "Noto Serif SC", Georgia, serif;
-        font-size: calc(var(--bsb-note-font) + 1px); line-height: 1.72; letter-spacing: .005em;
+        font-size: 14px; line-height: 1.72; letter-spacing: .005em;
       }
       #${PANEL_ID} .bsb-folio header { margin: 0 0 2.2em; }
       #${PANEL_ID} .bsb-folio .kicker {
         margin: 0 0 .7em; font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-        font-size: 11px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+        font-size: 14px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
         color: var(--ctp-overlay0);
       }
       #${PANEL_ID} .bsb-folio h1 {
-        margin: 0 0 .55em; font-size: 1.72em; font-weight: 650; line-height: 1.22;
+        margin: 0 0 .55em; font-size: 14px; font-weight: 650; line-height: 1.22;
         letter-spacing: -.02em; color: var(--ctp-text);
       }
       #${PANEL_ID} .bsb-folio .lede {
-        margin: 0; font-size: 1.06em; line-height: 1.65; color: var(--ctp-subtext0);
+        margin: 0; font-size: 14px; line-height: 1.65; color: var(--ctp-subtext0);
       }
       #${PANEL_ID} .bsb-folio section { margin: 0 0 2.1em; }
       #${PANEL_ID} .bsb-folio h2 {
         margin: 0 0 .7em; padding-top: .2em; scroll-margin-top: 18px;
-        font-size: 1.18em; font-weight: 650; letter-spacing: -.015em;
+        font-size: 14px; font-weight: 650; letter-spacing: -.015em;
       }
       #${PANEL_ID} .bsb-folio h3 {
         margin: 1.2em 0 .45em; scroll-margin-top: 18px;
-        font-size: 1.02em; font-weight: 650; color: var(--ctp-subtext1);
+        font-size: 14px; font-weight: 650; color: var(--ctp-subtext1);
       }
       #${PANEL_ID} .bsb-folio p { margin: 0 0 .9em; }
       #${PANEL_ID} .bsb-folio ul, #${PANEL_ID} .bsb-folio ol { margin: 0 0 1em; padding-left: 1.25em; }
@@ -4806,16 +4808,16 @@
         line-height: 1.35;
       }
       #${PANEL_ID} .bsb-ai-md h1 {
-        font-size: 1.5em; margin: 1.6em 0 0.8em;
+        font-size: 14px; margin: 1.6em 0 0.8em;
         padding-bottom: 0.4em;
         border-bottom: 1px solid color-mix(in srgb, var(--ctp-surface1) 50%, transparent);
       }
       #${PANEL_ID} .bsb-ai-md h1:first-child { margin-top: 0.15em; }
       #${PANEL_ID} .bsb-ai-md h2 {
-        font-size: 1.28em; margin: 1.55em 0 0.7em; color: var(--ctp-mauve);
+        font-size: 14px; margin: 1.55em 0 0.7em; color: var(--ctp-mauve);
       }
       #${PANEL_ID} .bsb-ai-md h3 {
-        font-size: 1.12em; margin: 1.4em 0 0.6em; color: var(--ctp-sapphire);
+        font-size: 14px; margin: 1.4em 0 0.6em; color: var(--ctp-sapphire);
       }
       #${PANEL_ID} .bsb-ai-md p {
         margin: 1.15em 0;
@@ -5974,6 +5976,27 @@
       #${PANEL_ID}[data-panel-size="small"] .bsb-knowledge-mobile-back { display:inline-flex; }
       #${PANEL_ID}[data-panel-size="small"] .bsb-knowledge-rail-split.with-tree { grid-template-columns:1fr; grid-template-rows:minmax(90px,36%) 1fr; }
       #${PANEL_ID}[data-panel-size="small"] .bsb-knowledge-rail-split.with-tree .bsb-knowledge-tree-pane { border-bottom:1px solid var(--ctp-surface0); border-right:0; }
+      /* 可见文字默认 14px。图标/公式除外。 */
+      #${PANEL_ID} .bsb-fab,
+      #${PANEL_ID} .bsb-sidebar,
+      #${PANEL_ID} .bsb-dock-tab,
+      #${PANEL_ID} .bsb-selection-toolbar {
+        font-size: 14px;
+      }
+      #${PANEL_ID} .bsb-sidebar :is(h1,h2,h3,h4,h5,h6,p,li,td,th,dt,dd,button,input,textarea,select,label,span,strong,small,em,b,i,a,code,pre,summary,option,legend,blockquote,cite,figcaption):not(.bsb-empty-ico):not(.bsb-knowledge-orb),
+      #${PANEL_ID} .bsb-selection-toolbar :is(button,span),
+      #${PANEL_ID} .bsb-dock-tab,
+      #${PANEL_ID} .bsb-folio,
+      #${PANEL_ID} .bsb-folio :is(h1,h2,h3,h4,p,li,td,th,code,pre,blockquote,figcaption,.kicker,.lede),
+      #${PANEL_ID} .bsb-ai-md,
+      #${PANEL_ID} .bsb-ai-md :is(h1,h2,h3,h4,p,li,td,th,code,pre,blockquote),
+      #${PANEL_ID} .bsb-preprocess-block-body,
+      #${PANEL_ID} .bsb-knowledge-card-body,
+      #${PANEL_ID} .bsb-knowledge-card-body :is(h1,h2,h3,h4,p,li),
+      #${PANEL_ID}[data-panel-size="small"] .bsb-preprocess-block-body,
+      #${PANEL_ID}[data-panel-size="small"] .bsb-knowledge-card-body {
+        font-size: 14px !important;
+      }
       #${PANEL_ID} [hidden] { display:none !important; }
       #${PANEL_ID} .bsb-output-nav { flex:0 0 auto; border-bottom:1px solid var(--ctp-surface0); background:color-mix(in srgb,var(--ctp-mantle) 78%,transparent); }
       #${PANEL_ID} .bsb-output-tabs { display:flex; gap:3px; overflow-x:auto; padding:6px 8px 3px; scrollbar-width:thin; }

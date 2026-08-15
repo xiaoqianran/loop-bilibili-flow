@@ -196,8 +196,10 @@ describe("Maintained full-feature compatibility source", () => {
     expect(maintainedSource).toContain("function paintStudioAnswer(");
     expect(maintainedSource).toContain("data-role=\"studio-answer\"");
     expect(maintainedSource).toContain("align-self: flex-end");
-    expect(maintainedSource).toContain("// @version      6.9.13");
-    expect(maintainedSource).toContain('|| "6.9.13"');
+    expect(maintainedSource).toContain("// @version      6.9.14");
+    expect(maintainedSource).toContain('|| "6.9.14"');
+    expect(maintainedSource).toContain("--bsb-ui-font: 14px");
+    expect(maintainedSource).toContain("font-size: 14px !important");
     expect(maintainedSource).toContain("CORE_LOCAL_FALLBACKS");
     expect(maintainedSource).toContain("NOTE_FONT_DEFAULT = 14");
     expect(maintainedSource).toContain("--bsb-knowledge-font: 14px");

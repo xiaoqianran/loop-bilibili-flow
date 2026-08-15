@@ -14,7 +14,7 @@ const flowAliasPath = resolve(projectRoot, "dist/userscript/loop-bilibili-flow.u
 const maintainedSourcePath = resolve(projectRoot, "loop-bilibili.js");
 
 const requiredMetadata = [
-  "// @version      6.9.13",
+  "// @version      6.9.14",
   "// @run-at       document-idle",
   "// @match        *://www.bilibili.com/video/*",
   "// @match        *://www.bilibili.com/list/*",

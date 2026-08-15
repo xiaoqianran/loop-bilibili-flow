@@ -15,7 +15,7 @@ const productionOutputPath = resolve(projectRoot, "dist/userscript/subbatch.user
 const flowAliasPath = resolve(projectRoot, "dist/userscript/loop-bilibili-flow.user.js");
 
 const requiredMetadata = [
-  "// @version      6.9.13",
+  "// @version      6.9.14",
   "// @run-at       document-idle",
   "// @match        *://www.bilibili.com/video/*",
   "// @match        *://www.bilibili.com/list/*",
