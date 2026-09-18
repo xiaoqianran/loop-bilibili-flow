@@ -275,7 +275,6 @@
   const NOTE_FONT_MIN = 14;
   const NOTE_FONT_MAX = 22;
   const NOTE_FONT_DEFAULT = 14;
-  const WBI_TTL_MS = 600_000;
   const DEFAULT_DELAY_MS = 400;
   const DEFAULT_MAX_PAGES = 20;
   const MIN_W = 420;
@@ -591,13 +590,6 @@
     }
   }
 
-  const MIXIN_KEY_ENC_TAB = [
-    46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
-    33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61,
-    26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36,
-    20, 34, 44, 52,
-  ];
-
   const TYPE_LABEL = {
     video: "单个视频",
     selection: "视频选集",
@@ -753,38 +745,6 @@
 
   // ─── pure helpers (offline harness extracts // #region pure-logic) ─────
   // #region pure-logic
-  function keyFromUrl(url) {
-    let name = String(url || "").split("/").pop() || "";
-    if (name.includes(".")) name = name.split(".").slice(0, -1).join(".");
-    return name;
-  }
-
-  function mixinKey(imgKey, subKey) {
-    let raw = String(imgKey) + String(subKey);
-    const maxIdx = Math.max(...MIXIN_KEY_ENC_TAB);
-    if (maxIdx >= raw.length) raw = raw.padEnd(maxIdx + 1, "0");
-    let out = "";
-    for (const i of MIXIN_KEY_ENC_TAB) out += raw[i] || "";
-    return out.slice(0, 32);
-  }
-
-  function encWbi(params, imgKey, subKey, wts) {
-    const data = {};
-    for (const [k, v] of Object.entries(params)) data[String(k)] = v;
-    data.wts = wts == null ? Math.floor(Date.now() / 1000) : Number(wts);
-    const forbidden = new Set(["!", "'", "(", ")", "*"]);
-    const parts = [];
-    for (const key of Object.keys(data).sort()) {
-      const val = String(data[key])
-        .split("")
-        .filter((c) => !forbidden.has(c))
-        .join("");
-      parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(val)}`);
-    }
-    const query = parts.join("&");
-    return `${query}&w_rid=${md5(query + mixinKey(imgKey, subKey))}`;
-  }
-
   function extractAssistantText(piece) {
     if (!piece || typeof piece !== "object") return { content: "", reasoning: "" };
     const content =
@@ -1041,24 +1001,6 @@
     }
   }
   // #endregion pure-logic
-
-  let wbiCache = { img: null, sub: null, at: 0 };
-
-  async function getWbiKeys() {
-    const now = Date.now();
-    if (wbiCache.img && now - wbiCache.at < WBI_TTL_MS) {
-      return [wbiCache.img, wbiCache.sub];
-    }
-    const nav = await httpJson("https://api.bilibili.com/x/web-interface/nav");
-    const wbi = (nav && nav.data && nav.data.wbi_img) || {};
-    const imgUrl = wbi.img_url || "";
-    const subUrl = wbi.sub_url || "";
-    if (!imgUrl || !subUrl) throw new Error("failed to get wbi keys from /nav");
-    const img = keyFromUrl(imgUrl);
-    const sub = keyFromUrl(subUrl);
-    wbiCache = { img, sub, at: now };
-    return [img, sub];
-  }
 
   // ─── HTTP ───────────────────────────────────────────────────────────────
   function httpJson(url, extraHeaders) {
@@ -2132,77 +2074,6 @@
   }
 
   // ─── subtitle fetch (client.py) ─────────────────────────────────────────
-  async function viewDetail(bvid) {
-    const [img, sub] = await getWbiKeys();
-    const q = encWbi({ bvid, need_elec: 0 }, img, sub);
-    return httpJson(
-      `https://api.bilibili.com/x/web-interface/wbi/view/detail?${q}`,
-    );
-  }
-
-  async function playerWbiV2(aid, cid, bvid) {
-    const [img, sub] = await getWbiKeys();
-    const params = aid ? { aid, cid } : { bvid, cid };
-    const q = encWbi(params, img, sub);
-    return httpJson(`https://api.bilibili.com/x/player/wbi/v2?${q}`);
-  }
-
-  async function dmViewSubs(cid, bvid) {
-    const dm = await httpJson(
-      `https://api.bilibili.com/x/v2/dm/view?oid=${cid}&type=1&bvid=${bvid}`,
-    );
-    if (dm.code !== 0) return [];
-    return (
-      (dm.data && dm.data.subtitle && dm.data.subtitle.subtitles) || []
-    ).slice();
-  }
-
-  async function aiSubtitleStat(aid, cid) {
-    const data = await httpJson(
-      `https://api.bilibili.com/x/player/v2/ai/subtitle/search/stat?aid=${aid}&cid=${cid}`,
-    );
-    if (data.code === 0 && data.data && data.data.subtitle_url) {
-      return bilibiliCall("subtitle.normalizeUrl", data.data.subtitle_url);
-    }
-    return "";
-  }
-
-  async function collectTracks(aid, cid, bvid) {
-    try {
-      const player = await playerWbiV2(aid, cid, bvid);
-      if (player.code === 0) {
-        const subs = (
-          (player.data && player.data.subtitle && player.data.subtitle.subtitles) ||
-          []
-        ).slice();
-        if (subs.length) return { subs, source: "player_wbi" };
-      }
-    } catch (_) {
-      /* fallthrough */
-    }
-    try {
-      const subs = await dmViewSubs(cid, bvid);
-      if (subs.length) return { subs, source: "dm_view" };
-    } catch (_) {
-      /* fallthrough */
-    }
-    return { subs: [], source: "" };
-  }
-
-  async function resolveUrl(track, aid, cid, source) {
-    const lan = String(track.lan || "");
-    let url = bilibiliCall("subtitle.normalizeUrl", track.subtitle_url || "");
-    if (!url && lan.startsWith("ai-") && aid) {
-      try {
-        url = await aiSubtitleStat(aid, cid);
-        if (url) return { url, source: "ai_stat" };
-      } catch (_) {
-        /* ignore */
-      }
-    }
-    return { url, source };
-  }
-
   function currentPageNumber() {
     try {
       return Math.max(1, parseInt(new URL(location.href).searchParams.get("p") || "1", 10) || 1);
@@ -2511,7 +2382,7 @@
 
     let detail;
     try {
-      detail = await viewDetail(bvid);
+      detail = await appCall("acquisition.fetchVideoDetail", runtimeNetwork(), bvid);
     } catch (e) {
       return { bvid, status: "error", error: `view/detail: ${e.message || e}` };
     }
@@ -2538,19 +2409,29 @@
 
     if (cid == null) return { ...base, status: "error", error: "no cid" };
 
-    const { subs, source: src0 } = await collectTracks(aid, cid, bvid);
+    const { subs, source: src0 } = await appCall(
+      "acquisition.collectSubtitleTracks",
+      runtimeNetwork(),
+      { aid, cid, bvid },
+    );
     if (!subs.length) return { ...base, status: "empty" };
 
     const track = bilibiliCall("subtitle.pickTrack", subs);
     if (!track) return { ...base, status: "empty" };
 
     const lan = String(track.lan || "");
-    const { url, source } = await resolveUrl(track, aid, cid, src0);
+    const { url, source } = await appCall(
+      "acquisition.resolveSubtitleUrl",
+      runtimeNetwork(),
+      track,
+      { aid, cid },
+      src0,
+    );
     if (!url) return { ...base, status: "empty", lan };
 
-    let bodyJson;
+    let body;
     try {
-      bodyJson = await httpJson(url);
+      body = await appCall("acquisition.fetchSubtitleBody", runtimeNetwork(), url);
     } catch (e) {
       return {
         ...base,
@@ -2560,7 +2441,6 @@
       };
     }
 
-    const body = bodyJson && typeof bodyJson === "object" ? bodyJson.body : null;
     if (!Array.isArray(body) || !body.length) {
       return { ...base, status: "empty", lan };
     }
@@ -2580,8 +2460,9 @@
   /** @returns {Promise<{items: Array, hasMore: boolean, meta?: object}>} */
   async function fetchListPage(ctx, page, pageSize) {
     if (ctx.type === "user") {
-      const [img, sub] = await getWbiKeys();
-      const q = encWbi(
+      const q = await appCall(
+        "acquisition.signWbi",
+        runtimeNetwork(),
         {
           mid: ctx.mid,
           pn: page,
@@ -2592,8 +2473,6 @@
           web_location: 1550101,
           order_avoided: true,
         },
-        img,
-        sub,
       );
       const result = await httpJson(
         `https://api.bilibili.com/x/space/wbi/arc/search?${q}`,
@@ -2692,8 +2571,9 @@
     }
 
     if (ctx.type === "search") {
-      const [img, sub] = await getWbiKeys();
-      const q = encWbi(
+      const q = await appCall(
+        "acquisition.signWbi",
+        runtimeNetwork(),
         {
           search_type: "video",
           keyword: ctx.keyword,
@@ -2701,8 +2581,6 @@
           page,
           page_size: 42,
         },
-        img,
-        sub,
       );
       const result = await httpJson(
         `https://api.bilibili.com/x/web-interface/wbi/search/type?${q}`,

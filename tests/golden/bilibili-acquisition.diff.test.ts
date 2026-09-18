@@ -8,17 +8,54 @@ import {
   preferredTrackIndex,
   runtimeSubtitleTracks,
   runtimeVideoView,
-  trackEndpoints,
+  subtitleAiStatUrl,
+  subtitleDmUrl,
+  subtitlePlayerUrl,
+  videoViewUrl,
+  wbi,
 } from "@subbatch/bilibili";
+import { md5 } from "@subbatch/core";
 
-import { legacyFunction } from "./legacy-harness";
+import { legacyFunction, legacySource } from "./legacy-harness";
 
 type UnknownFunction = (...args: any[]) => any;
 
 const legacyNormalizeUrl = legacyFunction<UnknownFunction>("formatSubtitleUrl");
 const legacyPickTrack = legacyFunction<UnknownFunction>("pickTrack");
+const legacyKeyFromUrl = legacyFunction<UnknownFunction>("keyFromUrl");
+const mixinTableSource = legacySource.match(
+  /const MIXIN_KEY_ENC_TAB = (\[[\s\S]*?\]);/,
+)?.[1];
+if (!mixinTableSource) throw new Error("legacy WBI mixin table not found");
+const legacyMixinKey = legacyFunction<UnknownFunction>("mixinKey", {
+  MIXIN_KEY_ENC_TAB: [...mixinTableSource.matchAll(/\d+/g)].map(([value]) => Number(value)),
+});
+const legacyEncWbi = legacyFunction<UnknownFunction>("encWbi", {
+  md5,
+  mixinKey: legacyMixinKey,
+});
 
 describe("Bilibili acquisition domain", () => {
+  it("signs WBI queries exactly like the legacy product", () => {
+    const keys = {
+      img: legacyKeyFromUrl("https://i0.hdslb.com/bfs/wbi/abcdefghijklmnopqrstuvwxyz123456.png"),
+      sub: legacyKeyFromUrl("https://i0.hdslb.com/bfs/wbi/654321zyxwvutsrqponmlkjihgfedcba.png"),
+    };
+    const params = {
+      bvid: "BV1TEST",
+      cid: 20,
+      keyword: "a!b(c)*d",
+    };
+    const wts = 1_700_000_000;
+
+    expect(wbi.keyFromUrl("https://example.com/path/key.png")).toBe(
+      legacyKeyFromUrl("https://example.com/path/key.png"),
+    );
+    expect(wbi.sign(params, keys, md5, wts)).toBe(
+      legacyEncWbi(params, keys.img, keys.sub, wts),
+    );
+  });
+
   it("normalizes subtitle URLs exactly like the legacy product", () => {
     for (const value of [
       "",
@@ -85,7 +122,7 @@ describe("Bilibili acquisition domain", () => {
     expect(runtimeSubtitleTracks(runtime, { cid: 200 })).toBeNull();
   });
 
-  it("builds page metadata and player subtitle endpoints", () => {
+  it("builds page metadata and Bilibili acquisition URLs", () => {
     const view = {
       bvid: "BV1TEST",
       aid: 123,
@@ -107,10 +144,27 @@ describe("Bilibili acquisition domain", () => {
       pages: view.pages,
       page: 2,
     });
-    expect(trackEndpoints({ bvid: "BV1TEST", cid: 20, aid: 123 })).toEqual([
-      "https://api.bilibili.com/x/player/wbi/v2?bvid=BV1TEST&cid=20&aid=123",
+    expect(videoViewUrl("BV1TEST")).toBe(
+      "https://api.bilibili.com/x/web-interface/view?bvid=BV1TEST",
+    );
+    expect(subtitlePlayerUrl({ bvid: "BV1TEST", cid: 20, aid: 123 })).toBe(
       "https://api.bilibili.com/x/player/v2?bvid=BV1TEST&cid=20&aid=123",
-    ]);
+    );
+    expect(subtitleDmUrl({ bvid: "BV1TEST", cid: 20 })).toBe(
+      "https://api.bilibili.com/x/v2/dm/view?oid=20&type=1&bvid=BV1TEST",
+    );
+    expect(subtitleAiStatUrl({ aid: 123, cid: 20 })).toBe(
+      "https://api.bilibili.com/x/player/v2/ai/subtitle/search/stat?aid=123&cid=20",
+    );
+    expect(wbi.navUrl()).toBe(
+      "https://api.bilibili.com/x/web-interface/nav",
+    );
+    expect(wbi.videoDetailUrl("signed=1")).toBe(
+      "https://api.bilibili.com/x/web-interface/wbi/view/detail?signed=1",
+    );
+    expect(wbi.playerUrl("signed=1")).toBe(
+      "https://api.bilibili.com/x/player/wbi/v2?signed=1",
+    );
     expect(
       isChargeBlocked({ is_upower_exclusive: true, is_upower_play: false }),
     ).toBe(true);

@@ -39,21 +39,36 @@ describe("Userscript acquisition orchestration", () => {
     );
   });
 
-  it("falls through player endpoints and normalizes tracks", async () => {
+  it("falls through signed WBI to player v2 and normalizes tracks", async () => {
     const network = networkWith((url) => {
-      if (url.includes("/wbi/")) {
+      if (url.endsWith("/x/web-interface/nav")) {
+        return {
+          code: 0,
+          data: {
+            wbi_img: {
+              img_url: "https://i0.hdslb.com/bfs/wbi/abcdefghijklmnopqrstuvwxyz123456.png",
+              sub_url: "https://i0.hdslb.com/bfs/wbi/654321zyxwvutsrqponmlkjihgfedcba.png",
+            },
+          },
+        };
+      }
+      if (url.includes("/x/player/wbi/v2?")) {
+        expect(url).toContain("w_rid=");
         return { code: -400, message: "wbi unavailable" };
       }
-      return {
-        code: 0,
-        data: {
-          subtitle: {
-            subtitles: [
-              { lan: "zh-CN", subtitle_url: "//sub.example/test.json" },
-            ],
+      if (url.includes("/x/player/v2?")) {
+        return {
+          code: 0,
+          data: {
+            subtitle: {
+              subtitles: [
+                { lan: "zh-CN", subtitle_url: "//sub.example/test.json" },
+              ],
+            },
           },
-        },
-      };
+        };
+      }
+      throw new Error(`unexpected URL: ${url}`);
     });
 
     await expect(
@@ -69,7 +84,7 @@ describe("Userscript acquisition orchestration", () => {
       },
     ]);
 
-    expect(network.json).toHaveBeenCalledTimes(2);
+    expect(network.json).toHaveBeenCalledTimes(3);
   });
 
   it("fetches a subtitle body through runtime.network", async () => {
@@ -91,6 +106,132 @@ describe("Userscript acquisition orchestration", () => {
         fallback: "network-or-http",
       }),
     );
+  });
+
+  it("uses signed WBI acquisition before the dm-view subtitle fallback", async () => {
+    const network = networkWith((url) => {
+      if (url.endsWith("/x/web-interface/nav")) {
+        return {
+          code: 0,
+          data: {
+            wbi_img: {
+              img_url: "https://i0.hdslb.com/bfs/wbi/abcdefghijklmnopqrstuvwxyz123456.png",
+              sub_url: "https://i0.hdslb.com/bfs/wbi/654321zyxwvutsrqponmlkjihgfedcba.png",
+            },
+          },
+        };
+      }
+      if (url.includes("/x/player/wbi/v2?")) {
+        expect(url).toContain("wts=");
+        expect(url).toContain("w_rid=");
+        return { code: -400, message: "player unavailable" };
+      }
+      if (url.includes("/x/player/v2?")) {
+        return { code: -400, message: "player v2 unavailable" };
+      }
+      if (url.includes("/x/v2/dm/view?")) {
+        return {
+          code: 0,
+          data: {
+            subtitle: {
+              subtitles: [
+                { lan: "zh-CN", subtitle_url: "//sub.example/dm.json" },
+              ],
+            },
+          },
+        };
+      }
+      throw new Error(`unexpected URL: ${url}`);
+    });
+
+    await expect(
+      acquisition.collectSubtitleTracks(network, {
+        bvid: "BV1TEST",
+        aid: 1,
+        cid: 2,
+      }),
+    ).resolves.toEqual({
+      subs: [
+        {
+          lan: "zh-CN",
+          subtitle_url: "https://sub.example/dm.json",
+        },
+      ],
+      source: "dm_view",
+    });
+
+    expect(network.json).toHaveBeenCalledTimes(4);
+  });
+
+  it("resolves missing AI subtitle URLs through the stat fallback", async () => {
+    const network = networkWith((url) => {
+      expect(url).toContain("/x/player/v2/ai/subtitle/search/stat?");
+      return {
+        code: 0,
+        data: { subtitle_url: "//sub.example/ai.json" },
+      };
+    });
+
+    await expect(
+      acquisition.resolveSubtitleUrl(
+        network,
+        { lan: "ai-zh", subtitle_url: "" },
+        { aid: 1, cid: 2 },
+        "player_wbi",
+      ),
+    ).resolves.toEqual({
+      url: "https://sub.example/ai.json",
+      source: "ai_stat",
+    });
+  });
+
+  it("treats a successful empty fallback response as empty rather than error", async () => {
+    const network = networkWith((url) => {
+      if (url.endsWith("/x/web-interface/nav")) {
+        return { code: -400, message: "nav unavailable" };
+      }
+      if (url.includes("/x/player/v2?")) {
+        return {
+          code: 0,
+          data: { subtitle: { subtitles: [] } },
+        };
+      }
+      if (url.includes("/x/v2/dm/view?")) {
+        return { code: -400, message: "dm unavailable" };
+      }
+      throw new Error(`unexpected URL: ${url}`);
+    });
+
+    await expect(
+      acquisition.fetchSubtitleTracks(network, {
+        bvid: "BV1TEST",
+        cid: 2,
+        aid: 1,
+      }),
+    ).resolves.toEqual([]);
+  });
+
+  it("preserves a real acquisition failure when every fallback fails", async () => {
+    const network = networkWith((url) => {
+      if (url.endsWith("/x/web-interface/nav")) {
+        return { code: -400, message: "nav unavailable" };
+      }
+      if (url.includes("/x/player/v2?")) {
+        return { code: -400, message: "player v2 unavailable" };
+      }
+      if (url.includes("/x/v2/dm/view?")) {
+        return { code: -400, message: "dm unavailable" };
+      }
+      throw new Error(`unexpected URL: ${url}`);
+    });
+
+    await expect(
+      acquisition.fetchSubtitleTracks(network, {
+        bvid: "BV1TEST",
+        cid: 2,
+        aid: 1,
+      }),
+    ).rejects.toThrow("dm unavailable");
   });
 
   it("preserves abort errors instead of trying the fallback endpoint", async () => {

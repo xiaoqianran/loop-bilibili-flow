@@ -130,6 +130,7 @@ bilibili.route
 └─ hasCarrierIdentity()
 
 bilibili.video
+├─ url()
 ├─ runtimeView()
 ├─ pageMeta()
 └─ isChargeBlocked()
@@ -138,9 +139,18 @@ bilibili.subtitle
 ├─ normalizeUrl()
 ├─ normalizeTracks()
 ├─ runtimeTracks()
-├─ trackEndpoints()
+├─ playerUrl()
+├─ dmUrl()
+├─ aiStatUrl()
 ├─ pickTrack()
 └─ preferredIndex()
+
+bilibili.wbi
+├─ navUrl()
+├─ videoDetailUrl()
+├─ playerUrl()
+├─ keyFromUrl()
+└─ sign()
 ```
 
 其中以下作为 v1 稳定边界：
@@ -202,11 +212,25 @@ runtime.shortcut
 app
 ├─ video.resolve()
 ├─ acquisition
+│  ├─ signWbi()
 │  ├─ fetchVideoView()
+│  ├─ fetchVideoDetail()
 │  ├─ fetchSubtitleTracks()
+│  ├─ collectSubtitleTracks()
+│  ├─ resolveSubtitleUrl()
 │  └─ fetchSubtitleBody()
 ├─ navigation.observe()
 └─ activation.start()
+```
+
+WBI 的边界固定为：
+
+```text
+bilibili.wbi        纯 Bilibili 签名规则
+      ↑
+apps/userscript     组合 core.md5 + WBI key 获取 + fallback orchestration
+      ↑
+runtime.network     只负责 HTTP I/O
 ```
 
 这些名称当前可以继续调整，直到 compat runtime 清零。

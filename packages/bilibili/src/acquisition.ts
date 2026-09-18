@@ -36,6 +36,10 @@ export interface SubtitleMeta {
   aid?: number | string | null;
 }
 
+export function videoViewUrl(bvid: string): string {
+  return `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`;
+}
+
 type UnknownRecord = Record<string, unknown>;
 
 function record(value: unknown): UnknownRecord | null {
@@ -183,16 +187,34 @@ export function runtimeSubtitleTracks(
   return null;
 }
 
-export function trackEndpoints(meta: SubtitleMeta): string[] {
+export function subtitlePlayerUrl(meta: SubtitleMeta): string {
   const params = new URLSearchParams({
     bvid: meta.bvid,
     cid: String(meta.cid),
   });
   if (meta.aid) params.set("aid", String(meta.aid));
-  return [
-    `https://api.bilibili.com/x/player/wbi/v2?${params}`,
-    `https://api.bilibili.com/x/player/v2?${params}`,
-  ];
+  return `https://api.bilibili.com/x/player/v2?${params}`;
+}
+
+export function subtitleDmUrl(
+  meta: Pick<SubtitleMeta, "bvid" | "cid">,
+): string {
+  const params = new URLSearchParams({
+    oid: String(meta.cid),
+    type: "1",
+    bvid: meta.bvid,
+  });
+  return `https://api.bilibili.com/x/v2/dm/view?${params}`;
+}
+
+export function subtitleAiStatUrl(
+  meta: Pick<SubtitleMeta, "aid" | "cid">,
+): string {
+  const params = new URLSearchParams({
+    aid: String(meta.aid || ""),
+    cid: String(meta.cid),
+  });
+  return `https://api.bilibili.com/x/player/v2/ai/subtitle/search/stat?${params}`;
 }
 
 export function pickTrack<T extends SubtitleTrack>(

@@ -8,8 +8,12 @@ export const video = {
 } as const;
 
 export const acquisition = {
+  signWbi: acquisitionApi.signWbi,
   fetchVideoView: acquisitionApi.fetchVideoView,
+  fetchVideoDetail: acquisitionApi.fetchVideoDetail,
   fetchSubtitleTracks: acquisitionApi.fetchSubtitleTracks,
+  collectSubtitleTracks: acquisitionApi.collectSubtitleTracks,
+  resolveSubtitleUrl: acquisitionApi.resolveSubtitleUrl,
   fetchSubtitleBody: acquisitionApi.fetchSubtitleBody,
 } as const;
 

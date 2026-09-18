@@ -34,11 +34,20 @@ describe("grouped public API", () => {
     expect(bilibili.route.detect).toBe(bilibili.detectContext);
     expect(bilibili.route.resolveVideo).toBe(bilibili.resolvePlayingVideoRef);
     expect(bilibili.route.playingHint).toBe(bilibili.extractPlayingVideoHint);
+    expect(bilibili.video.url).toBe(bilibili.videoViewUrl);
     expect(bilibili.video.runtimeView).toBe(bilibili.runtimeVideoView);
     expect(bilibili.video.pageMeta).toBe(bilibili.pageMeta);
     expect(bilibili.subtitle.normalizeUrl).toBe(bilibili.normalizeSubtitleUrl);
     expect(bilibili.subtitle.runtimeTracks).toBe(bilibili.runtimeSubtitleTracks);
+    expect(bilibili.subtitle.playerUrl).toBe(bilibili.subtitlePlayerUrl);
+    expect(bilibili.subtitle.dmUrl).toBe(bilibili.subtitleDmUrl);
+    expect(bilibili.subtitle.aiStatUrl).toBe(bilibili.subtitleAiStatUrl);
     expect(bilibili.subtitle.preferredIndex).toBe(bilibili.preferredTrackIndex);
+    expect(bilibili.wbi.navUrl).toBe(bilibili.navUrl);
+    expect(bilibili.wbi.videoDetailUrl).toBe(bilibili.videoDetailUrl);
+    expect(bilibili.wbi.playerUrl).toBe(bilibili.playerUrl);
+    expect(bilibili.wbi.keyFromUrl).toBe(bilibili.keyFromUrl);
+    expect(bilibili.wbi.sign).toBe(bilibili.sign);
 
     expect(runtime.userscript.create).toBe(runtime.createUserscriptRuntime);
     expect(runtime.spa.observe).toBe(runtime.installSpaNavigateAdapter);
@@ -49,8 +58,12 @@ describe("grouped public API", () => {
 
   it("groups userscript application APIs", () => {
     expect(app.video.resolve).toBe(app.resolveCurrentVideoRef);
+    expect(app.acquisition.signWbi).toBe(app.signWbi);
     expect(app.acquisition.fetchVideoView).toBe(app.fetchVideoView);
+    expect(app.acquisition.fetchVideoDetail).toBe(app.fetchVideoDetail);
     expect(app.acquisition.fetchSubtitleTracks).toBe(app.fetchSubtitleTracks);
+    expect(app.acquisition.collectSubtitleTracks).toBe(app.collectSubtitleTracks);
+    expect(app.acquisition.resolveSubtitleUrl).toBe(app.resolveSubtitleUrl);
     expect(app.acquisition.fetchSubtitleBody).toBe(app.fetchSubtitleBody);
     expect(app.navigation.observe).toBe(app.installNavigationLifecycle);
     expect(app.activation.start).toBe(app.startUserscriptLifecycle);

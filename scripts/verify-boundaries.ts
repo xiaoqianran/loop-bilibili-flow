@@ -73,6 +73,15 @@ async function main(): Promise<void> {
     }
   }
 
+  for (const file of await sourceFiles(join(root, "apps", "userscript", "src", "app"))) {
+    const source = await readFile(file, "utf8");
+    if (/api\.bilibili\.com/.test(source)) {
+      violations.push(
+        `${relative(root, file)}: Bilibili endpoint literal belongs in packages/bilibili`,
+      );
+    }
+  }
+
   if (violations.length) {
     throw new Error(
       `Architecture boundary violations:\n${violations.join("\n")}`,
@@ -80,7 +89,7 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    "Architecture boundaries verified: schemas/core/bilibili/runtime are isolated; core/schemas are platform-free",
+    "Architecture boundaries verified: packages are isolated; core/schemas are platform-free; app has no Bilibili endpoint literals",
   );
 }
 

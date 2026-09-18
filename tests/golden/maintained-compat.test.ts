@@ -32,12 +32,22 @@ describe("Maintained full-feature compatibility source", () => {
       .filter((name) => !maintainedNames.has(name))
       .sort();
     const migrated = [
+      "aiSubtitleStat",
+      "collectTracks",
+      "dmViewSubs",
+      "encWbi",
       "formatSubtitleUrl",
+      "getWbiKeys",
       "isChargeExclusiveBlocked",
+      "keyFromUrl",
+      "mixinKey",
       "pickTrack",
+      "playerWbiV2",
       "preferredTrackIndex",
+      "resolveUrl",
       "runtimeSubtitleTracks",
       "runtimeVideoView",
+      "viewDetail",
     ].sort();
 
     expect(baselineNames.size).toBeGreaterThan(250);
@@ -56,6 +66,10 @@ describe("Maintained full-feature compatibility source", () => {
     expect(maintainedSource).toContain('bilibiliCall("subtitle.preferredIndex"');
     expect(maintainedSource).toContain('"acquisition.fetchVideoView"');
     expect(maintainedSource).toContain('"acquisition.fetchSubtitleTracks"');
+    expect(maintainedSource).toContain('"acquisition.fetchVideoDetail"');
+    expect(maintainedSource).toContain('"acquisition.collectSubtitleTracks"');
+    expect(maintainedSource).toContain('"acquisition.resolveSubtitleUrl"');
+    expect(maintainedSource).toContain('"acquisition.signWbi"');
 
     const viewFetch = extractFunctionSource(maintainedSource, "fetchVideoViewFast");
     expect(viewFetch).toContain("appCall(");
@@ -76,13 +90,36 @@ describe("Maintained full-feature compatibility source", () => {
     expect(bodyFetch).toContain('"acquisition.fetchSubtitleBody"');
     expect(bodyFetch).not.toContain("requestJsonFast");
 
+    const subtitleFetch = extractFunctionSource(maintainedSource, "fetchSubtitle");
+    expect(subtitleFetch).toContain('"acquisition.fetchVideoDetail"');
+    expect(subtitleFetch).toContain('"acquisition.collectSubtitleTracks"');
+    expect(subtitleFetch).toContain('"acquisition.resolveSubtitleUrl"');
+    expect(subtitleFetch).toContain('"acquisition.fetchSubtitleBody"');
+    expect(subtitleFetch).not.toContain("/x/player/");
+    expect(subtitleFetch).not.toContain("/x/v2/dm/view");
+
+    const listFetch = extractFunctionSource(maintainedSource, "fetchListPage");
+    expect(listFetch).toContain('"acquisition.signWbi"');
+    expect(listFetch).not.toContain("getWbiKeys");
+    expect(listFetch).not.toContain("encWbi");
+
     for (const name of [
+      "aiSubtitleStat",
+      "collectTracks",
+      "dmViewSubs",
+      "encWbi",
       "formatSubtitleUrl",
+      "getWbiKeys",
       "isChargeExclusiveBlocked",
+      "keyFromUrl",
+      "mixinKey",
       "pickTrack",
+      "playerWbiV2",
       "preferredTrackIndex",
+      "resolveUrl",
       "runtimeSubtitleTracks",
       "runtimeVideoView",
+      "viewDetail",
     ]) {
       expect(maintainedSource).not.toContain(`function ${name}(`);
     }

@@ -35,6 +35,9 @@
 // SubBatch runtime (6.9.16)
 var SubBatch = (function(exports) {
   "use strict";
+  function videoViewUrl(bvid) {
+    return `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`;
+  }
   function record(value) {
     return value && typeof value === "object" ? value : null;
   }
@@ -146,16 +149,28 @@ var SubBatch = (function(exports) {
     }
     return null;
   }
-  function trackEndpoints(meta) {
+  function subtitlePlayerUrl(meta) {
     const params = new URLSearchParams({
       bvid: meta.bvid,
       cid: String(meta.cid)
     });
     if (meta.aid) params.set("aid", String(meta.aid));
-    return [
-      `https://api.bilibili.com/x/player/wbi/v2?${params}`,
-      `https://api.bilibili.com/x/player/v2?${params}`
-    ];
+    return `https://api.bilibili.com/x/player/v2?${params}`;
+  }
+  function subtitleDmUrl(meta) {
+    const params = new URLSearchParams({
+      oid: String(meta.cid),
+      type: "1",
+      bvid: meta.bvid
+    });
+    return `https://api.bilibili.com/x/v2/dm/view?${params}`;
+  }
+  function subtitleAiStatUrl(meta) {
+    const params = new URLSearchParams({
+      aid: String(meta.aid || ""),
+      cid: String(meta.cid)
+    });
+    return `https://api.bilibili.com/x/player/v2/ai/subtitle/search/stat?${params}`;
   }
   function pickTrack(tracks) {
     if (!tracks?.length) return null;
@@ -560,6 +575,105 @@ var SubBatch = (function(exports) {
     }
     return { type: "unknown", source: "auto", ...pickHintIds(merged) };
   }
+  const MIXIN_KEY_ENC_TAB = [
+    46,
+    47,
+    18,
+    2,
+    53,
+    8,
+    23,
+    32,
+    15,
+    50,
+    10,
+    31,
+    58,
+    3,
+    45,
+    35,
+    27,
+    43,
+    5,
+    49,
+    33,
+    9,
+    42,
+    19,
+    29,
+    28,
+    14,
+    39,
+    12,
+    38,
+    41,
+    13,
+    37,
+    48,
+    7,
+    16,
+    24,
+    55,
+    40,
+    61,
+    26,
+    17,
+    0,
+    1,
+    60,
+    51,
+    30,
+    4,
+    22,
+    25,
+    54,
+    21,
+    56,
+    59,
+    6,
+    63,
+    57,
+    62,
+    11,
+    36,
+    20,
+    34,
+    44,
+    52
+  ];
+  const FORBIDDEN = /* @__PURE__ */ new Set(["!", "'", "(", ")", "*"]);
+  function navUrl() {
+    return "https://api.bilibili.com/x/web-interface/nav";
+  }
+  function videoDetailUrl(query) {
+    return `https://api.bilibili.com/x/web-interface/wbi/view/detail?${query}`;
+  }
+  function playerUrl(query) {
+    return `https://api.bilibili.com/x/player/wbi/v2?${query}`;
+  }
+  function keyFromUrl(url) {
+    let name = String(url || "").split("/").pop() || "";
+    if (name.includes(".")) name = name.split(".").slice(0, -1).join(".");
+    return name;
+  }
+  function mixinKey(keys) {
+    let raw = String(keys.img) + String(keys.sub);
+    const maxIndex = Math.max(...MIXIN_KEY_ENC_TAB);
+    if (maxIndex >= raw.length) raw = raw.padEnd(maxIndex + 1, "0");
+    let mixed = "";
+    for (const index of MIXIN_KEY_ENC_TAB) mixed += raw[index] || "";
+    return mixed.slice(0, 32);
+  }
+  function sign(params, keys, hash, wts = Math.floor(Date.now() / 1e3)) {
+    const data = { ...params, wts: Number(wts) };
+    const parts = [];
+    for (const key of Object.keys(data).sort()) {
+      const value = String(data[key]).split("").filter((char) => !FORBIDDEN.has(char)).join("");
+      parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+    }
+    const query = parts.join("&");
+    return `${query}&w_rid=${hash(query + mixinKey(keys))}`;
+  }
   const BILIBILI_SOURCE = "bilibili";
   const route = {
     isCarrierShell: isVideoCarrierShell,
@@ -575,6 +689,7 @@ var SubBatch = (function(exports) {
     videoChanged: playingVideoChanged
   };
   const video$1 = {
+    url: videoViewUrl,
     runtimeView: runtimeVideoView,
     isChargeBlocked,
     pageMeta
@@ -583,9 +698,18 @@ var SubBatch = (function(exports) {
     normalizeUrl: normalizeSubtitleUrl,
     normalizeTracks,
     runtimeTracks: runtimeSubtitleTracks,
-    trackEndpoints,
+    playerUrl: subtitlePlayerUrl,
+    dmUrl: subtitleDmUrl,
+    aiStatUrl: subtitleAiStatUrl,
     pickTrack,
     preferredIndex: preferredTrackIndex
+  };
+  const wbi = {
+    navUrl,
+    videoDetailUrl,
+    playerUrl,
+    keyFromUrl,
+    sign
   };
   const bilibili = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
@@ -597,12 +721,15 @@ var SubBatch = (function(exports) {
     hasVideoCarrierIdentity,
     isChargeBlocked,
     isVideoCarrierShell,
+    keyFromUrl,
+    navUrl,
     normalizeSubtitleUrl,
     normalizeTracks,
     pageFromCid,
     pageMeta,
     pickHintIds,
     pickTrack,
+    playerUrl,
     playingVideoChanged,
     preferredTrackIndex,
     resolvePlayingVideoRef,
@@ -610,9 +737,15 @@ var SubBatch = (function(exports) {
     routeVideoKey,
     runtimeSubtitleTracks,
     runtimeVideoView,
+    sign,
     subtitle,
-    trackEndpoints,
-    video: video$1
+    subtitleAiStatUrl,
+    subtitleDmUrl,
+    subtitlePlayerUrl,
+    video: video$1,
+    videoDetailUrl,
+    videoViewUrl,
+    wbi
   }, Symbol.toStringTag, { value: "Module" }));
   const SHIFT = [
     7,
@@ -2501,11 +2634,11 @@ ${prompt2.userPromptTemplate}`
         }
       },
       network: {
-        request(url, request) {
-          return host2.request(url, request);
+        request(url, request2) {
+          return host2.request(url, request2);
         },
-        async json(url, request) {
-          const response = await host2.request(url, request);
+        async json(url, request2) {
+          const response = await host2.request(url, request2);
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${url}`);
           }
@@ -2754,45 +2887,156 @@ ${prompt2.userPromptTemplate}`
     shouldIgnore,
     register
   };
+  const WBI_TTL_MS = 6e5;
+  const wbiCache = /* @__PURE__ */ new WeakMap();
   const JSON_REQUEST = {
     credentials: "include",
     cache: "no-store",
     fallback: "network-or-http",
     headers: { Accept: "application/json, text/plain, */*" }
   };
+  function request(signal) {
+    return { ...JSON_REQUEST, ...signal ? { signal } : {} };
+  }
+  function isAbortError(error) {
+    return error?.name === "AbortError";
+  }
+  async function fetchWbiKeys(network, signal) {
+    const now = Date.now();
+    const cached = wbiCache.get(network);
+    if (cached && now - cached.at < WBI_TTL_MS) return cached.keys;
+    const payload = await network.json(
+      wbi.navUrl(),
+      request(signal)
+    );
+    const imgUrl = payload?.data?.wbi_img?.img_url || "";
+    const subUrl = payload?.data?.wbi_img?.sub_url || "";
+    if (payload?.code !== 0 || !imgUrl || !subUrl) {
+      throw new Error(payload?.message || "无法取得 WBI keys");
+    }
+    const keys = {
+      img: wbi.keyFromUrl(imgUrl),
+      sub: wbi.keyFromUrl(subUrl)
+    };
+    wbiCache.set(network, { keys, at: now });
+    return keys;
+  }
+  async function signWbi(network, params, signal, wts) {
+    const keys = await fetchWbiKeys(network, signal);
+    return wbi.sign(params, keys, md5, wts);
+  }
   async function fetchVideoView(network, bvid, signal) {
     const payload = await network.json(
-      `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`,
-      { ...JSON_REQUEST, ...signal ? { signal } : {} }
+      video$1.url(bvid),
+      request(signal)
     );
     if (payload?.code !== 0 || !payload.data) {
       throw new Error(payload?.message || "视频信息接口返回失败");
     }
     return payload.data;
   }
+  async function fetchVideoDetail(network, bvid, signal) {
+    const query = await signWbi(network, { bvid, need_elec: 0 }, signal);
+    return network.json(
+      wbi.videoDetailUrl(query),
+      request(signal)
+    );
+  }
   async function fetchSubtitleBody(network, url, signal) {
-    const payload = await network.json(url, {
-      ...JSON_REQUEST,
-      ...signal ? { signal } : {}
-    });
+    const payload = await network.json(url, request(signal));
     return Array.isArray(payload?.body) ? payload.body : [];
   }
-  async function fetchSubtitleTracks(network, meta, signal) {
-    let lastError = null;
-    for (const endpoint of subtitle.trackEndpoints(meta)) {
-      try {
-        const payload = await network.json(endpoint, { ...JSON_REQUEST, ...signal ? { signal } : {} });
-        if (payload?.code === 0) {
-          const tracks = payload.data?.subtitle?.subtitles;
-          if (Array.isArray(tracks)) return subtitle.normalizeTracks(tracks);
-        }
-        lastError = new Error(payload?.message || "字幕轨道接口返回失败");
-      } catch (error) {
-        if (error?.name === "AbortError") throw error;
-        lastError = error;
-      }
+  async function fetchPlayerWbiTracks(network, meta, signal) {
+    const params = meta.aid ? { aid: meta.aid, cid: meta.cid } : { bvid: meta.bvid, cid: meta.cid };
+    const query = await signWbi(network, params, signal);
+    const payload = await network.json(
+      wbi.playerUrl(query),
+      request(signal)
+    );
+    if (payload?.code !== 0) {
+      throw new Error(payload?.message || "WBI 字幕轨道接口返回失败");
     }
-    throw lastError || new Error("无法取得字幕轨道");
+    return subtitle.normalizeTracks(payload.data?.subtitle?.subtitles);
+  }
+  async function fetchPlayerV2Tracks(network, meta, signal) {
+    const payload = await network.json(
+      subtitle.playerUrl(meta),
+      request(signal)
+    );
+    if (payload?.code !== 0) {
+      throw new Error(payload?.message || "字幕轨道接口返回失败");
+    }
+    return subtitle.normalizeTracks(payload.data?.subtitle?.subtitles);
+  }
+  async function fetchDmSubtitleTracks(network, meta, signal) {
+    const payload = await network.json(
+      subtitle.dmUrl(meta),
+      request(signal)
+    );
+    if (payload?.code !== 0) {
+      throw new Error(payload?.message || "弹幕字幕接口返回失败");
+    }
+    return subtitle.normalizeTracks(payload.data?.subtitle?.subtitles);
+  }
+  async function fetchAiSubtitleUrl(network, meta, signal) {
+    if (!meta.aid) return "";
+    const payload = await network.json(
+      subtitle.aiStatUrl(meta),
+      request(signal)
+    );
+    if (payload?.code !== 0) return "";
+    return subtitle.normalizeUrl(payload.data?.subtitle_url);
+  }
+  async function collectSubtitleTracks(network, meta, signal) {
+    let lastError = null;
+    let hadSuccessfulResponse = false;
+    try {
+      const subs = await fetchPlayerWbiTracks(network, meta, signal);
+      hadSuccessfulResponse = true;
+      if (subs.length) return { subs, source: "player_wbi" };
+    } catch (error) {
+      if (isAbortError(error)) throw error;
+      lastError = error;
+    }
+    try {
+      const subs = await fetchPlayerV2Tracks(network, meta, signal);
+      hadSuccessfulResponse = true;
+      if (subs.length) return { subs, source: "player_v2" };
+    } catch (error) {
+      if (isAbortError(error)) throw error;
+      lastError = error;
+    }
+    try {
+      const subs = await fetchDmSubtitleTracks(network, meta, signal);
+      hadSuccessfulResponse = true;
+      if (subs.length) return { subs, source: "dm_view" };
+    } catch (error) {
+      if (isAbortError(error)) throw error;
+      lastError = error;
+    }
+    return {
+      subs: [],
+      source: "",
+      ...!hadSuccessfulResponse && lastError ? { error: lastError } : {}
+    };
+  }
+  async function resolveSubtitleUrl(network, track, meta, source = "", signal) {
+    const lan = String(track.lan || "");
+    const direct = subtitle.normalizeUrl(track.subtitle_url);
+    if (direct) return { url: direct, source };
+    if (!lan.startsWith("ai-") || !meta.aid) return { url: "", source };
+    try {
+      const url = await fetchAiSubtitleUrl(network, meta, signal);
+      return url ? { url, source: "ai_stat" } : { url: "", source };
+    } catch (error) {
+      if (isAbortError(error)) throw error;
+      return { url: "", source };
+    }
+  }
+  async function fetchSubtitleTracks(network, meta, signal) {
+    const result = await collectSubtitleTracks(network, meta, signal);
+    if (!result.subs.length && result.error) throw result.error;
+    return result.subs;
   }
   function pageFromHref(href) {
     try {
@@ -2927,8 +3171,12 @@ ${prompt2.userPromptTemplate}`
     resolve
   };
   const acquisition = {
+    signWbi,
     fetchVideoView,
+    fetchVideoDetail,
     fetchSubtitleTracks,
+    collectSubtitleTracks,
+    resolveSubtitleUrl,
     fetchSubtitleBody
   };
   const navigation = {
@@ -2941,14 +3189,18 @@ ${prompt2.userPromptTemplate}`
     __proto__: null,
     acquisition,
     activation,
+    collectSubtitleTracks,
     fetchSubtitleBody,
     fetchSubtitleTracks,
+    fetchVideoDetail,
     fetchVideoView,
     installNavigationLifecycle,
     navigation,
     observe,
     resolve,
     resolveCurrentVideoRef,
+    resolveSubtitleUrl,
+    signWbi,
     start,
     startUserscriptLifecycle,
     video
@@ -3008,24 +3260,24 @@ ${prompt2.userPromptTemplate}`
       this.cause = cause;
     }
   }
-  async function fetchRequest(pageWindow, url, request = {}) {
+  async function fetchRequest(pageWindow, url, request2 = {}) {
     let response;
     try {
       const fetchFn = pageWindow.fetch || fetch;
       response = await fetchFn.call(pageWindow, url, {
-        ...request.method ? { method: request.method } : {},
-        ...request.headers ? { headers: request.headers } : {},
-        ...request.body !== void 0 ? { body: request.body } : {},
-        ...request.signal ? { signal: request.signal } : {},
-        ...request.credentials ? { credentials: request.credentials } : {},
-        ...request.cache ? { cache: request.cache } : {}
+        ...request2.method ? { method: request2.method } : {},
+        ...request2.headers ? { headers: request2.headers } : {},
+        ...request2.body !== void 0 ? { body: request2.body } : {},
+        ...request2.signal ? { signal: request2.signal } : {},
+        ...request2.credentials ? { credentials: request2.credentials } : {},
+        ...request2.cache ? { cache: request2.cache } : {}
       });
     } catch (error) {
       throw new FetchNetworkError(error);
     }
     const headers = Object.fromEntries(response.headers.entries());
-    const useStream = request.stream === true && typeof request.onChunk === "function";
-    const text = useStream ? await readFetchStream(response, request.onChunk, request.signal) : await response.text();
+    const useStream = request2.stream === true && typeof request2.onChunk === "function";
+    const text = useStream ? await readFetchStream(response, request2.onChunk, request2.signal) : await response.text();
     return {
       status: response.status,
       ok: response.ok,
@@ -3033,14 +3285,14 @@ ${prompt2.userPromptTemplate}`
       headers
     };
   }
-  function privilegedRequest(url, request = {}) {
+  function privilegedRequest(url, request2 = {}) {
     if (typeof GM_xmlhttpRequest !== "function") {
       return Promise.reject(new Error("GM_xmlhttpRequest is unavailable"));
     }
-    if (request.signal?.aborted) {
+    if (request2.signal?.aborted) {
       return Promise.reject(new DOMException("Aborted", "AbortError"));
     }
-    const useStream = request.stream === true && typeof request.onChunk === "function";
+    const useStream = request2.stream === true && typeof request2.onChunk === "function";
     return new Promise((resolve2, reject) => {
       let lastLength = 0;
       let settled = false;
@@ -3052,7 +3304,7 @@ ${prompt2.userPromptTemplate}`
         }
         fail(new DOMException("Aborted", "AbortError"));
       };
-      const cleanup = () => request.signal?.removeEventListener("abort", onAbort);
+      const cleanup = () => request2.signal?.removeEventListener("abort", onAbort);
       const finish = (response) => {
         if (settled) return;
         settled = true;
@@ -3068,7 +3320,7 @@ ${prompt2.userPromptTemplate}`
       const emitChunk = (chunk) => {
         if (!chunk || settled) return !settled;
         try {
-          request.onChunk?.(chunk);
+          request2.onChunk?.(chunk);
           return true;
         } catch (error) {
           fail(error);
@@ -3081,9 +3333,9 @@ ${prompt2.userPromptTemplate}`
       };
       const details = {
         url,
-        ...request.method ? { method: request.method } : {},
-        ...request.headers ? { headers: request.headers } : {},
-        ...request.body !== void 0 ? { data: request.body } : {},
+        ...request2.method ? { method: request2.method } : {},
+        ...request2.headers ? { headers: request2.headers } : {},
+        ...request2.body !== void 0 ? { data: request2.body } : {},
         onload: (response) => {
           const text = String(response.responseText || "");
           if (useStream && text.length > lastLength) {
@@ -3110,14 +3362,14 @@ ${prompt2.userPromptTemplate}`
           }
         };
       }
-      request.signal?.addEventListener("abort", onAbort, { once: true });
+      request2.signal?.addEventListener("abort", onAbort, { once: true });
       requestHandle.current = GM_xmlhttpRequest(details);
       if (settled) cleanup();
     });
   }
-  function mayRetryHttpFailure(request) {
-    if (request.fallback !== "network-or-http") return false;
-    const method = String(request.method || "GET").toUpperCase();
+  function mayRetryHttpFailure(request2) {
+    if (request2.fallback !== "network-or-http") return false;
+    const method = String(request2.method || "GET").toUpperCase();
     return method === "GET" || method === "HEAD" || method === "OPTIONS";
   }
   function registerShortcuts(bindings, options = {}) {
@@ -3163,17 +3415,17 @@ ${prompt2.userPromptTemplate}`
       storageRemove: (key) => {
         if (typeof GM_deleteValue === "function") GM_deleteValue(key);
       },
-      request: async (url, request) => {
+      request: async (url, request2) => {
         try {
-          const response = await fetchRequest(pageWindow, url, request);
-          if (!response.ok && mayRetryHttpFailure(request ?? {})) {
-            return privilegedRequest(url, request);
+          const response = await fetchRequest(pageWindow, url, request2);
+          if (!response.ok && mayRetryHttpFailure(request2 ?? {})) {
+            return privilegedRequest(url, request2);
           }
           return response;
         } catch (error) {
-          if (request?.signal?.aborted) throw error;
-          if (error instanceof FetchNetworkError && request?.fallback !== "never") {
-            return privilegedRequest(url, request);
+          if (request2?.signal?.aborted) throw error;
+          if (error instanceof FetchNetworkError && request2?.fallback !== "never") {
+            return privilegedRequest(url, request2);
           }
           throw error;
         }
@@ -3454,7 +3706,6 @@ ${prompt2.userPromptTemplate}`
   const NOTE_FONT_MIN = 14;
   const NOTE_FONT_MAX = 22;
   const NOTE_FONT_DEFAULT = 14;
-  const WBI_TTL_MS = 600_000;
   const DEFAULT_DELAY_MS = 400;
   const DEFAULT_MAX_PAGES = 20;
   const MIN_W = 420;
@@ -3770,13 +4021,6 @@ ${prompt2.userPromptTemplate}`
     }
   }
 
-  const MIXIN_KEY_ENC_TAB = [
-    46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
-    33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61,
-    26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36,
-    20, 34, 44, 52,
-  ];
-
   const TYPE_LABEL = {
     video: "单个视频",
     selection: "视频选集",
@@ -3932,38 +4176,6 @@ ${prompt2.userPromptTemplate}`
 
   // ─── pure helpers (offline harness extracts // #region pure-logic) ─────
   // #region pure-logic
-  function keyFromUrl(url) {
-    let name = String(url || "").split("/").pop() || "";
-    if (name.includes(".")) name = name.split(".").slice(0, -1).join(".");
-    return name;
-  }
-
-  function mixinKey(imgKey, subKey) {
-    let raw = String(imgKey) + String(subKey);
-    const maxIdx = Math.max(...MIXIN_KEY_ENC_TAB);
-    if (maxIdx >= raw.length) raw = raw.padEnd(maxIdx + 1, "0");
-    let out = "";
-    for (const i of MIXIN_KEY_ENC_TAB) out += raw[i] || "";
-    return out.slice(0, 32);
-  }
-
-  function encWbi(params, imgKey, subKey, wts) {
-    const data = {};
-    for (const [k, v] of Object.entries(params)) data[String(k)] = v;
-    data.wts = wts == null ? Math.floor(Date.now() / 1000) : Number(wts);
-    const forbidden = new Set(["!", "'", "(", ")", "*"]);
-    const parts = [];
-    for (const key of Object.keys(data).sort()) {
-      const val = String(data[key])
-        .split("")
-        .filter((c) => !forbidden.has(c))
-        .join("");
-      parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(val)}`);
-    }
-    const query = parts.join("&");
-    return `${query}&w_rid=${md5(query + mixinKey(imgKey, subKey))}`;
-  }
-
   function extractAssistantText(piece) {
     if (!piece || typeof piece !== "object") return { content: "", reasoning: "" };
     const content =
@@ -4220,24 +4432,6 @@ ${prompt2.userPromptTemplate}`
     }
   }
   // #endregion pure-logic
-
-  let wbiCache = { img: null, sub: null, at: 0 };
-
-  async function getWbiKeys() {
-    const now = Date.now();
-    if (wbiCache.img && now - wbiCache.at < WBI_TTL_MS) {
-      return [wbiCache.img, wbiCache.sub];
-    }
-    const nav = await httpJson("https://api.bilibili.com/x/web-interface/nav");
-    const wbi = (nav && nav.data && nav.data.wbi_img) || {};
-    const imgUrl = wbi.img_url || "";
-    const subUrl = wbi.sub_url || "";
-    if (!imgUrl || !subUrl) throw new Error("failed to get wbi keys from /nav");
-    const img = keyFromUrl(imgUrl);
-    const sub = keyFromUrl(subUrl);
-    wbiCache = { img, sub, at: now };
-    return [img, sub];
-  }
 
   // ─── HTTP ───────────────────────────────────────────────────────────────
   function httpJson(url, extraHeaders) {
@@ -5311,77 +5505,6 @@ ${prompt2.userPromptTemplate}`
   }
 
   // ─── subtitle fetch (client.py) ─────────────────────────────────────────
-  async function viewDetail(bvid) {
-    const [img, sub] = await getWbiKeys();
-    const q = encWbi({ bvid, need_elec: 0 }, img, sub);
-    return httpJson(
-      `https://api.bilibili.com/x/web-interface/wbi/view/detail?${q}`,
-    );
-  }
-
-  async function playerWbiV2(aid, cid, bvid) {
-    const [img, sub] = await getWbiKeys();
-    const params = aid ? { aid, cid } : { bvid, cid };
-    const q = encWbi(params, img, sub);
-    return httpJson(`https://api.bilibili.com/x/player/wbi/v2?${q}`);
-  }
-
-  async function dmViewSubs(cid, bvid) {
-    const dm = await httpJson(
-      `https://api.bilibili.com/x/v2/dm/view?oid=${cid}&type=1&bvid=${bvid}`,
-    );
-    if (dm.code !== 0) return [];
-    return (
-      (dm.data && dm.data.subtitle && dm.data.subtitle.subtitles) || []
-    ).slice();
-  }
-
-  async function aiSubtitleStat(aid, cid) {
-    const data = await httpJson(
-      `https://api.bilibili.com/x/player/v2/ai/subtitle/search/stat?aid=${aid}&cid=${cid}`,
-    );
-    if (data.code === 0 && data.data && data.data.subtitle_url) {
-      return bilibiliCall("subtitle.normalizeUrl", data.data.subtitle_url);
-    }
-    return "";
-  }
-
-  async function collectTracks(aid, cid, bvid) {
-    try {
-      const player = await playerWbiV2(aid, cid, bvid);
-      if (player.code === 0) {
-        const subs = (
-          (player.data && player.data.subtitle && player.data.subtitle.subtitles) ||
-          []
-        ).slice();
-        if (subs.length) return { subs, source: "player_wbi" };
-      }
-    } catch (_) {
-      /* fallthrough */
-    }
-    try {
-      const subs = await dmViewSubs(cid, bvid);
-      if (subs.length) return { subs, source: "dm_view" };
-    } catch (_) {
-      /* fallthrough */
-    }
-    return { subs: [], source: "" };
-  }
-
-  async function resolveUrl(track, aid, cid, source) {
-    const lan = String(track.lan || "");
-    let url = bilibiliCall("subtitle.normalizeUrl", track.subtitle_url || "");
-    if (!url && lan.startsWith("ai-") && aid) {
-      try {
-        url = await aiSubtitleStat(aid, cid);
-        if (url) return { url, source: "ai_stat" };
-      } catch (_) {
-        /* ignore */
-      }
-    }
-    return { url, source };
-  }
-
   function currentPageNumber() {
     try {
       return Math.max(1, parseInt(new URL(location.href).searchParams.get("p") || "1", 10) || 1);
@@ -5690,7 +5813,7 @@ ${prompt2.userPromptTemplate}`
 
     let detail;
     try {
-      detail = await viewDetail(bvid);
+      detail = await appCall("acquisition.fetchVideoDetail", runtimeNetwork(), bvid);
     } catch (e) {
       return { bvid, status: "error", error: `view/detail: ${e.message || e}` };
     }
@@ -5717,19 +5840,29 @@ ${prompt2.userPromptTemplate}`
 
     if (cid == null) return { ...base, status: "error", error: "no cid" };
 
-    const { subs, source: src0 } = await collectTracks(aid, cid, bvid);
+    const { subs, source: src0 } = await appCall(
+      "acquisition.collectSubtitleTracks",
+      runtimeNetwork(),
+      { aid, cid, bvid },
+    );
     if (!subs.length) return { ...base, status: "empty" };
 
     const track = bilibiliCall("subtitle.pickTrack", subs);
     if (!track) return { ...base, status: "empty" };
 
     const lan = String(track.lan || "");
-    const { url, source } = await resolveUrl(track, aid, cid, src0);
+    const { url, source } = await appCall(
+      "acquisition.resolveSubtitleUrl",
+      runtimeNetwork(),
+      track,
+      { aid, cid },
+      src0,
+    );
     if (!url) return { ...base, status: "empty", lan };
 
-    let bodyJson;
+    let body;
     try {
-      bodyJson = await httpJson(url);
+      body = await appCall("acquisition.fetchSubtitleBody", runtimeNetwork(), url);
     } catch (e) {
       return {
         ...base,
@@ -5739,7 +5872,6 @@ ${prompt2.userPromptTemplate}`
       };
     }
 
-    const body = bodyJson && typeof bodyJson === "object" ? bodyJson.body : null;
     if (!Array.isArray(body) || !body.length) {
       return { ...base, status: "empty", lan };
     }
@@ -5759,8 +5891,9 @@ ${prompt2.userPromptTemplate}`
   /** @returns {Promise<{items: Array, hasMore: boolean, meta?: object}>} */
   async function fetchListPage(ctx, page, pageSize) {
     if (ctx.type === "user") {
-      const [img, sub] = await getWbiKeys();
-      const q = encWbi(
+      const q = await appCall(
+        "acquisition.signWbi",
+        runtimeNetwork(),
         {
           mid: ctx.mid,
           pn: page,
@@ -5771,8 +5904,6 @@ ${prompt2.userPromptTemplate}`
           web_location: 1550101,
           order_avoided: true,
         },
-        img,
-        sub,
       );
       const result = await httpJson(
         `https://api.bilibili.com/x/space/wbi/arc/search?${q}`,
@@ -5871,8 +6002,9 @@ ${prompt2.userPromptTemplate}`
     }
 
     if (ctx.type === "search") {
-      const [img, sub] = await getWbiKeys();
-      const q = encWbi(
+      const q = await appCall(
+        "acquisition.signWbi",
+        runtimeNetwork(),
         {
           search_type: "video",
           keyword: ctx.keyword,
@@ -5880,8 +6012,6 @@ ${prompt2.userPromptTemplate}`
           page,
           page_size: 42,
         },
-        img,
-        sub,
       );
       const result = await httpJson(
         `https://api.bilibili.com/x/web-interface/wbi/search/type?${q}`,
