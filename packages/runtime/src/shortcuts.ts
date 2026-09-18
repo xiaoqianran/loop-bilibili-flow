@@ -1,8 +1,4 @@
-import {
-  shortcutChordFromEvent,
-  shouldIgnoreShortcutEvent,
-  type ShortcutKeyboardEvent,
-} from "@subbatch/core";
+import { shortcut, type ShortcutKeyboardEvent } from "@subbatch/core";
 
 import type { ShortcutBinding, ShortcutRegisterOptions } from "./types";
 
@@ -36,13 +32,13 @@ export interface RegisterShortcutRuntimeOptions extends ShortcutRegisterOptions 
 /**
  * Register shortcut bindings with v6 input-protection semantics.
  */
-export function registerShortcutRuntime(
+export function register(
   bindings: readonly ShortcutBinding[],
   options: RegisterShortcutRuntimeOptions = {},
 ): () => void {
   const target = options.target;
   if (!target) {
-    throw new Error("registerShortcutRuntime requires a target EventTarget");
+    throw new Error("shortcut.register requires a target EventTarget");
   }
   const capture = options.capture !== false;
   const protectInput = options.protectInput !== false;
@@ -52,13 +48,13 @@ export function registerShortcutRuntime(
   const listener = (event: ShortcutKeyboardEvent): void => {
     if (
       protectInput &&
-      shouldIgnoreShortcutEvent(event, { enabled })
+      shortcut.shouldIgnore(event, { enabled })
     ) {
       return;
     }
     if (!protectInput && options.enabled === false) return;
 
-    const chord = shortcutChordFromEvent(event);
+    const chord = shortcut.chordFromEvent(event);
     if (!chord) return;
     const binding = bindings.find((candidate) => candidate.chord === chord);
     if (!binding) return;
@@ -83,3 +79,6 @@ export function registerShortcutRuntime(
   target.addEventListener("keydown", listener, capture);
   return () => target.removeEventListener("keydown", listener, capture);
 }
+
+/** @deprecated Use `runtime.shortcut.register`. */
+export const registerShortcutRuntime = register;

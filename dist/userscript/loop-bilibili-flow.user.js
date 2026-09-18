@@ -671,10 +671,10 @@ var SubBatch = (function(exports) {
     return md5(String(vars?.processedSubtitle || vars?.subtitle || ""));
   }
   function aiRunIdentityKey(run, inputHash = "") {
-    const prompt = run?.promptProfile || {};
-    const promptSig = md5(`${prompt.systemPrompt || ""}
+    const prompt2 = run?.promptProfile || {};
+    const promptSig = md5(`${prompt2.systemPrompt || ""}
 ---
-${prompt.userPromptTemplate || ""}`);
+${prompt2.userPromptTemplate || ""}`);
     const config = run?.config || {};
     const modelSig = md5(
       `${config.baseUrl || ""}|${config.model || ""}|${config.temperature}|${config.maxTokens}`
@@ -682,14 +682,14 @@ ${prompt.userPromptTemplate || ""}`);
     return [
       String(run?.taskId || ""),
       String(run?.profileId || ""),
-      String(run?.promptId || prompt.id || ""),
+      String(run?.promptId || prompt2.id || ""),
       promptSig,
       modelSig,
       String(inputHash || "")
     ].join(":");
   }
   function plannedAiRunFromCache(cached) {
-    const prompt = cached.promptProfile && typeof cached.promptProfile === "object" ? cached.promptProfile : null;
+    const prompt2 = cached.promptProfile && typeof cached.promptProfile === "object" ? cached.promptProfile : null;
     const config = cached.config && typeof cached.config === "object" ? {
       baseUrl: String(cached.config.baseUrl || ""),
       model: String(cached.config.model || ""),
@@ -697,7 +697,7 @@ ${prompt.userPromptTemplate || ""}`);
       maxTokens: Number(cached.config.maxTokens)
     } : null;
     const next = {
-      promptProfile: prompt,
+      promptProfile: prompt2,
       config
     };
     if (cached.taskId !== void 0) next.taskId = cached.taskId;
@@ -2097,12 +2097,12 @@ ${stripMermaidTimestampCitations(nextCode)}
     }
     return dedupeExactBlocks(parts.join("\n\n"));
   }
-  function preprocessCacheKey(item, raw, prompt, config, settings) {
+  function preprocessCacheKey(item, raw, prompt2, config, settings) {
     const source = `${item.bvid || "BV"}:P${item.page || 1}`;
     const promptSignature = md5(
-      `${prompt.systemPrompt}
+      `${prompt2.systemPrompt}
 ---
-${prompt.userPromptTemplate}`
+${prompt2.userPromptTemplate}`
     );
     const modelSignature = md5(
       `${config.baseUrl}|${config.model}|${config.temperature}|${config.maxTokens}`
@@ -2142,6 +2142,127 @@ ${prompt.userPromptTemplate}`
     );
   }
   const CORE_VERSION = "0.6.0";
+  const aiSession = {
+    ttlMs: aiSessionCacheTtlMs,
+    cacheKey: aiSessionCacheKey,
+    shouldAutoRestore: shouldRestoreAutomaticAiSession,
+    hasCache: isUsableAiSessionCache,
+    serializeRun: serializeAiRunForCache,
+    serializePreprocess: serializePreprocessRunForCache,
+    sanitizeInput: sanitizeSessionInputForCache,
+    buildCache: buildAiSessionCachePayload,
+    resolveActiveRun: resolveRestoredActiveRunId,
+    hydrateRun: draftHydratedAiRun,
+    inputHash: aiSessionInputHash,
+    runKey: aiRunIdentityKey,
+    partitionRuns: partitionPlannedAiRuns,
+    shouldSkipPrepare: shouldSkipPrepareForCachedSession,
+    hydratePreprocess: draftHydratedPreprocessRun
+  };
+  const shortcut$1 = {
+    all: SHORTCUT_COMMANDS,
+    chordFromEvent: shortcutChordFromEvent,
+    keyLabel: shortcutKeyLabel,
+    display: shortcutDisplayChord,
+    hasStrongModifier: shortcutHasStrongModifier,
+    isEditableTarget: shortcutEditableTarget,
+    shouldIgnore: shouldIgnoreShortcutEvent
+  };
+  const subtitleExport = {
+    root: SUBTITLE_EXPORT_ROOT,
+    indexName: SUBTITLE_EXPORT_INDEX_NAME,
+    videoUrl: buildVideoShortUrl,
+    videoKey: videoIndexKey,
+    safeSegment: safePathSegment,
+    fileName: joinFileName,
+    seriesTitle: resolveSeriesTitle,
+    partLabel: resolvePartLabel,
+    fileStem: resolveSubtitleFileStem,
+    folderName: resolveExportFolderName,
+    folderSegments: resolveExportFolderSegments,
+    buildPath: buildSubtitleExportRelativePath,
+    indexPath: buildSubtitleExportIndexPath,
+    collectionKey: collectionIndexKey,
+    parseIndex: parseExportIndexMd,
+    upsertVideo: upsertVideoExportIndex,
+    upsertIndex: upsertExportIndexMap,
+    upsertCollection: upsertCollectionExportIndex,
+    renderIndex: renderExportIndexMd,
+    normalizeItem: normalizeExportItem,
+    indexVideoTitle: resolveIndexVideoTitle,
+    upsertItem: upsertIndexForExportItem,
+    describe: describeSubtitleExport
+  };
+  const folio = {
+    slugHeading: slugFolioHeading,
+    normalizeLevel: normalizeFolioHeadingLevel,
+    buildOutline: buildFolioOutline,
+    flattenOutline: flattenFolioOutline,
+    countOutline: countFolioOutline,
+    chapterIndex: formatFolioChapterIndex,
+    summary: folioOutlineSummary
+  };
+  const knowledge = {
+    parse: parseKnowledgeOutput,
+    branchContext: knowledgeBranchContext
+  };
+  const library = {
+    group: {
+      upFolderLabel: buildUpFolderLabel,
+      collectionUrl: buildCollectionShortUrl,
+      inferType: inferLibraryGroupType,
+      spaceKey: resolveSpaceGroupKey,
+      groupKey: resolveLibraryGroupKey,
+      looseKey: resolveSpaceLooseVideosKey,
+      isLooseKey: isSpaceLooseVideosKey,
+      folderLabel: resolveLibraryFolderLabel,
+      folderSegments: resolveFolderSegments,
+      renderNodes: buildLibraryRenderNodes,
+      setSelection: setGroupSelection
+    },
+    meta: {
+      attachUserSpace: attachUserSpaceGroupMeta,
+      attachLooseVideos: attachSpaceLooseVideosMeta,
+      attachSelection: attachSelectionGroupMeta,
+      attachCollection: attachCollectionGroupMeta,
+      applyUgcSeason: applyUgcSeasonToItem,
+      applyUgcSeasons: applyUgcSeasonToItems,
+      applyCollectionMembership: applySpaceCollectionMembership,
+      countCollectionMatches: countSpaceCollectionMatches,
+      buildPatches: buildGroupMetaPatches,
+      applyPatch: applyGroupMetaPatchToItems,
+      mergeFields: mergeGroupFields,
+      refreshFolder: refreshGroupFolder,
+      suggestCaptureMode
+    }
+  };
+  const mermaid = {
+    stripCitations: stripMermaidTimestampCitations,
+    sanitizeMarkdown: sanitizeMermaidTimestampCitationsInMarkdown,
+    resolveRepair: resolveMermaidRepairConfig,
+    repairHint: mermaidRepairSetupHint,
+    replaceBlock: replaceMermaidBlockAt
+  };
+  const preprocess = {
+    splitCues: splitCuesForPreprocess,
+    parseTimestamp: parseEvidenceTimestampSeconds,
+    trimOverlap: trimProcessedOverlap,
+    dedupeBlocks: dedupeExactBlocks,
+    stitchChunks: stitchPreprocessChunks,
+    cacheKey: preprocessCacheKey
+  };
+  const prompt = {
+    render: renderPromptTemplate
+  };
+  const transcript = {
+    parseSeconds,
+    toCues,
+    srtTimestamp: formatSrtTimestamp,
+    toSrt: cuesToSrt,
+    toTxt: cuesToTxt,
+    clock: formatClock,
+    toAiText: cuesToAiText
+  };
   const core = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
     AI_SESSION_CACHE_PREFIX,
@@ -2153,6 +2274,7 @@ ${prompt.userPromptTemplate}`
     SUBTITLE_EXPORT_INDEX_NAME,
     SUBTITLE_EXPORT_ROOT,
     aiRunIdentityKey,
+    aiSession,
     aiSessionCacheKey,
     aiSessionCacheTtlMs,
     aiSessionInputHash,
@@ -2184,6 +2306,7 @@ ${prompt.userPromptTemplate}`
     draftHydratedAiRun,
     draftHydratedPreprocessRun,
     flattenFolioOutline,
+    folio,
     folioOutlineSummary,
     formatClock,
     formatFolioChapterIndex,
@@ -2192,9 +2315,12 @@ ${prompt.userPromptTemplate}`
     isSpaceLooseVideosKey,
     isUsableAiSessionCache,
     joinFileName,
+    knowledge,
     knowledgeBranchContext,
+    library,
     md5,
     mergeGroupFields,
+    mermaid,
     mermaidRepairSetupHint,
     normalizeExportItem,
     normalizeFolioHeadingLevel,
@@ -2203,7 +2329,9 @@ ${prompt.userPromptTemplate}`
     parseKnowledgeOutput,
     parseSeconds,
     partitionPlannedAiRuns,
+    preprocess,
     preprocessCacheKey,
+    prompt,
     refreshGroupFolder,
     renderExportIndexMd,
     renderPromptTemplate,
@@ -2227,6 +2355,7 @@ ${prompt.userPromptTemplate}`
     serializeAiRunForCache,
     serializePreprocessRunForCache,
     setGroupSelection,
+    shortcut: shortcut$1,
     shortcutChordFromEvent,
     shortcutDisplayChord,
     shortcutEditableTarget,
@@ -2239,8 +2368,10 @@ ${prompt.userPromptTemplate}`
     splitCuesForPreprocess,
     stitchPreprocessChunks,
     stripMermaidTimestampCitations,
+    subtitleExport,
     suggestCaptureMode,
     toCues,
+    transcript,
     trimProcessedOverlap,
     upsertCollectionExportIndex,
     upsertExportIndexMap,
@@ -2249,6 +2380,19 @@ ${prompt.userPromptTemplate}`
     videoIndexKey
   }, Symbol.toStringTag, { value: "Module" }));
   const BILIBILI_SOURCE = "bilibili";
+  const route = {
+    isCarrierShell: isVideoCarrierShell,
+    bvidFrom: extractBvid,
+    hasCarrierIdentity: hasVideoCarrierIdentity,
+    videoKey: routeVideoKey,
+    pickIds: pickHintIds,
+    urlHints: extractUrlHints,
+    detect: detectContext,
+    pageFromCid,
+    playingHint: extractPlayingVideoHint,
+    resolveVideo: resolvePlayingVideoRef,
+    videoChanged: playingVideoChanged
+  };
   const bilibili = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
     BILIBILI_SOURCE,
@@ -2268,10 +2412,11 @@ ${prompt.userPromptTemplate}`
     pickHintIds,
     playingVideoChanged,
     resolvePlayingVideoRef,
+    route,
     routeVideoKey,
     toCues
   }, Symbol.toStringTag, { value: "Module" }));
-  function createUserscriptRuntime(host2) {
+  function create(host2) {
     return {
       storage: {
         async get(key, fallback) {
@@ -2369,7 +2514,7 @@ ${prompt.userPromptTemplate}`
       historyPatches.delete(history);
     };
   }
-  function installSpaNavigateAdapter(options, listener) {
+  function observe$1(options, listener) {
     const historyWindow = options.historyWindow;
     const eventWindow = options.eventWindow ?? historyWindow;
     const documentRef = options.documentRef ?? null;
@@ -2424,21 +2569,21 @@ ${prompt.userPromptTemplate}`
       }
     };
   }
-  function registerShortcutRuntime(bindings, options = {}) {
+  function register(bindings, options = {}) {
     const target = options.target;
     if (!target) {
-      throw new Error("registerShortcutRuntime requires a target EventTarget");
+      throw new Error("shortcut.register requires a target EventTarget");
     }
     const capture = options.capture !== false;
     const protectInput = options.protectInput !== false;
     const stopOnMatch = options.stopOnMatch !== false;
     const enabled = options.enabled !== false;
     const listener = (event) => {
-      if (protectInput && shouldIgnoreShortcutEvent(event, { enabled })) {
+      if (protectInput && shortcut$1.shouldIgnore(event, { enabled })) {
         return;
       }
       if (!protectInput && options.enabled === false) return;
-      const chord = shortcutChordFromEvent(event);
+      const chord = shortcut$1.chordFromEvent(event);
       if (!chord) return;
       const binding = bindings.find((candidate) => candidate.chord === chord);
       if (!binding) return;
@@ -2458,6 +2603,15 @@ ${prompt.userPromptTemplate}`
     target.addEventListener("keydown", listener, capture);
     return () => target.removeEventListener("keydown", listener, capture);
   }
+  const userscript = {
+    create
+  };
+  const spa = {
+    observe: observe$1
+  };
+  const shortcut = {
+    register
+  };
   const PROMPT_STAGES = [
     "preprocess",
     "postprocess",
@@ -2537,18 +2691,19 @@ ${prompt.userPromptTemplate}`
       return 1;
     }
   }
-  function resolveCurrentVideoRef(href, pageRuntime) {
-    const ctx = detectContext(href);
-    const playing = extractPlayingVideoHint(pageRuntime);
-    const ref = resolvePlayingVideoRef({
+  function resolve(href, pageRuntime) {
+    const ctx = route.detect(href);
+    const playing = route.playingHint(pageRuntime);
+    const ref = route.resolveVideo({
       href,
-      urlBvid: ctx.bvid || extractBvid(href),
+      urlBvid: ctx.bvid || route.bvidFrom(href),
       urlPage: ctx.page || pageFromHref(href),
       playing
     });
     return ref ? { ...ref, ctx } : null;
   }
-  function installNavigationLifecycle(options) {
+  const resolveCurrentVideoRef = resolve;
+  function observe(options) {
     const originalPush = options.pageWindow.history.pushState;
     const originalReplace = options.pageWindow.history.replaceState;
     const pushState = (...args) => {
@@ -2602,8 +2757,9 @@ ${prompt.userPromptTemplate}`
       }
     };
   }
-  function startUserscriptLifecycle(options) {
-    if (!isVideoCarrierShell(options.href())) {
+  const installNavigationLifecycle = observe;
+  function start(options) {
+    if (!route.isCarrierShell(options.href())) {
       options.boot();
       return () => {
       };
@@ -2630,12 +2786,12 @@ ${prompt.userPromptTemplate}`
         return;
       }
       const href = options.href();
-      if (!isVideoCarrierShell(href)) {
+      if (!route.isCarrierShell(href)) {
         bootOnce();
         return;
       }
-      const ref = resolveCurrentVideoRef(href, options.pageWindow);
-      if (hasVideoCarrierIdentity(href, ref?.bvid || "")) bootOnce();
+      const ref = resolve(href, options.pageWindow);
+      if (route.hasCarrierIdentity(href, ref?.bvid || "")) bootOnce();
     };
     const onCandidate = () => {
       options.eventWindow.setTimeout(tryActivate, 0);
@@ -2656,11 +2812,27 @@ ${prompt.userPromptTemplate}`
     tryActivate();
     return cleanup;
   }
+  const startUserscriptLifecycle = start;
+  const video = {
+    resolve
+  };
+  const navigation = {
+    observe
+  };
+  const activation = {
+    start
+  };
   const app = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
+    activation,
     installNavigationLifecycle,
+    navigation,
+    observe,
+    resolve,
     resolveCurrentVideoRef,
-    startUserscriptLifecycle
+    start,
+    startUserscriptLifecycle,
+    video
   }, Symbol.toStringTag, { value: "Module" }));
   function parseResponseHeaders(raw) {
     const headers = {};
@@ -2750,7 +2922,7 @@ ${prompt.userPromptTemplate}`
       return Promise.reject(new DOMException("Aborted", "AbortError"));
     }
     const useStream = request.stream === true && typeof request.onChunk === "function";
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve2, reject) => {
       let lastLength = 0;
       let settled = false;
       const requestHandle = {};
@@ -2766,7 +2938,7 @@ ${prompt.userPromptTemplate}`
         if (settled) return;
         settled = true;
         cleanup();
-        resolve(response);
+        resolve2(response);
       };
       const fail = (error) => {
         if (settled) return;
@@ -2830,7 +3002,7 @@ ${prompt.userPromptTemplate}`
     return method === "GET" || method === "HEAD" || method === "OPTIONS";
   }
   function registerShortcuts(bindings, options = {}) {
-    return registerShortcutRuntime(bindings, {
+    return shortcut.register(bindings, {
       ...options,
       target: document,
       capture: true,
@@ -2849,7 +3021,7 @@ ${prompt.userPromptTemplate}`
   }
   function onNavigate(listener) {
     const pageWindow = resolvePageWindow();
-    const handle = installSpaNavigateAdapter(
+    const handle = spa.observe(
       {
         historyWindow: pageWindow,
         eventWindow: pageWindow,
@@ -2911,95 +3083,21 @@ ${prompt.userPromptTemplate}`
     };
   }
   const host = createUserscriptHost();
-  const runtime = createUserscriptRuntime(host);
+  const runtime = userscript.create(host);
+  const compat = { ...core, ...bilibili };
   const SubBatchMonorepo = {
     version: "6.9.16",
     runtime,
     host,
-    /** Entire pure core namespace — preferred bridge target. */
     core,
     bilibili,
     schemas,
     app,
+    compat,
+    ...compat,
     detectContext(href, hints) {
-      return detectContext(href ?? runtime.page.href(), hints);
-    },
-    extractBvid,
-    extractUrlHints,
-    routeVideoKey,
-    extractPlayingVideoHint,
-    resolvePlayingVideoRef,
-    playingVideoChanged,
-    pageFromCid,
-    renderPromptTemplate,
-    splitCuesForPreprocess,
-    stitchPreprocessChunks,
-    preprocessCacheKey,
-    aiSessionCacheKey,
-    aiSessionCacheTtlMs,
-    shouldRestoreAutomaticAiSession,
-    shouldSkipPrepareForCachedSession,
-    aiRunIdentityKey,
-    aiSessionInputHash,
-    partitionPlannedAiRuns,
-    isUsableAiSessionCache,
-    serializeAiRunForCache,
-    serializePreprocessRunForCache,
-    sanitizeSessionInputForCache,
-    buildAiSessionCachePayload,
-    resolveRestoredActiveRunId,
-    draftHydratedAiRun,
-    draftHydratedPreprocessRun,
-    replaceMermaidBlockAt,
-    resolveMermaidRepairConfig,
-    mermaidRepairSetupHint,
-    slugFolioHeading,
-    buildFolioOutline,
-    flattenFolioOutline,
-    countFolioOutline,
-    formatFolioChapterIndex,
-    folioOutlineSummary,
-    // ── export + library (also on core.* ; aliases for clarity) ──
-    safePathSegment,
-    joinFileName,
-    resolveSeriesTitle,
-    resolvePartLabel,
-    resolveSubtitleFileStem,
-    resolveExportFolderName,
-    buildSubtitleExportRelativePath,
-    buildSubtitleExportIndexPath,
-    buildVideoShortUrl,
-    upsertVideoExportIndex,
-    upsertExportIndexMap,
-    upsertCollectionExportIndex,
-    upsertIndexForExportItem,
-    resolveIndexVideoTitle,
-    normalizeExportItem,
-    renderExportIndexMd,
-    parseExportIndexMd,
-    buildUpFolderLabel,
-    buildCollectionShortUrl,
-    buildLibraryRenderNodes,
-    resolveLibraryGroupKey,
-    resolveLibraryFolderLabel,
-    attachSelectionGroupMeta,
-    attachCollectionGroupMeta,
-    attachUserSpaceGroupMeta,
-    attachSpaceLooseVideosMeta,
-    applySpaceCollectionMembership,
-    countSpaceCollectionMatches,
-    applyUgcSeasonToItem,
-    applyUgcSeasonToItems,
-    buildGroupMetaPatches,
-    applyGroupMetaPatchToItems,
-    mergeGroupFields,
-    setGroupSelection,
-    resolveSpaceGroupKey,
-    resolveFolderSegments,
-    resolveExportFolderSegments,
-    suggestCaptureMode,
-    shortcutCommands: SHORTCUT_COMMANDS,
-    shouldIgnoreShortcutEvent
+      return route.detect(href ?? runtime.page.href(), hints);
+    }
   };
   exports.SubBatchMonorepo = SubBatchMonorepo;
   exports.host = host;

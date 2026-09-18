@@ -24,7 +24,7 @@ export interface UserscriptHost {
   hubSend<T>(path: string, payload: unknown): Promise<T>;
 }
 
-export function createUserscriptRuntime(host: UserscriptHost): SubBatchRuntime {
+export function create(host: UserscriptHost): SubBatchRuntime {
   return {
     storage: {
       async get<T>(key: string, fallback?: T): Promise<T> {
@@ -79,3 +79,6 @@ export function createUserscriptRuntime(host: UserscriptHost): SubBatchRuntime {
     },
   };
 }
+
+/** @deprecated Use `runtime.userscript.create`. */
+export const createUserscriptRuntime = create;

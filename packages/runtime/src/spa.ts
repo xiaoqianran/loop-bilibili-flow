@@ -112,7 +112,7 @@ function subscribeHistoryPatch(
   };
 }
 
-export function installSpaNavigateAdapter(
+export function observe(
   options: InstallSpaNavigateOptions,
   listener: () => void,
 ): SpaNavigateHandle {
@@ -181,3 +181,6 @@ export function installSpaNavigateAdapter(
     },
   };
 }
+
+/** @deprecated Use `runtime.spa.observe`. */
+export const installSpaNavigateAdapter = observe;

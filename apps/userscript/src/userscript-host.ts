@@ -2,8 +2,8 @@ import {
   type ShortcutKeyboardEvent,
 } from "@subbatch/core";
 import {
-  installSpaNavigateAdapter,
-  registerShortcutRuntime,
+  shortcut as runtimeShortcut,
+  spa,
   type NetworkRequest,
   type NetworkResponse,
   type ShortcutBinding,
@@ -213,7 +213,7 @@ function registerShortcuts(
   bindings: readonly ShortcutBinding[],
   options: ShortcutRegisterOptions = {},
 ): () => void {
-  return registerShortcutRuntime(bindings, {
+  return runtimeShortcut.register(bindings, {
     ...options,
     target: document,
     capture: true,
@@ -237,7 +237,7 @@ function pageHrefOf(pageWindow: Window): string {
 
 function onNavigate(listener: () => void): () => void {
   const pageWindow = resolvePageWindow();
-  const handle = installSpaNavigateAdapter(
+  const handle = spa.observe(
     {
       historyWindow: pageWindow,
       eventWindow: pageWindow,

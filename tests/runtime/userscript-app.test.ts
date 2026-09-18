@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  installNavigationLifecycle,
-  resolveCurrentVideoRef,
-  startUserscriptLifecycle,
+  activation,
+  navigation,
+  video,
 } from "../../apps/userscript/src/app";
 
 class FakeTarget {
@@ -68,7 +68,7 @@ describe("userscript app boundary", () => {
       },
     };
 
-    const ref = resolveCurrentVideoRef(
+    const ref = video.resolve(
       "https://www.bilibili.com/video/BV1STALEURL01?p=1",
       runtime,
     );
@@ -88,7 +88,7 @@ describe("userscript app boundary", () => {
     const document = new FakeDocument();
     let boots = 0;
 
-    startUserscriptLifecycle({
+    activation.start({
       pageWindow: pageWindow as unknown as Window,
       eventWindow: eventWindow as unknown as Window,
       document: document as unknown as Document,
@@ -107,7 +107,7 @@ describe("userscript app boundary", () => {
     const document = new FakeDocument();
     let boots = 0;
 
-    startUserscriptLifecycle({
+    activation.start({
       pageWindow: pageWindow as unknown as Window,
       eventWindow: eventWindow as unknown as Window,
       document: document as unknown as Document,
@@ -136,7 +136,7 @@ describe("userscript app boundary", () => {
     let pageShows = 0;
     let visible = 0;
 
-    const cleanup = installNavigationLifecycle({
+    const cleanup = navigation.observe({
       pageWindow: pageWindow as unknown as Window,
       eventWindow: eventWindow as unknown as Window,
       document: document as unknown as Document,

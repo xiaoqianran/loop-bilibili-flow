@@ -14,7 +14,7 @@ export interface NavigationLifecycleOptions {
  * This owns the imperative history/event wiring; product code only supplies
  * callbacks describing what a navigation means for the application.
  */
-export function installNavigationLifecycle(
+export function observe(
   options: NavigationLifecycleOptions,
 ): () => void {
   const originalPush = options.pageWindow.history.pushState;
@@ -76,3 +76,6 @@ export function installNavigationLifecycle(
     }
   };
 }
+
+/** @deprecated Use `navigation.observe` from the app namespace. */
+export const installNavigationLifecycle = observe;

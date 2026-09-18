@@ -1,9 +1,6 @@
-import {
-  hasVideoCarrierIdentity,
-  isVideoCarrierShell,
-} from "@subbatch/bilibili";
+import { route } from "@subbatch/bilibili";
 
-import { resolveCurrentVideoRef } from "./current-video";
+import { resolve } from "./current-video";
 
 export interface UserscriptLifecycleOptions {
   pageWindow: Window;
@@ -21,10 +18,10 @@ export interface UserscriptLifecycleOptions {
  * /festival/* and /blackboard/* defer boot until a real BV can be observed
  * from the URL or live player state.
  */
-export function startUserscriptLifecycle(
+export function start(
   options: UserscriptLifecycleOptions,
 ): () => void {
-  if (!isVideoCarrierShell(options.href())) {
+  if (!route.isCarrierShell(options.href())) {
     options.boot();
     return () => {};
   }
@@ -54,13 +51,13 @@ export function startUserscriptLifecycle(
       return;
     }
     const href = options.href();
-    if (!isVideoCarrierShell(href)) {
+    if (!route.isCarrierShell(href)) {
       bootOnce();
       return;
     }
 
-    const ref = resolveCurrentVideoRef(href, options.pageWindow);
-    if (hasVideoCarrierIdentity(href, ref?.bvid || "")) bootOnce();
+    const ref = resolve(href, options.pageWindow);
+    if (route.hasCarrierIdentity(href, ref?.bvid || "")) bootOnce();
   };
 
   const onCandidate = () => {
@@ -86,3 +83,6 @@ export function startUserscriptLifecycle(
   tryActivate();
   return cleanup;
 }
+
+/** @deprecated Use `activation.start` from the app namespace. */
+export const startUserscriptLifecycle = start;
