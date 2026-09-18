@@ -1363,6 +1363,15 @@
     }
   }
 
+  function appFn(name) {
+    try {
+      const mono = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo : null;
+      const fn = mono?.app?.[name];
+      return typeof fn === "function" ? fn : null;
+    } catch (_) {
+      return null;
+    }
+  }
   /** Standalone install (no SubBatch bootstrap) must still capture subtitles. */
   const CORE_LOCAL_FALLBACKS = {
     buildLibraryRenderNodes(entries) {
@@ -2215,12 +2224,16 @@
    * 连播时 URL / __INITIAL_STATE__ 会落后于 player，优先走 monorepo 播放器身份。
    */
   function currentRouteVideoRef() {
-    const ctx = detectContext(location.href);
-    const resolve = bilibiliFn("resolvePlayingVideoRef");
-    const extract = bilibiliFn("extractPlayingVideoHint");
-    const playing = typeof extract === "function" ? extract(pageWindow) : null;
+    const resolve = appFn("resolveCurrentVideoRef");
     if (typeof resolve === "function") {
-      const ref = resolve({
+      return resolve(location.href, pageWindow);
+    }
+    const ctx = detectContext(location.href);
+    const resolvePlaying = bilibiliFn("resolvePlayingVideoRef");
+    const extractPlaying = bilibiliFn("extractPlayingVideoHint");
+    const playing = typeof extractPlaying === "function" ? extractPlaying(pageWindow) : null;
+    if (typeof resolvePlaying === "function") {
+      const ref = resolvePlaying({
         href: location.href,
         urlBvid: ctx?.bvid || extractBvid(location.href),
         urlPage: ctx?.page || currentPageNumber(),
@@ -17575,38 +17588,51 @@ body{padding:48px 20px 80px}
     bindGlobalShortcuts();
     refreshContextUI();
     bindTranscriptVideoEvents();
-    const _push = pageWindow.history.pushState;
-    const _replace = pageWindow.history.replaceState;
-    pageWindow.history.pushState = function () {
-      const result = _push.apply(this, arguments);
-      setTimeout(onMaybeNavigate, 0);
-      return result;
-    };
-    pageWindow.history.replaceState = function () {
-      const result = _replace.apply(this, arguments);
-      setTimeout(onMaybeNavigate, 0);
-      return result;
-    };
-    pageWindow.addEventListener("popstate", onMaybeNavigate);
-    pageWindow.addEventListener("hashchange", onMaybeNavigate);
-    window.addEventListener("pageshow", () => {
-      onMaybeNavigate();
-      scheduleAutoCapture("pageshow", 120);
-    });
-    document.addEventListener("visibilitychange", () => {
-      // 回到前台时补一次路由对齐；真正的抓取不应依赖可见性（见 scheduleAutoCapture）。
-      if (document.visibilityState === "visible") {
+    const installNavigation = appFn("installNavigationLifecycle");
+    if (typeof installNavigation === "function") {
+      installNavigation({
+        pageWindow,
+        eventWindow: window,
+        document,
+        onNavigate: onMaybeNavigate,
+        onPageShow: () => scheduleAutoCapture("pageshow", 120),
+        onVisible: () => scheduleAutoCapture("visible", 120),
+        pollMs: 800,
+      });
+    } else {
+      const _push = pageWindow.history.pushState;
+      const _replace = pageWindow.history.replaceState;
+      pageWindow.history.pushState = function () {
+        const result = _push.apply(this, arguments);
+        setTimeout(onMaybeNavigate, 0);
+        return result;
+      };
+      pageWindow.history.replaceState = function () {
+        const result = _replace.apply(this, arguments);
+        setTimeout(onMaybeNavigate, 0);
+        return result;
+      };
+      pageWindow.addEventListener("popstate", onMaybeNavigate);
+      pageWindow.addEventListener("hashchange", onMaybeNavigate);
+      window.addEventListener("pageshow", () => {
         onMaybeNavigate();
-        scheduleAutoCapture("visible", 120);
-      }
-    });
-    // History hook 是主路径；播放器连播常先换 cid/BV、后改 URL，所以还要听 media 换源并更勤地对齐身份。
-    document.addEventListener("loadstart", (event) => {
-      if (event.target instanceof HTMLMediaElement) onMaybeNavigate();
-    }, true);
-    setInterval(() => {
-      onMaybeNavigate();
-    }, 800);
+        scheduleAutoCapture("pageshow", 120);
+      });
+      document.addEventListener("visibilitychange", () => {
+        // 回到前台时补一次路由对齐；真正的抓取不应依赖可见性（见 scheduleAutoCapture）。
+        if (document.visibilityState === "visible") {
+          onMaybeNavigate();
+          scheduleAutoCapture("visible", 120);
+        }
+      });
+      // History hook 是主路径；播放器连播常先换 cid/BV、后改 URL，所以还要听 media 换源并更勤地对齐身份。
+      document.addEventListener("loadstart", (event) => {
+        if (event.target instanceof HTMLMediaElement) onMaybeNavigate();
+      }, true);
+      setInterval(() => {
+        onMaybeNavigate();
+      }, 800);
+    }
 
     // 初次打开页面也默认抓取：不要求打开面板、不要求标签页在前台、不要求点击“扫描”。
     const routeKey = currentRouteVideoKey();
@@ -17618,6 +17644,17 @@ body{padding:48px 20px 80px}
   }
 
   function startUserscript() {
+    const start = appFn("startUserscriptLifecycle");
+    if (typeof start === "function") {
+      start({
+        pageWindow,
+        eventWindow: window,
+        document,
+        href: () => location.href,
+        boot,
+      });
+      return;
+    }
     if (!isDeferredVideoCarrierPage(location.href)) {
       boot();
       return;

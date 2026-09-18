@@ -71,18 +71,21 @@ describe("Maintained full-feature compatibility source", () => {
     expect(navigateSource).toContain('bilibiliFn("playingVideoChanged")');
   });
 
-  it("resolves the playing video from the player before a stale URL", () => {
-    expect(extractFunctionSource(maintainedSource, "currentRouteVideoRef")).toContain(
-      'bilibiliFn("resolvePlayingVideoRef")',
+  it("delegates current video resolution to the userscript app boundary", () => {
+    const currentVideoSource = extractFunctionSource(
+      maintainedSource,
+      "currentRouteVideoRef",
     );
-    expect(extractFunctionSource(maintainedSource, "currentRouteVideoRef")).toContain(
-      'bilibiliFn("extractPlayingVideoHint")',
-    );
+    expect(currentVideoSource).toContain('appFn("resolveCurrentVideoRef")');
+    expect(currentVideoSource).toContain('bilibiliFn("resolvePlayingVideoRef")');
+    expect(currentVideoSource).toContain('bilibiliFn("extractPlayingVideoHint")');
     expect(extractFunctionSource(maintainedSource, "extractPageHints")).toContain(
       'bilibiliFn("extractPlayingVideoHint")',
     );
-    expect(extractFunctionSource(maintainedSource, "boot")).toContain("HTMLMediaElement");
-    expect(extractFunctionSource(maintainedSource, "boot")).toContain("800");
+    const bootSource = extractFunctionSource(maintainedSource, "boot");
+    expect(bootSource).toContain('appFn("installNavigationLifecycle")');
+    expect(bootSource).toContain("HTMLMediaElement");
+    expect(bootSource).toContain("800");
   });
 
   it("resets preprocess view to raw when SPA navigation aborts AI state", () => {
@@ -205,6 +208,9 @@ describe("Maintained full-feature compatibility source", () => {
     expect(maintainedSource).toContain('|| "6.9.16"');
     expect(maintainedSource).toContain("function isDeferredVideoCarrierPage(");
     expect(maintainedSource).toContain("function startUserscript(");
+    const startSource = extractFunctionSource(maintainedSource, "startUserscript");
+    expect(startSource).toContain('appFn("startUserscriptLifecycle")');
+    expect(startSource).toContain("isDeferredVideoCarrierPage(location.href)");
     expect(maintainedSource).toContain('bilibiliFn("extractPlayingVideoHint")');
     expect(maintainedSource).toContain("--bsb-ui-font: 14px");
     expect(maintainedSource).toContain("font-size: 14px !important");

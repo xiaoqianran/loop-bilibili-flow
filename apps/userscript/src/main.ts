@@ -14,6 +14,7 @@ import * as core from "@subbatch/core";
 import { createUserscriptRuntime } from "@subbatch/runtime";
 import * as schemas from "@subbatch/schemas";
 
+import * as app from "./app";
 import { createUserscriptHost } from "./userscript-host";
 
 const host = createUserscriptHost();
@@ -32,6 +33,7 @@ const SubBatchMonorepo = {
   core,
   bilibili,
   schemas,
+  app,
   detectContext(href?: string, hints?: bilibili.BilibiliPageHints) {
     return bilibili.detectContext(href ?? runtime.page.href(), hints);
   },
