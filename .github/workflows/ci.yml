@@ -54,7 +54,6 @@ jobs:
         with:
           name: subbatch-userscript
           path: |
-            dist/userscript/subbatch.user.js
-            dist/userscript/subbatch.compat.user.js
-            dist/userscript/subbatch.pure.user.js
+            dist/userscript/loop-bilibili-flow.user.js
+            dist/lab/subbatch.pure.user.js
           if-no-files-found: error
