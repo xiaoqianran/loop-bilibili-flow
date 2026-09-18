@@ -34,6 +34,11 @@ describe("grouped public API", () => {
     expect(bilibili.route.detect).toBe(bilibili.detectContext);
     expect(bilibili.route.resolveVideo).toBe(bilibili.resolvePlayingVideoRef);
     expect(bilibili.route.playingHint).toBe(bilibili.extractPlayingVideoHint);
+    expect(bilibili.video.runtimeView).toBe(bilibili.runtimeVideoView);
+    expect(bilibili.video.pageMeta).toBe(bilibili.pageMeta);
+    expect(bilibili.subtitle.normalizeUrl).toBe(bilibili.normalizeSubtitleUrl);
+    expect(bilibili.subtitle.runtimeTracks).toBe(bilibili.runtimeSubtitleTracks);
+    expect(bilibili.subtitle.preferredIndex).toBe(bilibili.preferredTrackIndex);
 
     expect(runtime.userscript.create).toBe(runtime.createUserscriptRuntime);
     expect(runtime.spa.observe).toBe(runtime.installSpaNavigateAdapter);
@@ -44,6 +49,9 @@ describe("grouped public API", () => {
 
   it("groups userscript application APIs", () => {
     expect(app.video.resolve).toBe(app.resolveCurrentVideoRef);
+    expect(app.acquisition.fetchVideoView).toBe(app.fetchVideoView);
+    expect(app.acquisition.fetchSubtitleTracks).toBe(app.fetchSubtitleTracks);
+    expect(app.acquisition.fetchSubtitleBody).toBe(app.fetchSubtitleBody);
     expect(app.navigation.observe).toBe(app.installNavigationLifecycle);
     expect(app.activation.start).toBe(app.startUserscriptLifecycle);
   });

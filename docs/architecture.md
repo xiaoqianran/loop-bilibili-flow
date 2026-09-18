@@ -128,6 +128,19 @@ bilibili.route
 ├─ videoChanged()
 ├─ isCarrierShell()
 └─ hasCarrierIdentity()
+
+bilibili.video
+├─ runtimeView()
+├─ pageMeta()
+└─ isChargeBlocked()
+
+bilibili.subtitle
+├─ normalizeUrl()
+├─ normalizeTracks()
+├─ runtimeTracks()
+├─ trackEndpoints()
+├─ pickTrack()
+└─ preferredIndex()
 ```
 
 其中以下作为 v1 稳定边界：
@@ -188,6 +201,10 @@ runtime.shortcut
 ```text
 app
 ├─ video.resolve()
+├─ acquisition
+│  ├─ fetchVideoView()
+│  ├─ fetchSubtitleTracks()
+│  └─ fetchSubtitleBody()
 ├─ navigation.observe()
 └─ activation.start()
 ```
@@ -240,13 +257,26 @@ app.video.resolve()
        CurrentVideoRef
 ```
 
-### 4. 典型字幕处理
+### 4. 典型字幕获取与处理
 
 ```text
-runtime.network
+Bilibili page/runtime
+      |
+      ├─ bilibili.video.runtimeView()
+      └─ bilibili.subtitle.runtimeTracks()
       |
       v
-app fetch/orchestrate
+compat cache (temporary)
+      |
+    cache miss
+      v
+app.acquisition
+      |
+      ├─ bilibili.video/subtitle rules
+      └─ runtime.network
+      |
+      v
+subtitle body
       |
       v
 core.transcript.toCues()
@@ -295,6 +325,7 @@ FROZEN
   schemas contracts
   core canonical grouped API（上文 v1 子集）
   bilibili.route v1
+  bilibili.video / bilibili.subtitle acquisition rules
   runtime ports + runtime.shortcut/spa/userscript
 
 INTERNAL

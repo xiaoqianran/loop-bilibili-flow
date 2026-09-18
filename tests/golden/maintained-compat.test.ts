@@ -25,15 +25,67 @@ function functionNames(source: string): Set<string> {
 }
 
 describe("Maintained full-feature compatibility source", () => {
-  it("retains every named function from the frozen external baseline", () => {
+  it("only removes functions that have a registered canonical owner", () => {
     const baselineNames = functionNames(legacySource);
     const maintainedNames = functionNames(maintainedSource);
-    const missing = [...baselineNames].filter((name) => !maintainedNames.has(name));
+    const missing = [...baselineNames]
+      .filter((name) => !maintainedNames.has(name))
+      .sort();
+    const migrated = [
+      "formatSubtitleUrl",
+      "isChargeExclusiveBlocked",
+      "pickTrack",
+      "preferredTrackIndex",
+      "runtimeSubtitleTracks",
+      "runtimeVideoView",
+    ].sort();
 
     expect(baselineNames.size).toBeGreaterThan(250);
-    expect(missing).toEqual([]);
+    expect(missing).toEqual(migrated);
     expect(maintainedSource).toContain("function boot()");
     expect(maintainedSource).toContain("scheduleAutoCapture(\"initial\", 180)");
+  });
+
+  it("delegates migrated acquisition rules to grouped Bilibili APIs", () => {
+    expect(maintainedSource).toContain("function bilibiliCall(");
+    expect(maintainedSource).toContain('bilibiliCall("video.runtimeView"');
+    expect(maintainedSource).toContain('bilibiliCall("video.pageMeta"');
+    expect(maintainedSource).toContain('bilibiliCall("video.isChargeBlocked"');
+    expect(maintainedSource).toContain('bilibiliCall("subtitle.runtimeTracks"');
+    expect(maintainedSource).toContain('bilibiliCall("subtitle.pickTrack"');
+    expect(maintainedSource).toContain('bilibiliCall("subtitle.preferredIndex"');
+    expect(maintainedSource).toContain('"acquisition.fetchVideoView"');
+    expect(maintainedSource).toContain('"acquisition.fetchSubtitleTracks"');
+
+    const viewFetch = extractFunctionSource(maintainedSource, "fetchVideoViewFast");
+    expect(viewFetch).toContain("appCall(");
+    expect(viewFetch).toContain('"acquisition.fetchVideoView"');
+    expect(viewFetch).not.toContain("requestJsonFast");
+    expect(viewFetch).not.toContain("/x/web-interface/view");
+
+    const trackFetch = extractFunctionSource(
+      maintainedSource,
+      "fetchSubtitleTracksFast",
+    );
+    expect(trackFetch).toContain("appCall(");
+    expect(trackFetch).toContain('"acquisition.fetchSubtitleTracks"');
+    expect(trackFetch).not.toContain("requestJsonFast");
+    expect(trackFetch).not.toContain("/x/player/");
+
+    const bodyFetch = extractFunctionSource(maintainedSource, "fetchTrackBodyFast");
+    expect(bodyFetch).toContain('"acquisition.fetchSubtitleBody"');
+    expect(bodyFetch).not.toContain("requestJsonFast");
+
+    for (const name of [
+      "formatSubtitleUrl",
+      "isChargeExclusiveBlocked",
+      "pickTrack",
+      "preferredTrackIndex",
+      "runtimeSubtitleTracks",
+      "runtimeVideoView",
+    ]) {
+      expect(maintainedSource).not.toContain(`function ${name}(`);
+    }
   });
 
   it("fixes query-key BV corruption while documenting the baseline behavior", () => {

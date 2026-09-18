@@ -7,12 +7,53 @@ const legacyPath = fileURLToPath(
 
 export const legacySource = readFileSync(legacyPath, "utf8");
 
+function matchingParen(source: string, openIndex: number): number {
+  let depth = 0;
+  let quote = "";
+  let escaped = false;
+
+  for (let index = openIndex; index < source.length; index += 1) {
+    const char = source[index];
+
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === quote) quote = "";
+      continue;
+    }
+
+    if (char === '"' || char === "'" || char === "`") {
+      quote = char;
+      continue;
+    }
+    if (char === "(") depth += 1;
+    if (char === ")") {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+
+  return -1;
+}
+
 export function extractFunctionSource(source: string, name: string): string {
   const marker = `function ${name}(`;
   const start = source.indexOf(marker);
   if (start < 0) throw new Error(`Legacy function not found: ${name}`);
 
-  const bodyStart = source.indexOf("{", start + marker.length);
+  const paramsStart = start + marker.length - 1;
+  const paramsEnd = matchingParen(source, paramsStart);
+  if (paramsEnd < 0) {
+    throw new Error(`Legacy function parameters not terminated: ${name}`);
+  }
+
+  const bodyStart = source.indexOf("{", paramsEnd + 1);
   if (bodyStart < 0) throw new Error(`Legacy function body not found: ${name}`);
 
   let depth = 0;

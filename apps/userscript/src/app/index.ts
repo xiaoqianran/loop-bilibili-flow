@@ -1,9 +1,16 @@
+import * as acquisitionApi from "./acquisition";
 import { resolve } from "./current-video";
 import { observe } from "./navigation";
 import { start } from "./video-carrier";
 
 export const video = {
   resolve,
+} as const;
+
+export const acquisition = {
+  fetchVideoView: acquisitionApi.fetchVideoView,
+  fetchSubtitleTracks: acquisitionApi.fetchSubtitleTracks,
+  fetchSubtitleBody: acquisitionApi.fetchSubtitleBody,
 } as const;
 
 export const navigation = {
@@ -15,6 +22,7 @@ export const activation = {
 } as const;
 
 // Compatibility flat exports.
+export * from "./acquisition";
 export * from "./current-video";
 export * from "./navigation";
 export * from "./video-carrier";

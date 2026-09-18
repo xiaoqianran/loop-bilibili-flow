@@ -29,16 +29,35 @@ schemas     core     bilibili     runtime
 已接管并可依赖的 canonical API：
 
 - `core.prompt / transcript / preprocess / aiSession / mermaid / subtitleExport`
-- `bilibili.route`
+- `bilibili.route / bilibili.video / bilibili.subtitle`
 - `runtime.userscript / runtime.spa / runtime.shortcut`
 - Runtime Ports：Storage / Network / Clipboard / Style / Shortcut / Page
-- App 当前内部边界：`app.video / app.navigation / app.activation`
+- App 当前内部边界：`app.video / app.acquisition / app.navigation / app.activation`
 
 Shortcut 的浏览器事件处理已经从 Core 移到 Runtime；Core 只保留产品 command catalog。
 
+## 已真实迁出的 acquisition slice
+
+`video view + subtitle track discovery + subtitle body network I/O` 已接管：
+
+```text
+compat cache/persistence
+        |
+        v
+app.acquisition
+   |            \
+   v             v
+bilibili      runtime.network
+video/subtitle
+```
+
+compat 已删除本地 `formatSubtitleUrl / pickTrack / runtimeVideoView /
+runtimeSubtitleTracks / preferredTrackIndex / isChargeExclusiveBlocked`，
+并且 view/track/body 的普通网络请求不再直接调用 `requestJsonFast`。
+
 ## 仍由 compat body 承载
 
-- Bilibili API / WBI 与合集扫描 orchestration
+- WBI key/sign、AI 字幕地址补全、dm_view fallback 与合集扫描 orchestration
 - Studio DOM / CSS UI
 - 浏览器内 PRE / POST Worker Pool 与模型请求编排
 - Mermaid / Markdown 第三方渲染加载

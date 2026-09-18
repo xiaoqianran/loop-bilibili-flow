@@ -29,7 +29,9 @@ core
 └─ transcript.*
 
 bilibili
-└─ route.*
+├─ route.*
+├─ video.*
+└─ subtitle.*
 
 runtime
 ├─ userscript.*
@@ -38,6 +40,7 @@ runtime
 
 app
 ├─ video.*
+├─ acquisition.*
 ├─ navigation.*
 └─ activation.*
 ```
@@ -53,11 +56,16 @@ runtime.shortcut.shouldIgnore(event);
 
 bilibili.route.detect(href);
 bilibili.route.resolveVideo(input);
+bilibili.video.runtimeView(pageWindow, bvid);
+bilibili.subtitle.runtimeTracks(pageWindow, meta);
+bilibili.subtitle.pickTrack(tracks);
 
 runtime.spa.observe(options, onNavigate);
 runtime.shortcut.register(bindings);
 
 app.video.resolve(href, pageWindow);
+app.acquisition.fetchVideoView(runtime.network, bvid);
+app.acquisition.fetchSubtitleTracks(runtime.network, meta);
 app.navigation.observe(options);
 app.activation.start(options);
 ```
