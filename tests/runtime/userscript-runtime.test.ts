@@ -27,10 +27,6 @@ function fakeHost(): UserscriptHost {
     pageHref: () => "https://www.bilibili.com/video/BV1TEST",
     registerShortcuts: () => vi.fn(),
     onNavigate: () => vi.fn(),
-    hubAvailable: async () => false,
-    hubSend: async () => {
-      throw new Error("disabled");
-    },
   };
 }
 

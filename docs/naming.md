@@ -17,7 +17,7 @@ core.mermaid.sanitizeMarkdown()
 ```text
 core
 ├─ aiSession.*
-├─ shortcut.*
+├─ command.shortcuts
 ├─ subtitleExport.*
 ├─ folio.*
 ├─ knowledge.*
@@ -49,7 +49,7 @@ core.aiSession.cacheKey(routeKey);
 core.mermaid.sanitizeMarkdown(markdown);
 core.subtitleExport.buildPath(item, "srt");
 core.preprocess.stitchChunks(chunks, outputs);
-core.shortcut.shouldIgnore(event);
+runtime.shortcut.shouldIgnore(event);
 
 bilibili.route.detect(href);
 bilibili.route.resolveVideo(input);
@@ -66,7 +66,7 @@ app.activation.start(options);
 
 旧 flat API 暂时保留，只用于：
 
-- `loop-bilibili.js` 兼容主体；
+- `compat/maintained-runtime.js` 临时兼容主体；
 - Golden / differential tests；
 - 尚未迁移的旧调用方。
 

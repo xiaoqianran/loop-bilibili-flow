@@ -47,40 +47,14 @@ importers:
       '@subbatch/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
-      '@subbatch/schemas':
-        specifier: workspace:*
-        version: link:../../packages/schemas
-      '@subbatch/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
 
-  packages/bilibili:
-    dependencies:
-      '@subbatch/core':
-        specifier: workspace:*
-        version: link:../core
+  packages/bilibili: {}
 
   packages/core: {}
 
-  packages/hub-client:
-    dependencies:
-      '@subbatch/schemas':
-        specifier: workspace:*
-        version: link:../schemas
-
-  packages/runtime:
-    dependencies:
-      '@subbatch/core':
-        specifier: workspace:*
-        version: link:../core
+  packages/runtime: {}
 
   packages/schemas: {}
-
-  packages/ui:
-    dependencies:
-      '@subbatch/core':
-        specifier: workspace:*
-        version: link:../core
 
 packages:
 

@@ -1,5 +1,5 @@
 import * as aiSessionApi from "./ai-session";
-import * as shortcutApi from "./commands";
+import * as commandApi from "./commands";
 import * as subtitleExportApi from "./export/subtitle-download";
 import * as folioApi from "./folio";
 import * as knowledgeApi from "./knowledge";
@@ -37,14 +37,8 @@ export const aiSession = {
   hydratePreprocess: aiSessionApi.draftHydratedPreprocessRun,
 } as const;
 
-export const shortcut = {
-  all: shortcutApi.SHORTCUT_COMMANDS,
-  chordFromEvent: shortcutApi.shortcutChordFromEvent,
-  keyLabel: shortcutApi.shortcutKeyLabel,
-  display: shortcutApi.shortcutDisplayChord,
-  hasStrongModifier: shortcutApi.shortcutHasStrongModifier,
-  isEditableTarget: shortcutApi.shortcutEditableTarget,
-  shouldIgnore: shortcutApi.shouldIgnoreShortcutEvent,
+export const command = {
+  shortcuts: commandApi.SHORTCUT_COMMANDS,
 } as const;
 
 export const subtitleExport = {

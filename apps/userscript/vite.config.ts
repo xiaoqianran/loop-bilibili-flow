@@ -13,7 +13,7 @@ export default defineConfig({
     },
     rollupOptions: {
       output: {
-        // Keep named exports on the IIFE global (SubBatch.runtime, etc.).
+        // Expose the single SubBatchMonorepo composition object on the IIFE global.
         exports: "named",
       },
     },

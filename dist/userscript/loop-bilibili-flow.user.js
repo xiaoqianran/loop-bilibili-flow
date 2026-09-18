@@ -32,8 +32,7 @@
 // @license      MIT
 // ==/UserScript==
 
-// SubBatch Monorepo runtime bootstrap (6.9.16)
-// Build mode: compat — includes maintained full-feature behavior body
+// SubBatch runtime (6.9.16)
 var SubBatch = (function(exports) {
   "use strict";
   function extractBvid$1(text) {
@@ -423,6 +422,36 @@ var SubBatch = (function(exports) {
     }
     return { type: "unknown", source: "auto", ...pickHintIds(merged) };
   }
+  const BILIBILI_SOURCE = "bilibili";
+  const route = {
+    isCarrierShell: isVideoCarrierShell,
+    bvidFrom: extractBvid,
+    hasCarrierIdentity: hasVideoCarrierIdentity,
+    videoKey: routeVideoKey,
+    pickIds: pickHintIds,
+    urlHints: extractUrlHints,
+    detect: detectContext,
+    pageFromCid,
+    playingHint: extractPlayingVideoHint,
+    resolveVideo: resolvePlayingVideoRef,
+    videoChanged: playingVideoChanged
+  };
+  const bilibili = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    BILIBILI_SOURCE,
+    detectContext,
+    extractBvid,
+    extractPlayingVideoHint,
+    extractUrlHints,
+    hasVideoCarrierIdentity,
+    isVideoCarrierShell,
+    pageFromCid,
+    pickHintIds,
+    playingVideoChanged,
+    resolvePlayingVideoRef,
+    route,
+    routeVideoKey
+  }, Symbol.toStringTag, { value: "Module" }));
   const SHIFT = [
     7,
     12,
@@ -769,78 +798,6 @@ ${prompt2.userPromptTemplate || ""}`);
       defaultChord: "Ctrl+Alt+KeyD"
     }
   ];
-  function shortcutChordFromEvent(event) {
-    const code = String(event.code || "");
-    if (!code || /^(Control|Shift|Alt|Meta)(Left|Right)?$/.test(code)) return "";
-    const parts = [];
-    if (event.ctrlKey) parts.push("Ctrl");
-    if (event.altKey) parts.push("Alt");
-    if (event.shiftKey) parts.push("Shift");
-    if (event.metaKey) parts.push("Meta");
-    parts.push(code);
-    return parts.join("+");
-  }
-  function shortcutKeyLabel(code) {
-    const value = String(code || "");
-    if (/^Key[A-Z]$/.test(value)) return value.slice(3);
-    if (/^Digit[0-9]$/.test(value)) return value.slice(5);
-    if (/^Numpad[0-9]$/.test(value)) return `Num ${value.slice(6)}`;
-    const labels = {
-      Space: "Space",
-      Enter: "Enter",
-      Tab: "Tab",
-      Escape: "Esc",
-      Backspace: "Backspace",
-      Delete: "Delete",
-      ArrowUp: "↑",
-      ArrowDown: "↓",
-      ArrowLeft: "←",
-      ArrowRight: "→",
-      Minus: "-",
-      Equal: "=",
-      BracketLeft: "[",
-      BracketRight: "]",
-      Semicolon: ";",
-      Quote: "'",
-      Comma: ",",
-      Period: ".",
-      Slash: "/",
-      Backslash: "\\",
-      Backquote: "`",
-      Home: "Home",
-      End: "End",
-      PageUp: "PgUp",
-      PageDown: "PgDn",
-      Insert: "Insert"
-    };
-    if (labels[value]) return labels[value];
-    if (/^F\d{1,2}$/.test(value)) return value;
-    return value.replace(/^(Arrow|Numpad)/, "") || value;
-  }
-  function shortcutDisplayChord(chord) {
-    const parts = String(chord || "").split("+").filter(Boolean);
-    if (!parts.length) return "未绑定";
-    return parts.map(
-      (part) => ["Ctrl", "Alt", "Shift", "Meta"].includes(part) ? part : shortcutKeyLabel(part)
-    ).join(" + ");
-  }
-  function shortcutHasStrongModifier(chord) {
-    const parts = new Set(String(chord || "").split("+"));
-    return parts.has("Ctrl") || parts.has("Alt") || parts.has("Meta");
-  }
-  function shortcutEditableTarget(target) {
-    if (!target || typeof target.closest !== "function") return false;
-    return !!target.closest(
-      'input, textarea, select, [contenteditable="true"], [contenteditable="plaintext-only"]'
-    );
-  }
-  function shouldIgnoreShortcutEvent(event, options = {}) {
-    if (options.enabled === false) return true;
-    if (event.repeat || event.isComposing) return true;
-    if (event.getModifierState?.("AltGraph")) return true;
-    if (shortcutEditableTarget(event.target ?? null)) return true;
-    return false;
-  }
   const MULTI_PART_TITLE_RE$2 = /^(.*)\s-\sP(\d+)【([\s\S]*)】\s*$/;
   function cleanAuthor(author) {
     const up = String(author || "").trim();
@@ -2159,14 +2116,8 @@ ${prompt2.userPromptTemplate}`
     shouldSkipPrepare: shouldSkipPrepareForCachedSession,
     hydratePreprocess: draftHydratedPreprocessRun
   };
-  const shortcut$1 = {
-    all: SHORTCUT_COMMANDS,
-    chordFromEvent: shortcutChordFromEvent,
-    keyLabel: shortcutKeyLabel,
-    display: shortcutDisplayChord,
-    hasStrongModifier: shortcutHasStrongModifier,
-    isEditableTarget: shortcutEditableTarget,
-    shouldIgnore: shouldIgnoreShortcutEvent
+  const command = {
+    shortcuts: SHORTCUT_COMMANDS
   };
   const subtitleExport = {
     root: SUBTITLE_EXPORT_ROOT,
@@ -2296,6 +2247,7 @@ ${prompt2.userPromptTemplate}`
     buildUpFolderLabel,
     buildVideoShortUrl,
     collectionIndexKey,
+    command,
     countFolioOutline,
     countSpaceCollectionMatches,
     cuesToAiText,
@@ -2355,13 +2307,6 @@ ${prompt2.userPromptTemplate}`
     serializeAiRunForCache,
     serializePreprocessRunForCache,
     setGroupSelection,
-    shortcut: shortcut$1,
-    shortcutChordFromEvent,
-    shortcutDisplayChord,
-    shortcutEditableTarget,
-    shortcutHasStrongModifier,
-    shortcutKeyLabel,
-    shouldIgnoreShortcutEvent,
     shouldRestoreAutomaticAiSession,
     shouldSkipPrepareForCachedSession,
     slugFolioHeading,
@@ -2378,43 +2323,6 @@ ${prompt2.userPromptTemplate}`
     upsertIndexForExportItem,
     upsertVideoExportIndex,
     videoIndexKey
-  }, Symbol.toStringTag, { value: "Module" }));
-  const BILIBILI_SOURCE = "bilibili";
-  const route = {
-    isCarrierShell: isVideoCarrierShell,
-    bvidFrom: extractBvid,
-    hasCarrierIdentity: hasVideoCarrierIdentity,
-    videoKey: routeVideoKey,
-    pickIds: pickHintIds,
-    urlHints: extractUrlHints,
-    detect: detectContext,
-    pageFromCid,
-    playingHint: extractPlayingVideoHint,
-    resolveVideo: resolvePlayingVideoRef,
-    videoChanged: playingVideoChanged
-  };
-  const bilibili = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
-    __proto__: null,
-    BILIBILI_SOURCE,
-    cuesToAiText,
-    cuesToSrt,
-    cuesToTxt,
-    detectContext,
-    extractBvid,
-    extractPlayingVideoHint,
-    extractUrlHints,
-    formatClock,
-    formatSrtTimestamp,
-    hasVideoCarrierIdentity,
-    isVideoCarrierShell,
-    pageFromCid,
-    parseSeconds,
-    pickHintIds,
-    playingVideoChanged,
-    resolvePlayingVideoRef,
-    route,
-    routeVideoKey,
-    toCues
   }, Symbol.toStringTag, { value: "Module" }));
   function create(host2) {
     return {
@@ -2461,10 +2369,6 @@ ${prompt2.userPromptTemplate}`
         href: () => host2.pageHref(),
         window: () => host2.pageWindow,
         onNavigate: (listener) => host2.onNavigate(listener)
-      },
-      hub: {
-        available: () => host2.hubAvailable(),
-        send: (path, payload) => host2.hubSend(path, payload)
       }
     };
   }
@@ -2569,6 +2473,78 @@ ${prompt2.userPromptTemplate}`
       }
     };
   }
+  function chordFromEvent(event) {
+    const code = String(event.code || "");
+    if (!code || /^(Control|Shift|Alt|Meta)(Left|Right)?$/.test(code)) return "";
+    const parts = [];
+    if (event.ctrlKey) parts.push("Ctrl");
+    if (event.altKey) parts.push("Alt");
+    if (event.shiftKey) parts.push("Shift");
+    if (event.metaKey) parts.push("Meta");
+    parts.push(code);
+    return parts.join("+");
+  }
+  function keyLabel(code) {
+    const value = String(code || "");
+    if (/^Key[A-Z]$/.test(value)) return value.slice(3);
+    if (/^Digit[0-9]$/.test(value)) return value.slice(5);
+    if (/^Numpad[0-9]$/.test(value)) return `Num ${value.slice(6)}`;
+    const labels = {
+      Space: "Space",
+      Enter: "Enter",
+      Tab: "Tab",
+      Escape: "Esc",
+      Backspace: "Backspace",
+      Delete: "Delete",
+      ArrowUp: "↑",
+      ArrowDown: "↓",
+      ArrowLeft: "←",
+      ArrowRight: "→",
+      Minus: "-",
+      Equal: "=",
+      BracketLeft: "[",
+      BracketRight: "]",
+      Semicolon: ";",
+      Quote: "'",
+      Comma: ",",
+      Period: ".",
+      Slash: "/",
+      Backslash: "\\",
+      Backquote: "`",
+      Home: "Home",
+      End: "End",
+      PageUp: "PgUp",
+      PageDown: "PgDn",
+      Insert: "Insert"
+    };
+    if (labels[value]) return labels[value];
+    if (/^F\d{1,2}$/.test(value)) return value;
+    return value.replace(/^(Arrow|Numpad)/, "") || value;
+  }
+  function display(chord) {
+    const parts = String(chord || "").split("+").filter(Boolean);
+    if (!parts.length) return "未绑定";
+    return parts.map(
+      (part) => ["Ctrl", "Alt", "Shift", "Meta"].includes(part) ? part : keyLabel(part)
+    ).join(" + ");
+  }
+  function hasStrongModifier(chord) {
+    const parts = new Set(String(chord || "").split("+"));
+    return parts.has("Ctrl") || parts.has("Alt") || parts.has("Meta");
+  }
+  function isEditableTarget(target) {
+    if (!target || typeof target.closest !== "function") return false;
+    return !!target.closest(
+      'input, textarea, select, [contenteditable="true"], [contenteditable="plaintext-only"]'
+    );
+  }
+  function shouldIgnore(event, options = {}) {
+    if (options.enabled === false) return true;
+    if (event.repeat || event.isComposing) return true;
+    if (event.getModifierState?.("AltGraph")) return true;
+    if (isEditableTarget(event.target ?? null)) return true;
+    return false;
+  }
   function register(bindings, options = {}) {
     const target = options.target;
     if (!target) {
@@ -2579,11 +2555,9 @@ ${prompt2.userPromptTemplate}`
     const stopOnMatch = options.stopOnMatch !== false;
     const enabled = options.enabled !== false;
     const listener = (event) => {
-      if (protectInput && shortcut$1.shouldIgnore(event, { enabled })) {
-        return;
-      }
+      if (protectInput && shouldIgnore(event, { enabled })) return;
       if (!protectInput && options.enabled === false) return;
-      const chord = shortcut$1.chordFromEvent(event);
+      const chord = chordFromEvent(event);
       if (!chord) return;
       const binding = bindings.find((candidate) => candidate.chord === chord);
       if (!binding) return;
@@ -2610,80 +2584,14 @@ ${prompt2.userPromptTemplate}`
     observe: observe$1
   };
   const shortcut = {
+    chordFromEvent,
+    keyLabel,
+    display,
+    hasStrongModifier,
+    isEditableTarget,
+    shouldIgnore,
     register
   };
-  const PROMPT_STAGES = [
-    "preprocess",
-    "postprocess",
-    "knowledge"
-  ];
-  function isPromptStage(value) {
-    return value === "preprocess" || value === "postprocess" || value === "knowledge";
-  }
-  function normalizePromptStage(value) {
-    if (value === "postprocess" || value === "postprocessing") return "postprocess";
-    if (value === "knowledge") return "knowledge";
-    if (value === "preprocess" || value === "preprocessing") return "preprocess";
-    return "postprocess";
-  }
-  const V6_STORAGE_KEYS = {
-    ui: "bili-subbatch-ui-v2",
-    aiLegacy: "bili-subbatch-ai-v2",
-    aiProfiles: "bili-subbatch-ai-profiles-v1",
-    /** @deprecated Use aiProfiles. Kept as a source-compatible alias. */
-    aiConfig: "bili-subbatch-ai-profiles-v1",
-    prompts: "bili-subbatch-prompts-v1",
-    shortcuts: "bili-subbatch-shortcuts-v1",
-    postTasks: "bili-subbatch-post-tasks-v1",
-    knowledgeModel: "bili-subbatch-knowledge-model-v1",
-    preprocessEnabled: "bili-subbatch-preprocess-enabled-v1",
-    preprocessModel: "bili-subbatch-preprocess-model-v1",
-    preprocessConcurrency: "bili-subbatch-preprocess-concurrency-v1",
-    preprocessTargetMinutes: "bili-subbatch-preprocess-target-minutes-v1",
-    preprocessOverlapSeconds: "bili-subbatch-preprocess-overlap-seconds-v1",
-    preprocessMaxChars: "bili-subbatch-preprocess-max-chars-v1",
-    preprocessRetries: "bili-subbatch-preprocess-retries-v1",
-    autoCapture: "bili-subbatch-auto-capture-v1",
-    autoAnalyze: "bili-subbatch-auto-analyze-v1",
-    transcriptFollow: "bili-subbatch-transcript-follow-v2",
-    playerSubtitle: "bili-subbatch-player-subtitle-v2"
-  };
-  const V6_SCHEMA_VERSIONS = {
-    aiProfiles: 4,
-    prompts: 5,
-    shortcuts: 2,
-    postTasks: 1
-  };
-  const V6_BUILTIN_PROMPT_IDS = {
-    preprocess: "builtin-subtitle-normalizer",
-    postprocess: "builtin-mermaid-learning-map",
-    knowledge: "builtin-knowledge-drilldown"
-  };
-  const V6_KNOWLEDGE_DB = {
-    name: "bili-subbatch-knowledge-v1",
-    version: 1,
-    anchorStore: "anchors",
-    nodeStore: "nodes"
-  };
-  const V6_SHORTCUT_COMMAND_IDS = [
-    "toggle-panel",
-    "open-processed",
-    "open-postprocess",
-    "toggle-dock"
-  ];
-  const SCHEMA_VERSION = 1;
-  const schemas = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
-    __proto__: null,
-    PROMPT_STAGES,
-    SCHEMA_VERSION,
-    V6_BUILTIN_PROMPT_IDS,
-    V6_KNOWLEDGE_DB,
-    V6_SCHEMA_VERSIONS,
-    V6_SHORTCUT_COMMAND_IDS,
-    V6_STORAGE_KEYS,
-    isPromptStage,
-    normalizePromptStage
-  }, Symbol.toStringTag, { value: "Module" }));
   function pageFromHref(href) {
     try {
       return Math.max(1, Number(new URL(href).searchParams.get("p")) || 1);
@@ -3075,38 +2983,24 @@ ${prompt2.userPromptTemplate}`
       pageWindow,
       pageHref: () => pageHrefOf(pageWindow),
       registerShortcuts,
-      onNavigate,
-      hubAvailable: async () => false,
-      hubSend: async () => {
-        throw new Error("Local Hub 尚未启用");
-      }
+      onNavigate
     };
   }
   const host = createUserscriptHost();
   const runtime = userscript.create(host);
-  const compat = { ...core, ...bilibili };
   const SubBatchMonorepo = {
     version: "6.9.16",
     runtime,
-    host,
     core,
     bilibili,
-    schemas,
-    app,
-    compat,
-    ...compat,
-    detectContext(href, hints) {
-      return route.detect(href ?? runtime.page.href(), hints);
-    }
+    app
   };
   exports.SubBatchMonorepo = SubBatchMonorepo;
-  exports.host = host;
-  exports.runtime = runtime;
   Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
   return exports;
 })({});
 
-// ---- SubBatch maintained full-feature compatibility runtime ----
+// ---- SubBatch temporary maintained compatibility runtime ----
 
 /**
  * v6.9.16 — Video Carrier 抽象：festival/blackboard 仅在检测到真实 BV / active player 后启动完整工作台；修正 live-player helper bridge。

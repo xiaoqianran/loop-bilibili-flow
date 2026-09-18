@@ -3,10 +3,10 @@ import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Script } from "node:vm";
 
-import { LEGACY_BODY_MARKER } from "./userscript-build-utils";
+import { COMPAT_BODY_MARKER } from "./userscript-build-utils";
 
 const projectRoot = process.cwd();
-const outputPath = resolve(projectRoot, "dist/userscript/subbatch.pure.user.js");
+const outputPath = resolve(projectRoot, "dist/lab/subbatch.pure.user.js");
 
 function hash(source: string): string {
   return createHash("sha256").update(source).digest("hex");
@@ -27,7 +27,7 @@ async function verify(): Promise<void> {
     throw new Error("Output contains a runtime module dependency");
   }
   new Script(output, { filename: "subbatch.pure.user.js" });
-  if (output.includes(LEGACY_BODY_MARKER)) {
+  if (output.includes(COMPAT_BODY_MARKER)) {
     throw new Error("Pure laboratory output must not include the maintained behavior body");
   }
   if (outputStats.size > 350_000) {

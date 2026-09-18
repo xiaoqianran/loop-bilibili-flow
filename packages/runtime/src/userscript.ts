@@ -20,8 +20,6 @@ export interface UserscriptHost {
     options?: ShortcutRegisterOptions,
   ): () => void;
   onNavigate(listener: () => void): () => void;
-  hubAvailable(): Promise<boolean>;
-  hubSend<T>(path: string, payload: unknown): Promise<T>;
 }
 
 export function create(host: UserscriptHost): SubBatchRuntime {
@@ -72,10 +70,6 @@ export function create(host: UserscriptHost): SubBatchRuntime {
       href: () => host.pageHref(),
       window: () => host.pageWindow,
       onNavigate: (listener) => host.onNavigate(listener),
-    },
-    hub: {
-      available: () => host.hubAvailable(),
-      send: <T>(path: string, payload: unknown) => host.hubSend<T>(path, payload),
     },
   };
 }

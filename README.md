@@ -1,33 +1,65 @@
 # Content-Flow / SubBatch
 
-SubBatch 将成熟的 Bili SubBatch v6.0.2 逐步迁移为可测试、可双端构建并可继续接入 Local Hub 的 Monorepo。
+Bilibili Userscript。正式安装文件只有一个：
 
-当前迭代：**P4.5 Safe Incremental Takeover**。正式 Userscript 始终携带完整维护版行为主体；pure API bundle 仅用于迁移实验，不能替代产品。Chrome Extension、Side Panel 和 Local Hub 尚未启动。
+```text
+dist/userscript/loop-bilibili-flow.user.js
+```
 
-## 开发命令
+## 架构
+
+```text
+schemas     core     bilibili     runtime
+   \         |         |          /
+    \        |         |         /
+     └────────┴─────────┴────────┘
+                  |
+            apps/userscript
+                  |
+                build
+                  |
+                  v
+    loop-bilibili-flow.user.js
+```
+
+- `packages/schemas`：持久化与跨边界数据契约。
+- `packages/core`：纯业务逻辑。
+- `packages/bilibili`：Bilibili route / player identity 规则。
+- `packages/runtime`：浏览器运行时端口与 Userscript adapter。
+- `apps/userscript`：唯一应用组合层。
+- `compat/maintained-runtime.js`：**临时迁移债务**，仅用于尚未迁入模块的完整产品行为；最终必须删除。
+- `legacy/Bili-SubBatch-v6.0.2.user.js`：只读 Golden Reference，不参与日常开发。
+
+## 开发
 
 ```bash
 pnpm install
 pnpm typecheck
 pnpm lint
 pnpm test
-pnpm build:userscript          # 正式完整功能版（bootstrap + 维护版 v6 body）
-pnpm build:compat-userscript   # 正式构建的兼容别名
-pnpm build:pure-userscript     # 实验 API bundle（尚无产品 UI/boot）
-pnpm verify:dist
-pnpm verify:compat-dist
+pnpm build
 ```
 
-| 产物 | 路径 |
-| --- | --- |
-| 本地安装（`subbatch.user.js` 别名） | `dist/userscript/loop-bilibili-flow.user.js` |
-| 正式完整功能 userscript | `dist/userscript/subbatch.user.js` |
-| 正式构建兼容别名 | `dist/userscript/subbatch.compat.user.js` |
-| 实验 pure API bundle | `dist/userscript/subbatch.pure.user.js` |
-| 维护版主体（构建输入） | `loop-bilibili.js` |
+`pnpm build` 只生成正式产物：
 
-## Legacy 基线
+```text
+dist/userscript/loop-bilibili-flow.user.js
+```
 
-`legacy/Bili-SubBatch-v6.0.2.user.js` 是来自指定外部基线的只读 Golden Reference。其 SHA-256 记录在 `legacy/SHA256SUMS`。`loop-bilibili.js` 是维护版主体。油猴安装 `dist/userscript/loop-bilibili-flow.user.js`，它与 `subbatch.user.js` 字节相同：monorepo 引导 + 维护主体。
+实验迁移验证可使用：
 
-详见 `docs/migration/P4-userscript.md`。
+```bash
+pnpm build:pure-userscript
+```
+
+它生成 `dist/lab/subbatch.pure.user.js`，只用于检查 `apps + packages` 是否可独立打包，不是发布文件。
+
+## 规则
+
+1. `schemas / core / bilibili / runtime` 彼此不直接依赖。
+2. 只有 `apps/userscript` 负责组合模块与浏览器环境。
+3. `core / schemas` 禁止 DOM、GM API、浏览器存储。
+4. 新功能按真实压力加入；不提前创建空 package / stub port。
+5. 每迁移一个 compat 能力，先用 Golden / differential test 锁行为，再删除 compat 中对应实现。
+
+详见 `docs/architecture.md`。

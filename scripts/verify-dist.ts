@@ -1,17 +1,22 @@
 import { createHash } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Script } from "node:vm";
 
 import {
-  LEGACY_BODY_MARKER,
+  COMPAT_BODY_MARKER,
   stripUserscriptMetadata,
 } from "./userscript-build-utils";
 
 const projectRoot = process.cwd();
-const outputPath = resolve(projectRoot, "dist/userscript/subbatch.user.js");
-const flowAliasPath = resolve(projectRoot, "dist/userscript/loop-bilibili-flow.user.js");
-const maintainedSourcePath = resolve(projectRoot, "loop-bilibili.js");
+const outputPath = resolve(
+  projectRoot,
+  "dist/userscript/loop-bilibili-flow.user.js",
+);
+const maintainedSourcePath = resolve(
+  projectRoot,
+  "compat/maintained-runtime.js",
+);
 
 const requiredMetadata = [
   "// @version      6.9.16",
@@ -51,15 +56,28 @@ function hash(source: string): string {
 }
 
 async function verify(): Promise<void> {
-  const [output, maintainedSource, flowAlias, outputStats] = await Promise.all([
+  const officialEntries = await readdir(resolve(projectRoot, "dist/userscript"), {
+    withFileTypes: true,
+  });
+  const userscripts = officialEntries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".user.js"))
+    .map((entry) => entry.name)
+    .sort();
+  if (
+    userscripts.length !== 1 ||
+    userscripts[0] !== "loop-bilibili-flow.user.js"
+  ) {
+    throw new Error(
+      `Official userscript directory must contain exactly loop-bilibili-flow.user.js; found: ${userscripts.join(", ") || "(none)"}`,
+    );
+  }
+
+  const [output, maintainedSource, outputStats] = await Promise.all([
     readFile(outputPath, "utf8"),
     readFile(maintainedSourcePath, "utf8"),
-    readFile(flowAliasPath, "utf8"),
     stat(outputPath),
   ]);
-  if (output !== flowAlias) {
-    throw new Error("loop-bilibili-flow.user.js must be byte-identical to subbatch.user.js");
-  }
+
   if (!output.startsWith("// ==UserScript==\n")) {
     throw new Error("Userscript metadata must be the first output bytes");
   }
@@ -72,11 +90,11 @@ async function verify(): Promise<void> {
   if (/^\s*(?:import|export)\s/m.test(output) || /\brequire\s*\(/.test(output)) {
     throw new Error("Output contains a runtime module dependency");
   }
-  new Script(output, { filename: "subbatch.user.js" });
+  new Script(output, { filename: "loop-bilibili-flow.user.js" });
 
-  const marker = `${LEGACY_BODY_MARKER}\n`;
+  const marker = `${COMPAT_BODY_MARKER}\n`;
   const markerIndex = output.indexOf(marker);
-  if (markerIndex < 0) throw new Error("Maintained full-feature runtime marker not found");
+  if (markerIndex < 0) throw new Error("Temporary maintained runtime marker not found");
   const outputBehaviorBody = output.slice(markerIndex + marker.length);
   const expectedBehaviorBody = stripUserscriptMetadata(maintainedSource);
   if (outputBehaviorBody !== expectedBehaviorBody) {
@@ -94,7 +112,7 @@ async function verify(): Promise<void> {
   }
 
   console.log(
-    `Verified production ${outputPath}: executable monorepo bootstrap plus exact maintained full-feature runtime (sha256 ${hash(output)})`,
+    `Verified ${outputPath}: single official userscript with full current behavior (sha256 ${hash(output)})`,
   );
 }
 

@@ -3,11 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   SHORTCUT_COMMANDS,
   renderPromptTemplate,
+} from "@subbatch/core";
+import {
   shortcutChordFromEvent,
   shortcutDisplayChord,
   shortcutEditableTarget,
   shouldIgnoreShortcutEvent,
-} from "@subbatch/core";
+} from "@subbatch/runtime";
 import {
   PROMPT_STAGES,
   V6_BUILTIN_PROMPT_IDS,

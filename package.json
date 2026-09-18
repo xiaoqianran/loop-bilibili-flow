@@ -15,13 +15,11 @@
     "typecheck:projects": "tsc -b --pretty false",
     "test": "vitest run",
     "lint": "eslint . --max-warnings=0 && tsx scripts/verify-boundaries.ts",
-    "build:userscript": "tsx scripts/build-userscript.ts --mode=compat && pnpm verify:dist && pnpm verify:compat-dist",
+    "build:userscript": "tsx scripts/build-userscript.ts --mode=full && pnpm verify:dist",
     "build:pure-userscript": "tsx scripts/build-userscript.ts --mode=pure && pnpm verify:pure-dist",
-    "build:compat-userscript": "pnpm build:userscript",
     "build": "pnpm build:userscript",
     "verify:dist": "tsx scripts/verify-dist.ts",
-    "verify:pure-dist": "tsx scripts/verify-pure-dist.ts",
-    "verify:compat-dist": "tsx scripts/verify-compat-dist.ts"
+    "verify:pure-dist": "tsx scripts/verify-pure-dist.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.33.0",

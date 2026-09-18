@@ -71,10 +71,6 @@ export interface PageAdapter {
   onNavigate(listener: () => void): () => void;
 }
 
-export interface HubAdapter {
-  available(): Promise<boolean>;
-  send<T>(path: string, payload: unknown): Promise<T>;
-}
 
 export interface SubBatchRuntime {
   storage: StorageAdapter;
@@ -83,5 +79,4 @@ export interface SubBatchRuntime {
   style: StyleAdapter;
   shortcuts: ShortcutAdapter;
   page: PageAdapter;
-  hub: HubAdapter;
 }

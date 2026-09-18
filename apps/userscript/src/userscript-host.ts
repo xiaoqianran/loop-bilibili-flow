@@ -1,12 +1,10 @@
 import {
-  type ShortcutKeyboardEvent,
-} from "@subbatch/core";
-import {
   shortcut as runtimeShortcut,
   spa,
   type NetworkRequest,
   type NetworkResponse,
   type ShortcutBinding,
+  type ShortcutKeyboardEvent,
   type ShortcutRegisterOptions,
   type UserscriptHost,
 } from "@subbatch/runtime";
@@ -297,10 +295,6 @@ export function createUserscriptHost(): UserscriptHost {
     pageHref: () => pageHrefOf(pageWindow),
     registerShortcuts,
     onNavigate,
-    hubAvailable: async () => false,
-    hubSend: async () => {
-      throw new Error("Local Hub 尚未启用");
-    },
   };
 }
 

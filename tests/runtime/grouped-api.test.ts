@@ -27,7 +27,7 @@ describe("grouped public API", () => {
       core.buildSubtitleExportRelativePath,
     );
     expect(core.preprocess.stitchChunks).toBe(core.stitchPreprocessChunks);
-    expect(core.shortcut.shouldIgnore).toBe(core.shouldIgnoreShortcutEvent);
+    expect(core.command.shortcuts).toBe(core.SHORTCUT_COMMANDS);
   });
 
   it("groups Bilibili and runtime APIs", () => {
@@ -37,6 +37,8 @@ describe("grouped public API", () => {
 
     expect(runtime.userscript.create).toBe(runtime.createUserscriptRuntime);
     expect(runtime.spa.observe).toBe(runtime.installSpaNavigateAdapter);
+    expect(runtime.shortcut.shouldIgnore).toBe(runtime.shouldIgnoreShortcutEvent);
+    expect(runtime.shortcut.display).toBe(runtime.shortcutDisplayChord);
     expect(runtime.shortcut.register).toBe(runtime.registerShortcutRuntime);
   });
 

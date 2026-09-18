@@ -6,9 +6,6 @@
   "dependencies": {
     "@subbatch/bilibili": "workspace:*",
     "@subbatch/core": "workspace:*",
-    "@subbatch/runtime": "workspace:*",
-    "@subbatch/schemas": "workspace:*",
-    "@subbatch/ui": "workspace:*"
+    "@subbatch/runtime": "workspace:*"
   }
 }
-

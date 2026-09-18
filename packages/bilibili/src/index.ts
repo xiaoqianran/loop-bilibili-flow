@@ -18,4 +18,3 @@ export const route = {
 
 // Compatibility flat exports.
 export * from "./route";
-export * from "./subtitle";

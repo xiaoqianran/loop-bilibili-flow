@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { registerShortcutRuntime } from "@subbatch/runtime";
-import type { ShortcutKeyboardEvent } from "@subbatch/core";
+import { registerShortcutRuntime, type ShortcutKeyboardEvent } from "@subbatch/runtime";
 
 function createTarget() {
   const listeners = new Set<(event: ShortcutKeyboardEvent) => void>();

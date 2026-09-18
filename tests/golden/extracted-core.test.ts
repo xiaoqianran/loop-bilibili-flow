@@ -29,8 +29,6 @@ import {
   shouldRestoreAutomaticAiSession,
   renderPromptTemplate,
   sanitizeMermaidTimestampCitationsInMarkdown,
-  shortcutChordFromEvent,
-  shortcutDisplayChord,
   splitCuesForPreprocess,
   stitchPreprocessChunks,
   toCues,
@@ -38,6 +36,7 @@ import {
   cuesToTxt,
   type PreprocessItem,
 } from "@subbatch/core";
+import { shortcutChordFromEvent, shortcutDisplayChord } from "@subbatch/runtime";
 import {
   detectContext,
   extractBvid,

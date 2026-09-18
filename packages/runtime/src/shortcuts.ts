@@ -1,6 +1,17 @@
-import { shortcut, type ShortcutKeyboardEvent } from "@subbatch/core";
-
 import type { ShortcutBinding, ShortcutRegisterOptions } from "./types";
+
+export interface ShortcutKeyboardEvent {
+  code?: string;
+  key?: string;
+  ctrlKey?: boolean;
+  altKey?: boolean;
+  shiftKey?: boolean;
+  metaKey?: boolean;
+  repeat?: boolean;
+  isComposing?: boolean;
+  target?: EventTarget | null;
+  getModifierState?: (key: string) => boolean;
+}
 
 export interface ShortcutEventTargetLike {
   addEventListener(
@@ -17,21 +28,94 @@ export interface ShortcutEventTargetLike {
 
 export interface RegisterShortcutRuntimeOptions extends ShortcutRegisterOptions {
   target?: ShortcutEventTargetLike;
-  /**
-   * Capture phase (default true) — matches v6 bindGlobalShortcuts.
-   */
   capture?: boolean;
-  /**
-   * When true (default), call preventDefault + stopImmediatePropagation on match.
-   */
   stopOnMatch?: boolean;
-  /** Receives synchronous or asynchronous binding failures. */
   onError?: (error: unknown) => void;
 }
 
-/**
- * Register shortcut bindings with v6 input-protection semantics.
- */
+export function chordFromEvent(event: ShortcutKeyboardEvent): string {
+  const code = String(event.code || "");
+  if (!code || /^(Control|Shift|Alt|Meta)(Left|Right)?$/.test(code)) return "";
+  const parts: string[] = [];
+  if (event.ctrlKey) parts.push("Ctrl");
+  if (event.altKey) parts.push("Alt");
+  if (event.shiftKey) parts.push("Shift");
+  if (event.metaKey) parts.push("Meta");
+  parts.push(code);
+  return parts.join("+");
+}
+
+export function keyLabel(code: string): string {
+  const value = String(code || "");
+  if (/^Key[A-Z]$/.test(value)) return value.slice(3);
+  if (/^Digit[0-9]$/.test(value)) return value.slice(5);
+  if (/^Numpad[0-9]$/.test(value)) return `Num ${value.slice(6)}`;
+  const labels: Record<string, string> = {
+    Space: "Space",
+    Enter: "Enter",
+    Tab: "Tab",
+    Escape: "Esc",
+    Backspace: "Backspace",
+    Delete: "Delete",
+    ArrowUp: "↑",
+    ArrowDown: "↓",
+    ArrowLeft: "←",
+    ArrowRight: "→",
+    Minus: "-",
+    Equal: "=",
+    BracketLeft: "[",
+    BracketRight: "]",
+    Semicolon: ";",
+    Quote: "'",
+    Comma: ",",
+    Period: ".",
+    Slash: "/",
+    Backslash: "\\",
+    Backquote: "`",
+    Home: "Home",
+    End: "End",
+    PageUp: "PgUp",
+    PageDown: "PgDn",
+    Insert: "Insert",
+  };
+  if (labels[value]) return labels[value];
+  if (/^F\d{1,2}$/.test(value)) return value;
+  return value.replace(/^(Arrow|Numpad)/, "") || value;
+}
+
+export function display(chord: string): string {
+  const parts = String(chord || "").split("+").filter(Boolean);
+  if (!parts.length) return "未绑定";
+  return parts
+    .map((part) =>
+      ["Ctrl", "Alt", "Shift", "Meta"].includes(part) ? part : keyLabel(part),
+    )
+    .join(" + ");
+}
+
+export function hasStrongModifier(chord: string): boolean {
+  const parts = new Set(String(chord || "").split("+"));
+  return parts.has("Ctrl") || parts.has("Alt") || parts.has("Meta");
+}
+
+export function isEditableTarget(target: EventTarget | null | undefined): boolean {
+  if (!target || typeof (target as Element).closest !== "function") return false;
+  return !!(target as Element).closest(
+    'input, textarea, select, [contenteditable="true"], [contenteditable="plaintext-only"]',
+  );
+}
+
+export function shouldIgnore(
+  event: ShortcutKeyboardEvent,
+  options: { enabled?: boolean } = {},
+): boolean {
+  if (options.enabled === false) return true;
+  if (event.repeat || event.isComposing) return true;
+  if (event.getModifierState?.("AltGraph")) return true;
+  if (isEditableTarget(event.target ?? null)) return true;
+  return false;
+}
+
 export function register(
   bindings: readonly ShortcutBinding[],
   options: RegisterShortcutRuntimeOptions = {},
@@ -46,15 +130,10 @@ export function register(
   const enabled = options.enabled !== false;
 
   const listener = (event: ShortcutKeyboardEvent): void => {
-    if (
-      protectInput &&
-      shortcut.shouldIgnore(event, { enabled })
-    ) {
-      return;
-    }
+    if (protectInput && shouldIgnore(event, { enabled })) return;
     if (!protectInput && options.enabled === false) return;
 
-    const chord = shortcut.chordFromEvent(event);
+    const chord = chordFromEvent(event);
     if (!chord) return;
     const binding = bindings.find((candidate) => candidate.chord === chord);
     if (!binding) return;
@@ -80,5 +159,11 @@ export function register(
   return () => target.removeEventListener("keydown", listener, capture);
 }
 
-/** @deprecated Use `runtime.shortcut.register`. */
+// Compatibility aliases for callers not yet migrated to runtime.shortcut.*.
+export const shortcutChordFromEvent = chordFromEvent;
+export const shortcutKeyLabel = keyLabel;
+export const shortcutDisplayChord = display;
+export const shortcutHasStrongModifier = hasStrongModifier;
+export const shortcutEditableTarget = isEditableTarget;
+export const shouldIgnoreShortcutEvent = shouldIgnore;
 export const registerShortcutRuntime = register;
