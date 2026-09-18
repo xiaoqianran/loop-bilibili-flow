@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         Bili SubBatch (loop-bilibili)
 // @namespace    https://github.com/loop-bilibili/bili-subbatch
-// @version      6.9.14
+// @version      6.9.16
 // @description  B站知识阅读工作台：字幕预处理、多产物后处理、Anchor 局部追问树与持久 Knowledge Workspace
 // @author       loop-bilibili
 // @match        *://www.bilibili.com/video/*
+// @match        *://www.bilibili.com/festival/*
+// @match        *://www.bilibili.com/blackboard/*
 // @match        *://www.bilibili.com/list/*
 // @match        *://www.bilibili.com/bangumi/play/*
 // @match        *://www.bilibili.com/medialist/*
@@ -30,7 +32,7 @@
 // @license      MIT
 // ==/UserScript==
 
-// SubBatch Monorepo runtime bootstrap (6.9.14)
+// SubBatch Monorepo runtime bootstrap (6.9.16)
 // Build mode: compat — includes maintained full-feature behavior body
 var SubBatch = (function(exports) {
   "use strict";
@@ -157,6 +159,15 @@ var SubBatch = (function(exports) {
     const nextCid = readPositiveNumber(next?.cid);
     return !!(prevCid && nextCid && prevCid !== nextCid);
   }
+  function isVideoCarrierShell(href) {
+    try {
+      const url = new URL(href);
+      if (!/^(www\.)?bilibili\.com$/i.test(url.hostname)) return false;
+      return /^\/(?:festival|blackboard)(?:\/|$)/i.test(url.pathname);
+    } catch {
+      return false;
+    }
+  }
   function extractBvid(text) {
     if (!text) return "";
     const value = String(text).trim();
@@ -164,6 +175,9 @@ var SubBatch = (function(exports) {
     if (/^BV(?!id$)[A-Za-z0-9]+$/i.test(value)) return `BV${value.slice(2)}`;
     const match = value.match(/BV(?!id\b)[A-Za-z0-9]+/i);
     return match ? `BV${match[0].slice(2)}` : "";
+  }
+  function hasVideoCarrierIdentity(href, observedBvid) {
+    return !!(extractBvid(href) || extractBvid(observedBvid));
   }
   function routeVideoKey(bvid, page) {
     return `${String(bvid || "").toUpperCase()}:P${Math.max(1, Number(page) || 1)}`;
@@ -2247,6 +2261,8 @@ ${prompt.userPromptTemplate}`
     extractUrlHints,
     formatClock,
     formatSrtTimestamp,
+    hasVideoCarrierIdentity,
+    isVideoCarrierShell,
     pageFromCid,
     parseSeconds,
     pickHintIds,
@@ -2765,7 +2781,7 @@ ${prompt.userPromptTemplate}`
   const host = createUserscriptHost();
   const runtime = createUserscriptRuntime(host);
   const SubBatchMonorepo = {
-    version: "6.9.14",
+    version: "6.9.16",
     runtime,
     host,
     /** Entire pure core namespace — preferred bridge target. */
@@ -2862,6 +2878,8 @@ ${prompt.userPromptTemplate}`
 // ---- SubBatch maintained full-feature compatibility runtime ----
 
 /**
+ * v6.9.16 — Video Carrier 抽象：festival/blackboard 仅在检测到真实 BV / active player 后启动完整工作台；修正 live-player helper bridge。
+ * v6.9.15 — 支持 B 站 /festival/* 专题页：复用 BV 路由与现有字幕链路，不引入专题页专用抓取分支。
  * v6.9.14 — 工作台可见文字默认统一 14px。
  * v6.9.13 — 单独安装 loop-bilibili-flow 时补齐 core 回退，避免字幕库渲染崩溃；打开页面先点开中文字幕。
  * v6.9.12 — 用户提问色条改到右侧；框选/知识问答发送后不再自动滚到底。
@@ -2941,7 +2959,7 @@ ${prompt.userPromptTemplate}`
    */
 
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.9.14";
+    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.9.16";
   const PANEL_ID = "bili-subbatch-panel";
   const UI_STORE_KEY = "bili-subbatch-ui-v2";
   /** Catppuccin flavors — official palette https://catppuccin.com/palette/ */
@@ -4178,6 +4196,16 @@ ${prompt.userPromptTemplate}`
     return typeof fn === "function" ? fn : null;
   }
 
+  function bilibiliFn(name) {
+    try {
+      const mono = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo : null;
+      const fn = mono?.bilibili?.[name] || mono?.[name];
+      return typeof fn === "function" ? fn : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /** Standalone install (no SubBatch bootstrap) must still capture subtitles. */
   const CORE_LOCAL_FALLBACKS = {
     buildLibraryRenderNodes(entries) {
@@ -4854,6 +4882,12 @@ ${prompt.userPromptTemplate}`
     } catch (_) {
       /* ignore */
     }
+    if (!hints.bvid) {
+      const extractPlaying = bilibiliFn("extractPlayingVideoHint");
+      const playing = typeof extractPlaying === "function" ? extractPlaying(pageWindow) : null;
+      const playingBvid = extractBvid(playing?.bvid || "");
+      if (playingBvid) hints.bvid = playingBvid;
+    }
     return hints;
   }
 
@@ -5025,8 +5059,8 @@ ${prompt.userPromptTemplate}`
    */
   function currentRouteVideoRef() {
     const ctx = detectContext(location.href);
-    const resolve = coreFn("resolvePlayingVideoRef");
-    const extract = coreFn("extractPlayingVideoHint");
+    const resolve = bilibiliFn("resolvePlayingVideoRef");
+    const extract = bilibiliFn("extractPlayingVideoHint");
     const playing = typeof extract === "function" ? extract(pageWindow) : null;
     if (typeof resolve === "function") {
       const ref = resolve({
@@ -20325,7 +20359,7 @@ body{padding:48px 20px 80px}
     const nextRef = currentRouteVideoRef();
     const nextVideoKey = nextRef?.key || "";
     const hrefChanged = href !== lastHref;
-    const changedFn = coreFn("playingVideoChanged");
+    const changedFn = bilibiliFn("playingVideoChanged");
     const videoChanged = typeof changedFn === "function"
       ? changedFn(lastPlayingRef, nextRef)
       : nextVideoKey !== lastRouteVideoKey;
@@ -20363,7 +20397,22 @@ body{padding:48px 20px 80px}
     refreshContextUI();
   }
 
+  function isDeferredVideoCarrierPage(href = location.href) {
+    const detect = bilibiliFn("isVideoCarrierShell");
+    if (typeof detect === "function") return !!detect(href);
+    try {
+      const url = new URL(href);
+      return /^(www\.)?bilibili\.com$/i.test(url.hostname)
+        && /^\/(?:festival|blackboard)(?:\/|$)/i.test(url.pathname);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  let booted = false;
   function boot() {
+    if (booted) return;
+    booted = true;
     initCacheChannel();
     ensurePanel();
     bindGlobalShortcuts();
@@ -20411,9 +20460,61 @@ body{padding:48px 20px 80px}
     scheduleAutoCapture("initial", 180);
   }
 
+  function startUserscript() {
+    if (!isDeferredVideoCarrierPage(location.href)) {
+      boot();
+      return;
+    }
+
+    let timer = 0;
+    const cleanup = () => {
+      if (timer) window.clearInterval(timer);
+      timer = 0;
+      pageWindow.removeEventListener("popstate", onCandidate);
+      pageWindow.removeEventListener("hashchange", onCandidate);
+      window.removeEventListener("pageshow", onCandidate);
+      document.removeEventListener("loadstart", onMediaCandidate, true);
+    };
+    const tryActivate = () => {
+      if (booted) {
+        cleanup();
+        return;
+      }
+      // A carrier shell may SPA-navigate into a normal supported route.
+      if (!isDeferredVideoCarrierPage(location.href)) {
+        cleanup();
+        boot();
+        return;
+      }
+      const ref = currentRouteVideoRef();
+      const hasIdentity = bilibiliFn("hasVideoCarrierIdentity");
+      const canActivate = typeof hasIdentity === "function"
+        ? !!hasIdentity(location.href, ref?.bvid || "")
+        : !!(ref?.bvid || extractBvid(location.href));
+      if (!canActivate) return;
+      cleanup();
+      boot();
+    };
+    const onCandidate = () => window.setTimeout(tryActivate, 0);
+    const onMediaCandidate = (event) => {
+      if (event.target instanceof HTMLMediaElement) onCandidate();
+    };
+
+    pageWindow.addEventListener("popstate", onCandidate);
+    pageWindow.addEventListener("hashchange", onCandidate);
+    window.addEventListener("pageshow", onCandidate);
+    document.addEventListener("loadstart", onMediaCandidate, true);
+    // Low-cost fallback for activity shells whose player appears asynchronously
+    // without changing history or emitting a media load event we can observe.
+    timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") tryActivate();
+    }, 1500);
+    tryActivate();
+  }
+
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", boot);
+    document.addEventListener("DOMContentLoaded", startUserscript, { once: true });
   } else {
-    boot();
+    startUserscript();
   }
 })();

@@ -4,6 +4,8 @@ import {
   detectContext,
   extractBvid,
   extractUrlHints,
+  hasVideoCarrierIdentity,
+  isVideoCarrierShell,
   pickHintIds,
   routeVideoKey,
   type BilibiliPageHints,
@@ -109,6 +111,26 @@ const ROUTE_CASES: Array<{
     hints: { mid: "100", season_id: "200" },
   },
   {
+    name: "festival page carrying a normal BV",
+    href: "https://www.bilibili.com/festival/jzj2023?bvid=BV1ns4y1A7fj&spm_id_from=333.941.top_right_bar_window_history.content.click",
+  },
+  {
+    name: "future festival page carrying a normal BV",
+    href: "https://www.bilibili.com/festival/knowledge2027?bvid=BV1FutureCarrier01",
+  },
+  {
+    name: "blackboard activity page carrying a normal BV",
+    href: "https://www.bilibili.com/blackboard/era/example.html?bvid=BV1Blackboard01",
+  },
+  {
+    name: "blackboard activity page without a BV",
+    href: "https://www.bilibili.com/blackboard/era/nIRvsAu6dqR8xcvB.html",
+  },
+  {
+    name: "topic list page without an active BV",
+    href: "https://www.bilibili.com/v/topic/detail?topic_id=1326608",
+  },
+  {
     name: "DOM bvid fallback",
     href: "https://www.bilibili.com/",
     hints: { bvid: "BV1domFallback01", mid: "1", season_id: "2" },
@@ -166,5 +188,39 @@ describe("Bilibili route differential (legacy vs new)", () => {
     // The maintained implementation intentionally fixes that data-corrupting bug.
     if (legacy.bvid === "BVid") legacy.bvid = next.bvid;
     expect(next).toEqual(legacy);
+  });
+});
+
+describe("Bilibili video-carrier shells", () => {
+  it.each([
+    "https://www.bilibili.com/festival/jzj2023?bvid=BV1ns4y1A7fj",
+    "https://www.bilibili.com/festival/knowledge2027",
+    "https://www.bilibili.com/blackboard/era/nIRvsAu6dqR8xcvB.html",
+    "https://www.bilibili.com/blackboard/custom/player.html?bvid=BV1Blackboard01",
+  ])("recognizes %s as a deferred carrier shell", (href) => {
+    expect(isVideoCarrierShell(href)).toBe(true);
+  });
+
+  it.each([
+    "https://www.bilibili.com/video/BV1ns4y1A7fj",
+    "https://www.bilibili.com/list/123456?bvid=BV1Q541167Qg",
+    "https://www.bilibili.com/v/topic/detail?topic_id=1326608",
+    "https://space.bilibili.com/12345",
+    "https://example.com/festival/jzj2023?bvid=BV1ns4y1A7fj",
+  ])("does not classify %s as a deferred carrier shell", (href) => {
+    expect(isVideoCarrierShell(href)).toBe(false);
+  });
+
+  it("requires a real BV identity before activating a carrier shell", () => {
+    const emptyFestival = "https://www.bilibili.com/festival/knowledge2027";
+    const emptyBlackboard = "https://www.bilibili.com/blackboard/era/example.html";
+    expect(hasVideoCarrierIdentity(emptyFestival)).toBe(false);
+    expect(hasVideoCarrierIdentity(emptyBlackboard)).toBe(false);
+    expect(
+      hasVideoCarrierIdentity(`${emptyFestival}?bvid=BV1FutureCarrier01`),
+    ).toBe(true);
+    expect(hasVideoCarrierIdentity(emptyBlackboard, "BV1PlayerObserved01")).toBe(
+      true,
+    );
   });
 });

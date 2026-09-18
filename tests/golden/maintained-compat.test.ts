@@ -68,15 +68,18 @@ describe("Maintained full-feature compatibility source", () => {
     expect(navigateSource).toContain('state.transcriptQuery = ""');
     expect(navigateSource).toContain("state.transcriptFilteredIndexes = null");
     expect(navigateSource).toContain("transcriptSearch.value = \"\"");
-    expect(navigateSource).toContain('coreFn("playingVideoChanged")');
+    expect(navigateSource).toContain('bilibiliFn("playingVideoChanged")');
   });
 
   it("resolves the playing video from the player before a stale URL", () => {
     expect(extractFunctionSource(maintainedSource, "currentRouteVideoRef")).toContain(
-      'coreFn("resolvePlayingVideoRef")',
+      'bilibiliFn("resolvePlayingVideoRef")',
     );
     expect(extractFunctionSource(maintainedSource, "currentRouteVideoRef")).toContain(
-      'coreFn("extractPlayingVideoHint")',
+      'bilibiliFn("extractPlayingVideoHint")',
+    );
+    expect(extractFunctionSource(maintainedSource, "extractPageHints")).toContain(
+      'bilibiliFn("extractPlayingVideoHint")',
     );
     expect(extractFunctionSource(maintainedSource, "boot")).toContain("HTMLMediaElement");
     expect(extractFunctionSource(maintainedSource, "boot")).toContain("800");
@@ -196,8 +199,13 @@ describe("Maintained full-feature compatibility source", () => {
     expect(maintainedSource).toContain("function paintStudioAnswer(");
     expect(maintainedSource).toContain("data-role=\"studio-answer\"");
     expect(maintainedSource).toContain("align-self: flex-end");
-    expect(maintainedSource).toContain("// @version      6.9.14");
-    expect(maintainedSource).toContain('|| "6.9.14"');
+    expect(maintainedSource).toContain("// @version      6.9.16");
+    expect(maintainedSource).toContain("// @match        *://www.bilibili.com/festival/*");
+    expect(maintainedSource).toContain("// @match        *://www.bilibili.com/blackboard/*");
+    expect(maintainedSource).toContain('|| "6.9.16"');
+    expect(maintainedSource).toContain("function isDeferredVideoCarrierPage(");
+    expect(maintainedSource).toContain("function startUserscript(");
+    expect(maintainedSource).toContain('bilibiliFn("extractPlayingVideoHint")');
     expect(maintainedSource).toContain("--bsb-ui-font: 14px");
     expect(maintainedSource).toContain("font-size: 14px !important");
     expect(maintainedSource).toContain("CORE_LOCAL_FALLBACKS");

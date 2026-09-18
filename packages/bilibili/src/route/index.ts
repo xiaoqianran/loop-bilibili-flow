@@ -28,6 +28,21 @@ export interface BilibiliPageHints {
   fromVideoPath?: boolean;
 }
 
+/**
+ * Activity shells that may embed a normal Bilibili player but are not video
+ * routes by themselves. They should only activate the full userscript after a
+ * real BV can be observed from URL / DOM / live player state.
+ */
+export function isVideoCarrierShell(href: string): boolean {
+  try {
+    const url = new URL(href);
+    if (!/^(www\.)?bilibili\.com$/i.test(url.hostname)) return false;
+    return /^\/(?:festival|blackboard)(?:\/|$)/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 /** Extract a BV id without confusing the `bvid` query-parameter name for an id. */
 export function extractBvid(text: string | null | undefined): string {
   if (!text) return "";
@@ -36,6 +51,13 @@ export function extractBvid(text: string | null | undefined): string {
   if (/^BV(?!id$)[A-Za-z0-9]+$/i.test(value)) return `BV${value.slice(2)}`;
   const match = value.match(/BV(?!id\b)[A-Za-z0-9]+/i);
   return match ? `BV${match[0].slice(2)}` : "";
+}
+
+export function hasVideoCarrierIdentity(
+  href: string,
+  observedBvid?: string | null,
+): boolean {
+  return !!(extractBvid(href) || extractBvid(observedBvid));
 }
 
 export function routeVideoKey(

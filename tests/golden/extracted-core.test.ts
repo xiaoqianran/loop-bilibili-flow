@@ -87,6 +87,22 @@ describe("P2 extracted Pure Core", () => {
       }),
     ).toMatchObject({ key: "BV1XXXX:P3", page: 3, cid: 333 });
     expect(
+      resolvePlayingVideoRef({
+        href: "https://www.bilibili.com/blackboard/era/example.html",
+        playing: {
+          bvid: "BV1CarrierPlayer01",
+          page: 1,
+          cid: 7788,
+          source: "player",
+        },
+      }),
+    ).toMatchObject({
+      bvid: "BV1CarrierPlayer01",
+      key: "BV1CARRIERPLAYER01:P1",
+      cid: 7788,
+      source: "player",
+    });
+    expect(
       extractPlayingVideoHint({
         player: {
           getManifest() {
