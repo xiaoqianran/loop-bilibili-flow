@@ -9224,8 +9224,8 @@
     if (act === "prompt-add" || act === "prompt-add-pre" || act === "prompt-add-knowledge") {
       const library = savePromptProfilesFromForm({ activeId: state.activePromptId });
       const stage = act === "prompt-add-pre" ? "preprocess" : act === "prompt-add-knowledge" ? "knowledge" : "postprocess";
-      const next = createPromptProfile({
-        id: makePromptProfileId(),
+      const next = coreCall("createPromptProfile", {
+        id: coreCall("makePromptProfileId"),
         stage,
         name: stage === "preprocess" ? `字幕预处理 ${library.prompts.filter((p) => p.stage === "preprocess").length + 1}` : stage === "knowledge" ? `知识追问 ${library.prompts.filter((p) => p.stage === "knowledge").length + 1}` : `后处理提示词 ${library.prompts.filter((p) => p.stage === "postprocess").length + 1}`,
         hint: stage === "preprocess" ? "字幕预处理" : stage === "knowledge" ? "局部知识追问" : "后处理提示词",
@@ -9244,10 +9244,10 @@
     }
     if (act === "prompt-reset") {
       const library = savePromptProfilesFromForm({ activeId: state.activePromptId });
-      const pre = createPromptProfile(DEFAULT_PREPROCESS_PROMPT, 0);
-      const post = createPromptProfile(DEFAULT_MERMAID_PROMPT, 1);
-      const html = createPromptProfile(DEFAULT_HTML_FOLIO_PROMPT, 2);
-      const knowledge = createPromptProfile(DEFAULT_KNOWLEDGE_PROMPT, 3);
+      const pre = coreCall("createPromptProfile", DEFAULT_PREPROCESS_PROMPT, 0);
+      const post = coreCall("createPromptProfile", DEFAULT_MERMAID_PROMPT, 1);
+      const html = coreCall("createPromptProfile", DEFAULT_HTML_FOLIO_PROMPT, 2);
+      const knowledge = coreCall("createPromptProfile", DEFAULT_KNOWLEDGE_PROMPT, 3);
       const prompts = library.prompts.filter((p) => ![DEFAULT_PREPROCESS_PROMPT_ID, DEFAULT_PROMPT_ID, DEFAULT_HTML_FOLIO_PROMPT_ID, DEFAULT_KNOWLEDGE_PROMPT_ID].includes(p.id));
       prompts.unshift(knowledge);
       prompts.unshift(html);
@@ -9278,7 +9278,7 @@
     if (act === "ai-reset") {
       const prev = loadAiProfiles();
       const first = prev.find((x) => x.enabled) || prev[0] || {};
-      const resetProfile = createAiProfile({
+      const resetProfile = coreCall("createAiProfile", {
         ...AI_DEFAULTS,
         name: "默认模型",
         apiKey: first.apiKey || "",
@@ -9293,10 +9293,10 @@
     }
     if (act === "ai-profile-add") {
       const profiles = saveAiProfilesFromForm();
-      const source = profiles.find((p) => p.id === state.aiEditorId) || profiles[profiles.length - 1] || createAiProfile(AI_DEFAULTS, 0);
-      const next = createAiProfile({
+      const source = profiles.find((p) => p.id === state.aiEditorId) || profiles[profiles.length - 1] || coreCall("createAiProfile", AI_DEFAULTS, 0);
+      const next = coreCall("createAiProfile", {
         ...source,
-        id: makeAiProfileId(),
+        id: coreCall("makeAiProfileId"),
         name: `模型 ${profiles.length + 1}`,
         enabled: true,
       }, profiles.length);
@@ -9687,39 +9687,16 @@
       <section class="bsb-shortcut-card"><div class="bsb-shortcut-section-title"><strong>命令快捷键</strong><span>点击快捷键框后直接按新的组合；Esc 取消，Backspace / Delete 清除。</span></div><div class="bsb-shortcut-list">${SHORTCUT_COMMANDS.map(shortcutCommandHtml).join("")}</div><div class="bsb-shortcut-foot"><span>建议使用 Ctrl + Alt + 字母/数字，避开 Chrome 与 B 站播放器常用键。</span><button type="button" class="bsb-btn ghost" data-shortcut-reset-all>恢复默认快捷键</button></div></section></div>`;
   }
 
-  function makePromptProfileId() {
-    return `prompt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  }
-
-  function createPromptProfile(seed, index = 0) {
-    const o = seed && typeof seed === "object" ? seed : {};
-    const stage = o.stage === "preprocess" ? "preprocess" : o.stage === "knowledge" ? "knowledge" : "postprocess";
-    return {
-      id: String(o.id || makePromptProfileId()),
-      stage,
-      name: String(o.name || `提示词 ${index + 1}`).slice(0, 100),
-      hint: String(o.hint || (stage === "preprocess" ? "字幕预处理" : stage === "knowledge" ? "局部知识追问" : "后处理提示词")).slice(0, 160),
-      systemPrompt: String(o.systemPrompt || ""),
-      userPromptTemplate: String(o.userPromptTemplate || ""),
-    };
-  }
-
-  function normalizePromptProfiles(input) {
-    return (Array.isArray(input) ? input : [])
-      .filter((x) => x && typeof x === "object")
-      .map(createPromptProfile);
-  }
-
   function ensureBuiltinStagePrompts(prompts) {
     const list = [...(prompts || [])];
-    if (!list.some((p) => p.stage === "preprocess")) list.unshift(createPromptProfile(DEFAULT_PREPROCESS_PROMPT, 0));
+    if (!list.some((p) => p.stage === "preprocess")) list.unshift(coreCall("createPromptProfile", DEFAULT_PREPROCESS_PROMPT, 0));
     if (!list.some((p) => p.id === DEFAULT_HTML_FOLIO_PROMPT_ID)) {
       const mermaidAt = list.findIndex((p) => p.id === DEFAULT_PROMPT_ID);
-      const html = createPromptProfile(DEFAULT_HTML_FOLIO_PROMPT, list.length);
+      const html = coreCall("createPromptProfile", DEFAULT_HTML_FOLIO_PROMPT, list.length);
       if (mermaidAt >= 0) list.splice(mermaidAt + 1, 0, html);
       else list.push(html);
     }
-    if (!list.some((p) => p.stage === "knowledge")) list.push(createPromptProfile(DEFAULT_KNOWLEDGE_PROMPT, list.length));
+    if (!list.some((p) => p.stage === "knowledge")) list.push(coreCall("createPromptProfile", DEFAULT_KNOWLEDGE_PROMPT, list.length));
     return list;
   }
 
@@ -9793,7 +9770,7 @@
     const next = (prompts || []).map((prompt) => {
       if (!prompt || prompt.id !== DEFAULT_HTML_FOLIO_PROMPT_ID) return prompt;
       changed = true;
-      return createPromptProfile({
+      return coreCall("createPromptProfile", {
         ...DEFAULT_HTML_FOLIO_PROMPT,
         id: prompt.id,
         stage: "postprocess",
@@ -9802,23 +9779,12 @@
     return { prompts: next, changed };
   }
 
-  function resolvePromptActiveIds(prompts, postId, preId, knowledgeId) {
-    const posts = prompts.filter((p) => p.stage === "postprocess");
-    const pres = prompts.filter((p) => p.stage === "preprocess");
-    const knowledge = prompts.filter((p) => p.stage === "knowledge");
-    return {
-      activeId: posts.some((p) => p.id === postId) ? postId : (posts[0]?.id || ""),
-      activePreprocessId: pres.some((p) => p.id === preId) ? preId : (pres[0]?.id || ""),
-      activeKnowledgeId: knowledge.some((p) => p.id === knowledgeId) ? knowledgeId : (knowledge[0]?.id || ""),
-    };
-  }
-
   function loadPromptProfiles() {
     try {
       const raw = storageGet(PROMPT_STORE_KEY, null);
       if (raw != null && raw !== "") {
         const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
-        let prompts = normalizePromptProfiles(Array.isArray(parsed) ? parsed : parsed?.prompts);
+        let prompts = coreCall("normalizePromptProfiles", Array.isArray(parsed) ? parsed : parsed?.prompts);
         // v1 migration: all legacy prompts are postprocess; inject the transparent built-in subtitle normalizer.
         prompts = ensureBuiltinStagePrompts(prompts);
         const storedVersion = Array.isArray(parsed) ? 0 : Number(parsed?.version || 0);
@@ -9838,7 +9804,7 @@
             migratedHtmlFolio.changed ||
             storedVersion < PROMPT_SCHEMA_VERSION,
         };
-        const ids = resolvePromptActiveIds(
+        const ids = coreCall("resolvePromptActiveIds",
           prompts,
           String(Array.isArray(parsed) ? "" : parsed?.activeId || ""),
           String(Array.isArray(parsed) ? "" : parsed?.activePreprocessId || ""),
@@ -9858,10 +9824,10 @@
     } catch (_) {
       /* fall through to first-run default */
     }
-    const pre = createPromptProfile(DEFAULT_PREPROCESS_PROMPT, 0);
-    const post = createPromptProfile(DEFAULT_MERMAID_PROMPT, 1);
-    const html = createPromptProfile(DEFAULT_HTML_FOLIO_PROMPT, 2);
-    const knowledge = createPromptProfile(DEFAULT_KNOWLEDGE_PROMPT, 3);
+    const pre = coreCall("createPromptProfile", DEFAULT_PREPROCESS_PROMPT, 0);
+    const post = coreCall("createPromptProfile", DEFAULT_MERMAID_PROMPT, 1);
+    const html = coreCall("createPromptProfile", DEFAULT_HTML_FOLIO_PROMPT, 2);
+    const knowledge = coreCall("createPromptProfile", DEFAULT_KNOWLEDGE_PROMPT, 3);
     const prompts = [pre, post, html, knowledge];
     state.promptProfiles = prompts;
     state.activePromptId = post.id;
@@ -9871,8 +9837,8 @@
   }
 
   function savePromptProfiles(prompts, activeId, activePreprocessId = state.activePrePromptId, activeKnowledgeId = state.activeKnowledgePromptId) {
-    let normalized = normalizePromptProfiles(prompts);
-    const ids = resolvePromptActiveIds(normalized, String(activeId || ""), String(activePreprocessId || ""), String(activeKnowledgeId || ""));
+    let normalized = coreCall("normalizePromptProfiles", prompts);
+    const ids = coreCall("resolvePromptActiveIds", normalized, String(activeId || ""), String(activePreprocessId || ""), String(activeKnowledgeId || ""));
     try {
       storageSet(PROMPT_STORE_KEY, JSON.stringify({
         version: PROMPT_SCHEMA_VERSION,
@@ -11182,8 +11148,8 @@
   function readPromptEditor(editor, index) {
     if (!editor) return null;
     const get = (key) => editor.querySelector(`[data-prompt-field="${key}"]`);
-    return createPromptProfile({
-      id: editor.dataset.promptId || makePromptProfileId(),
+    return coreCall("createPromptProfile", {
+      id: editor.dataset.promptId || coreCall("makePromptProfileId"),
       stage: editor.dataset.promptStage === "preprocess" ? "preprocess" : editor.dataset.promptStage === "knowledge" ? "knowledge" : "postprocess",
       name: String(get("name")?.value || `提示词 ${index + 1}`),
       hint: String(get("hint")?.value || "自定义提示词"),
@@ -11536,7 +11502,7 @@
       return;
     }
     if (action === "duplicate") {
-      const copy = createPromptProfile({ ...current, id: makePromptProfileId(), name: `${current.name} 副本` }, index + 1);
+      const copy = coreCall("createPromptProfile", { ...current, id: coreCall("makePromptProfileId"), name: `${current.name} 副本` }, index + 1);
       const prompts = [...library.prompts];
       prompts.splice(index + 1, 0, copy);
       savePromptProfiles(prompts, library.activeId, library.activePreprocessId, library.activeKnowledgeId);
@@ -11596,32 +11562,6 @@
     return String(template || "").replace(/\{\{\s*(title|bvid|author|subtitle|rawSubtitle|processedSubtitle|chunkIndex|chunkCount|chunkStart|coreStart|chunkEnd|anchorText|sourceContext|ancestorPath|question)\s*\}\}/g, (_, key) => values[key] ?? "");
   }
 
-  function makeAiProfileId() {
-    return `ai-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  }
-
-  function createAiProfile(seed, index = 0) {
-    const o = seed && typeof seed === "object" ? seed : {};
-    const temperature = Number(o.temperature);
-    return {
-      id: String(o.id || makeAiProfileId()),
-      name: String(o.name || o.label || o.model || `模型 ${index + 1}`).slice(0, 80),
-      enabled: o.enabled !== false,
-      baseUrl: String(o.baseUrl || AI_DEFAULTS.baseUrl).trim().replace(/\/+$/, ""),
-      apiKey: String(o.apiKey != null ? o.apiKey : AI_DEFAULTS.apiKey).trim(),
-      model: String(o.model || AI_DEFAULTS.model).trim(),
-      temperature: Number.isFinite(temperature) ? temperature : AI_DEFAULTS.temperature,
-      maxTokens: Math.max(256, Math.min(128000, Math.floor(Number(o.maxTokens) || AI_DEFAULTS.maxTokens))),
-      stream: !(o.stream === false || o.stream === "false" || o.stream === 0),
-    };
-  }
-
-  function normalizeAiProfiles(input) {
-    const list = Array.isArray(input) ? input : [];
-    const normalized = list.filter((x) => x && typeof x === "object").map(createAiProfile);
-    return normalized.length ? normalized : [createAiProfile(AI_DEFAULTS, 0)];
-  }
-
   function loadAiProfiles() {
     try {
       const raw = storageGet(AI_PROFILES_STORE_KEY, null);
@@ -11638,7 +11578,7 @@
                 // v4 起模型配置只保留 API 与采样参数；提示词迁移到独立模板库。
               }))
             : list;
-          const normalized = normalizeAiProfiles(seeds);
+          const normalized = coreCall("normalizeAiProfiles", seeds);
           if (storedVersion < AI_PROFILES_SCHEMA_VERSION) {
             storageSet(AI_PROFILES_STORE_KEY, JSON.stringify({
               version: AI_PROFILES_SCHEMA_VERSION,
@@ -11658,7 +11598,7 @@
       if (raw) {
         const legacy = typeof raw === "string" ? JSON.parse(raw) : raw;
         if (legacy && typeof legacy === "object") {
-          const migrated = [createAiProfile({ ...legacy, name: legacy.name || legacy.model || "默认模型" }, 0)];
+          const migrated = [coreCall("createAiProfile", { ...legacy, name: legacy.name || legacy.model || "默认模型" }, 0)];
           storageSet(AI_PROFILES_STORE_KEY, JSON.stringify({ version: AI_PROFILES_SCHEMA_VERSION, profiles: migrated }));
           return migrated;
         }
@@ -11666,11 +11606,11 @@
     } catch (_) {
       /* ignore */
     }
-    return [createAiProfile({ ...AI_DEFAULTS, name: "默认模型" }, 0)];
+    return [coreCall("createAiProfile", { ...AI_DEFAULTS, name: "默认模型" }, 0)];
   }
 
   function saveAiProfiles(profiles) {
-    const normalized = normalizeAiProfiles(profiles);
+    const normalized = coreCall("normalizeAiProfiles", profiles);
     try {
       storageSet(AI_PROFILES_STORE_KEY, JSON.stringify({ version: AI_PROFILES_SCHEMA_VERSION, profiles: normalized }));
     } catch (_) {
@@ -11739,13 +11679,13 @@
     const active = getActiveAiRun();
     if (active?.config) return active.config;
     const profiles = state.aiProfiles?.length ? state.aiProfiles : loadAiProfiles();
-    return profiles.find((x) => x.enabled) || profiles[0] || createAiProfile(AI_DEFAULTS, 0);
+    return profiles.find((x) => x.enabled) || profiles[0] || coreCall("createAiProfile", AI_DEFAULTS, 0);
   }
 
   function saveAiConfig(cfg) {
     const profiles = state.aiProfiles?.length ? [...state.aiProfiles] : loadAiProfiles();
     const index = Math.max(0, profiles.findIndex((x) => x.id === cfg?.id));
-    profiles[index] = createAiProfile({ ...(profiles[index] || {}), ...(cfg || {}) }, index);
+    profiles[index] = coreCall("createAiProfile", { ...(profiles[index] || {}), ...(cfg || {}) }, index);
     saveAiProfiles(profiles);
     return profiles[index];
   }
@@ -11849,8 +11789,8 @@
 
   function readAiProfileCard(card, index) {
     const get = (key) => card.querySelector(`[data-ai-field="${key}"]`);
-    return createAiProfile({
-      id: card.dataset.aiProfileId || makeAiProfileId(),
+    return coreCall("createAiProfile", {
+      id: card.dataset.aiProfileId || coreCall("makeAiProfileId"),
       enabled: !!get("enabled")?.checked,
       name: String(get("name")?.value || `模型 ${index + 1}`),
       baseUrl: String(get("baseUrl")?.value || "").trim().replace(/\/+$/, ""),
@@ -11886,7 +11826,7 @@
     const index = profiles.findIndex((x) => x.id === editor.dataset.aiProfileId);
     if (index < 0) return;
     if (action === "duplicate") {
-      const copy = createAiProfile({ ...profiles[index], id: makeAiProfileId(), name: `${profiles[index].name} 副本` }, index + 1);
+      const copy = coreCall("createAiProfile", { ...profiles[index], id: coreCall("makeAiProfileId"), name: `${profiles[index].name} 副本` }, index + 1);
       profiles.splice(index + 1, 0, copy);
       saveAiProfiles(profiles);
       state.aiEditorId = copy.id;
@@ -11936,7 +11876,7 @@
 
   function createAiRun(profile, sessionId, task = null, promptProfile = null) {
     const taskId = String(task?.id || "legacy-output");
-    const prompt = promptProfile ? createPromptProfile(promptProfile, 0) : null;
+    const prompt = promptProfile ? coreCall("createPromptProfile", promptProfile, 0) : null;
     return {
       ...createAiRuntime(profile.name || profile.model),
       id: `${sessionId}:${taskId}:${profile.id}`,
@@ -13052,7 +12992,7 @@
       profiles = loadAiProfiles();
     }
     const latest = profiles.find((profile) => profile.id === run?.profileId);
-    return createAiProfile(latest || run?.config || AI_DEFAULTS, 0);
+    return coreCall("createAiProfile", latest || run?.config || AI_DEFAULTS, 0);
   }
 
   function validateAiRunConfigs(configs) {
@@ -14045,7 +13985,7 @@
       saveAiProfiles(profiles);
       return same.id;
     }
-    const created = createAiProfile({
+    const created = coreCall("createAiProfile", {
       name: "Mermaid 修复",
       baseUrl,
       apiKey,
@@ -15784,7 +15724,7 @@ body{padding:48px 20px 80px}
   }
 
   function buildAiMessagesForProfile(_cfg, vars, promptProfile) {
-    const prompt = promptProfile ? createPromptProfile(promptProfile, 0) : null;
+    const prompt = promptProfile ? coreCall("createPromptProfile", promptProfile, 0) : null;
     if (!prompt) return [];
     const system = renderPromptTemplate(prompt.systemPrompt, vars).trim();
     const user = renderPromptTemplate(prompt.userPromptTemplate, vars).trim();

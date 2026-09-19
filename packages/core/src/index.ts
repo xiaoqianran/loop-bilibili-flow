@@ -8,6 +8,7 @@ import * as libraryMetaApi from "./library/group-meta";
 import * as libraryGroupApi from "./library/groups";
 import * as mermaidApi from "./mermaid";
 import * as preprocessApi from "./preprocess";
+import * as profileStateApi from "./profile-state";
 import * as promptApi from "./prompts";
 import * as transcriptApi from "./transcript";
 
@@ -139,6 +140,21 @@ export const preprocess = {
   cacheKey: preprocessApi.preprocessCacheKey,
 } as const;
 
+export const profile = {
+  prompt: {
+    makeId: profileStateApi.makePromptProfileId,
+    create: profileStateApi.createPromptProfile,
+    normalize: profileStateApi.normalizePromptProfiles,
+    resolveActive: profileStateApi.resolvePromptActiveIds,
+  },
+  ai: {
+    defaults: profileStateApi.DEFAULT_AI_PROFILE_DEFAULTS,
+    makeId: profileStateApi.makeAiProfileId,
+    create: profileStateApi.createAiProfile,
+    normalize: profileStateApi.normalizeAiProfiles,
+  },
+} as const;
+
 export const prompt = {
   render: promptApi.renderPromptTemplate,
 } as const;
@@ -165,6 +181,7 @@ export * from "./library/group-meta";
 export * from "./library/groups";
 export * from "./mermaid";
 export * from "./preprocess";
+export * from "./profile-state";
 export * from "./prompts";
 export * from "./transcript";
 export * from "./utils/md5";

@@ -66,6 +66,13 @@ describe("Maintained full-feature compatibility source", () => {
       "dedupeExactBlocks",
       "stitchPreprocessChunks",
       "preprocessCacheKey",
+      "makePromptProfileId",
+      "createPromptProfile",
+      "normalizePromptProfiles",
+      "resolvePromptActiveIds",
+      "makeAiProfileId",
+      "createAiProfile",
+      "normalizeAiProfiles",
       "viewDetail",
     ].sort();
 
@@ -157,6 +164,13 @@ describe("Maintained full-feature compatibility source", () => {
       "dedupeExactBlocks",
       "stitchPreprocessChunks",
       "preprocessCacheKey",
+      "makePromptProfileId",
+      "createPromptProfile",
+      "normalizePromptProfiles",
+      "resolvePromptActiveIds",
+      "makeAiProfileId",
+      "createAiProfile",
+      "normalizeAiProfiles",
       "viewDetail",
     ]) {
       expect(maintainedSource).not.toContain(`function ${name}(`);

@@ -34,6 +34,12 @@ describe("grouped public API", () => {
     );
     expect(core.preprocess.stitchChunks).toBe(core.stitchPreprocessChunks);
     expect(core.command.shortcuts).toBe(core.SHORTCUT_COMMANDS);
+
+    expect(core.profile.prompt.create).toBe(core.createPromptProfile);
+    expect(core.profile.prompt.normalize).toBe(core.normalizePromptProfiles);
+    expect(core.profile.prompt.resolveActive).toBe(core.resolvePromptActiveIds);
+    expect(core.profile.ai.create).toBe(core.createAiProfile);
+    expect(core.profile.ai.normalize).toBe(core.normalizeAiProfiles);
   });
 
   it("groups Bilibili and runtime APIs", () => {
