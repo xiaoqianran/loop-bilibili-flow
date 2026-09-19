@@ -41,7 +41,6 @@ const requiredCapabilities = [
   "function detectContext(",
   "function loadAllListItems(",
   "function fetchSubtitle(",
-  "function splitCuesForPreprocess(",
   "function requestChatCompletion(",
   "function renderAiResultTabs(",
   "function parseKnowledgeOutput(",
@@ -49,6 +48,12 @@ const requiredCapabilities = [
   "function downloadSubtitleExportBatch(",
   "loop-bilibili-subbatch",
   "bili-subbatch-knowledge-v1",
+] as const;
+
+const requiredCanonicalCapabilities = [
+  "function splitCuesForPreprocess(",
+  "function stitchPreprocessChunks(",
+  "function preprocessCacheKey(",
 ] as const;
 
 function hash(source: string): string {
@@ -105,6 +110,13 @@ async function verify(): Promise<void> {
   for (const capability of requiredCapabilities) {
     if (!outputBehaviorBody.includes(capability)) {
       throw new Error(`Production userscript lost capability marker: ${capability}`);
+    }
+  }
+  for (const capability of requiredCanonicalCapabilities) {
+    if (!output.includes(capability)) {
+      throw new Error(
+        `Production userscript lost canonical capability marker: ${capability}`,
+      );
     }
   }
   if (outputStats.size <= Buffer.byteLength(maintainedSource)) {

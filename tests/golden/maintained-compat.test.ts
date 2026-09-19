@@ -59,6 +59,13 @@ describe("Maintained full-feature compatibility source", () => {
       "cuesToTxt",
       "formatClock",
       "cuesToAiText",
+      "cueTextLength",
+      "splitCuesForPreprocess",
+      "parseEvidenceTimestampSeconds",
+      "trimProcessedOverlap",
+      "dedupeExactBlocks",
+      "stitchPreprocessChunks",
+      "preprocessCacheKey",
       "viewDetail",
     ].sort();
 
@@ -143,6 +150,13 @@ describe("Maintained full-feature compatibility source", () => {
       "cuesToTxt",
       "formatClock",
       "cuesToAiText",
+      "cueTextLength",
+      "splitCuesForPreprocess",
+      "parseEvidenceTimestampSeconds",
+      "trimProcessedOverlap",
+      "dedupeExactBlocks",
+      "stitchPreprocessChunks",
+      "preprocessCacheKey",
       "viewDetail",
     ]) {
       expect(maintainedSource).not.toContain(`function ${name}(`);

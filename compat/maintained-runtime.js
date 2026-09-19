@@ -15555,149 +15555,6 @@ body{padding:48px 20px 80px}
     };
   }
 
-  function cueTextLength(cue, bvid, page) {
-    const sec = cue?.from_sec != null ? cue.from_sec : coreCall("parseSeconds", cue?.from);
-    return String(`[${bvid || "BV"} P${Math.max(1, Number(page) || 1)} ${coreCall("formatClock", sec)}] ${String(cue?.content || "").trim()}\n`).length;
-  }
-
-  /**
-   * 长视频 PRE 智能切块：
-   * - 以字幕真实时间为主要边界（默认 8 分钟）
-   * - maxChars 是硬上限，语速很快/中文 token 密度高时会提前切
-   * - 从第二块开始向前带 overlapSeconds 的字幕作为上下文
-   * - coreStartSec 标记真正属于该块的新内容起点，最终 stitch 时据此去掉 overlap
-   */
-  function splitCuesForPreprocess(item, settings = currentPreprocessSettings()) {
-    const cues = (item?.data || []).filter((cue) => String(cue?.content || "").trim());
-    if (!cues.length) return [];
-    const page = item.page || 1;
-    const bvid = item.bvid || "BV";
-    const targetSec = Math.max(120, settings.targetMinutes * 60);
-    const overlapSec = Math.max(0, settings.overlapSeconds);
-    const hardChars = Math.max(8000, settings.maxChars);
-    const specs = [];
-    let coreStartIdx = 0;
-
-    while (coreStartIdx < cues.length) {
-      const coreStartSec = Number(cues[coreStartIdx].from_sec ?? coreCall("parseSeconds", cues[coreStartIdx].from));
-      let endIdx = coreStartIdx;
-      let chars = 0;
-      while (endIdx < cues.length) {
-        const cue = cues[endIdx];
-        const nextChars = chars + cueTextLength(cue, bvid, page);
-        const cueEnd = Number(cue.to_sec ?? coreCall("parseSeconds", cue.to) ?? cue.from_sec ?? 0);
-        const duration = Math.max(0, cueEnd - coreStartSec);
-        if (endIdx > coreStartIdx && (nextChars > hardChars || duration >= targetSec)) break;
-        chars = nextChars;
-        endIdx += 1;
-      }
-      if (endIdx <= coreStartIdx) endIdx = coreStartIdx + 1;
-
-      let overlapStartIdx = coreStartIdx;
-      if (specs.length && overlapSec > 0) {
-        const wanted = coreStartSec - overlapSec;
-        while (overlapStartIdx > 0) {
-          const prevSec = Number(cues[overlapStartIdx - 1].from_sec ?? coreCall("parseSeconds", cues[overlapStartIdx - 1].from));
-          if (prevSec < wanted) break;
-          overlapStartIdx -= 1;
-        }
-      }
-
-      // overlap 也不能突破字符硬上限；必要时从最旧的 overlap cue 开始收缩。
-      let chunkText = coreCall("cuesToAiText", cues.slice(overlapStartIdx, endIdx), bvid, page);
-      while (chunkText.length > hardChars && overlapStartIdx < coreStartIdx) {
-        overlapStartIdx += 1;
-        chunkText = coreCall("cuesToAiText", cues.slice(overlapStartIdx, endIdx), bvid, page);
-      }
-      // 极端单 cue 过长：沿用最后一道字符保险，不影响正常按 cue 边界切块。
-      if (chunkText.length > hardChars) chunkText = chunkText.slice(0, hardChars);
-
-      const chunkStartSec = Number(cues[overlapStartIdx].from_sec ?? coreCall("parseSeconds", cues[overlapStartIdx].from));
-      const lastCue = cues[Math.max(coreStartIdx, endIdx - 1)];
-      const endSec = Number(lastCue.to_sec ?? coreCall("parseSeconds", lastCue.to) ?? lastCue.from_sec ?? 0);
-      specs.push({
-        text: chunkText,
-        coreStartSec,
-        chunkStartSec,
-        endSec,
-        coreStartIdx,
-        overlapStartIdx,
-        endIdx,
-      });
-      coreStartIdx = endIdx;
-    }
-    return specs;
-  }
-
-  function parseEvidenceTimestampSeconds(text) {
-    const m = String(text || "").match(/\[[^\]\n]*?\b(?:(\d{1,2}):)?(\d{2}):(\d{2})\]/);
-    if (!m) return null;
-    const h = Number(m[1] || 0), min = Number(m[2] || 0), sec = Number(m[3] || 0);
-    if (![h, min, sec].every(Number.isFinite)) return null;
-    return h * 3600 + min * 60 + sec;
-  }
-
-  function trimProcessedOverlap(text, coreStartSec) {
-    const source = String(text || "").trim();
-    if (!source || !(coreStartSec > 0)) return source;
-    const blocks = source.split(/\n{2,}/).map((x) => x.trim()).filter(Boolean);
-    const kept = [];
-    let pending = [];
-    let sawKeptTimestamp = false;
-    let sawAnyTimestamp = false;
-    for (const block of blocks) {
-      const sec = parseEvidenceTimestampSeconds(block);
-      if (sec == null) {
-        if (sawKeptTimestamp) kept.push(block);
-        else pending.push(block);
-        continue;
-      }
-      sawAnyTimestamp = true;
-      if (sec + 0.75 < coreStartSec) {
-        pending = [];
-        continue;
-      }
-      if (!sawKeptTimestamp && pending.length) kept.push(...pending);
-      pending = [];
-      kept.push(block);
-      sawKeptTimestamp = true;
-    }
-    // 如果某个自定义 PRE Prompt 完全不保留时间戳，宁可保留 overlap 重复，也不能误删正文。
-    if (!sawAnyTimestamp || !sawKeptTimestamp) return source;
-    return kept.join("\n\n").trim();
-  }
-
-  function dedupeExactBlocks(text) {
-    const seen = new Set();
-    const out = [];
-    for (const block of String(text || "").split(/\n{2,}/).map((x) => x.trim()).filter(Boolean)) {
-      const key = block.replace(/\s+/g, " ").trim().toLocaleLowerCase();
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      out.push(block);
-    }
-    return out.join("\n\n").trim();
-  }
-
-  function stitchPreprocessChunks(chunkSpecs, outputs) {
-    const parts = [];
-    for (let i = 0; i < chunkSpecs.length; i++) {
-      const cleaned = i === 0
-        ? String(outputs[i] || "").trim()
-        : trimProcessedOverlap(outputs[i], chunkSpecs[i].coreStartSec);
-      if (cleaned) parts.push(cleaned);
-    }
-    return dedupeExactBlocks(parts.join("\n\n"));
-  }
-
-  function preprocessCacheKey(item, raw, prompt, cfg, settings = currentPreprocessSettings()) {
-    const source = `${item.bvid || "BV"}:P${item.page || 1}`;
-    const promptSig = md5(`${prompt.systemPrompt}\n---\n${prompt.userPromptTemplate}`);
-    const modelSig = md5(`${cfg.baseUrl}|${cfg.model}|${cfg.temperature}|${cfg.maxTokens}`);
-    const chunkSig = md5(`${settings.targetMinutes}|${settings.overlapSeconds}|${settings.maxChars}`);
-    return `ai-preprocess:${source}:${md5(raw)}:${promptSig}:${modelSig}:${chunkSig}`;
-  }
-
   function abortPreprocessChildRuntime(runtime) {
     if (!runtime) return;
     runtime.abort = true;
@@ -15825,7 +15682,7 @@ body{padding:48px 20px 80px}
       for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
         const item = items[itemIndex];
         const raw = coreCall("cuesToAiText", item.data || [], item.bvid, item.page || 1);
-        const cacheKey = preprocessCacheKey(item, raw, prompt, cfg, settings);
+        const cacheKey = coreCall("preprocessCacheKey", item, raw, prompt, cfg, settings);
         const cached = state.forcePreprocessOnce ? null : await persistentCacheRead(cacheKey);
         if (cached?.value?.text) {
           item.preprocessedText = String(cached.value.text);
@@ -15834,7 +15691,7 @@ body{padding:48px 20px 80px}
           prepared.push({ item, raw, cacheKey, cached: true, chunks: [], outputs: [] });
           continue;
         }
-        const chunks = splitCuesForPreprocess(item, settings);
+        const chunks = coreCall("splitCuesForPreprocess", item, settings);
         const record = { item, raw, cacheKey, cached: false, chunks, outputs: new Array(chunks.length) };
         prepared.push(record);
         chunks.forEach((chunk, chunkIndex) => jobs.push({
@@ -15871,7 +15728,7 @@ body{padding:48px 20px 80px}
 
       for (const record of prepared) {
         if (record.cached) continue;
-        const text = stitchPreprocessChunks(record.chunks, record.outputs);
+        const text = coreCall("stitchPreprocessChunks", record.chunks, record.outputs);
         record.item.preprocessedText = text;
         record.item.preprocessCacheKey = record.cacheKey;
         persistentCacheWrite(record.cacheKey, {
