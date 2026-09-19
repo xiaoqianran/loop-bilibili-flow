@@ -1,3 +1,4 @@
+import * as aiProtocolApi from "./ai-protocol";
 import * as aiSessionApi from "./ai-session";
 import * as commandApi from "./commands";
 import * as subtitleExportApi from "./export/subtitle-download";
@@ -11,6 +12,14 @@ import * as promptApi from "./prompts";
 import * as transcriptApi from "./transcript";
 
 export const CORE_VERSION = "0.6.0";
+
+export const ai = {
+  extractText: aiProtocolApi.extractAssistantText,
+  extractChoice: aiProtocolApi.extractFromChoice,
+  display: aiProtocolApi.formatAiDisplay,
+  truncateInput: aiProtocolApi.truncateForAi,
+  parseSseLine: aiProtocolApi.parseSseDataLine,
+} as const;
 
 /**
  * Canonical grouped API.
@@ -146,6 +155,7 @@ export const transcript = {
 
 // Compatibility surface. Keep until the maintained body no longer depends on
 // flat function names.
+export * from "./ai-protocol";
 export * from "./ai-session";
 export * from "./commands";
 export * from "./export/subtitle-download";

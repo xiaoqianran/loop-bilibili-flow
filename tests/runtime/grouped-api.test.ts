@@ -8,6 +8,12 @@ import * as app from "../../apps/userscript/src/app";
 
 describe("grouped public API", () => {
   it("groups core APIs behind short domain methods", () => {
+    expect(core.ai.extractText).toBe(core.extractAssistantText);
+    expect(core.ai.extractChoice).toBe(core.extractFromChoice);
+    expect(core.ai.display).toBe(core.formatAiDisplay);
+    expect(core.ai.truncateInput).toBe(core.truncateForAi);
+    expect(core.ai.parseSseLine).toBe(core.parseSseDataLine);
+
     expect(core.aiSession.cacheKey).toBe(core.aiSessionCacheKey);
     expect(core.aiSession.shouldAutoRestore).toBe(
       core.shouldRestoreAutomaticAiSession,

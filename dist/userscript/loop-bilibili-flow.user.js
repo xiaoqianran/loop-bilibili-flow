@@ -747,6 +747,100 @@ var SubBatch = (function(exports) {
     videoViewUrl,
     wbi
   }, Symbol.toStringTag, { value: "Module" }));
+  const DEFAULT_AI_INPUT_MAX_CHARS = 16e4;
+  function extractAssistantText(piece) {
+    if (!piece || typeof piece !== "object") {
+      return { content: "", reasoning: "" };
+    }
+    const value = piece;
+    const content = typeof value.content === "string" && value.content || typeof value.text === "string" && value.text || "";
+    const reasoning = typeof value.reasoning_content === "string" && value.reasoning_content || typeof value.reasoning === "string" && value.reasoning || "";
+    return { content, reasoning };
+  }
+  function extractFromChoice(choice) {
+    if (!choice || typeof choice !== "object") {
+      return { content: "", reasoning: "" };
+    }
+    const value = choice;
+    const fromDelta = extractAssistantText(value.delta);
+    const fromMessage = extractAssistantText(value.message);
+    return {
+      content: fromDelta.content || fromMessage.content || "",
+      reasoning: fromDelta.reasoning || fromMessage.reasoning || ""
+    };
+  }
+  function formatAiDisplay(content, reasoning) {
+    const body = String(content || "");
+    if (body.trim()) return body;
+    return reasoning && String(reasoning).trim() ? "正在分析字幕并组织笔记…" : "";
+  }
+  function truncateForAi(text, maxChars = DEFAULT_AI_INPUT_MAX_CHARS) {
+    const source = String(text || "");
+    const limit = maxChars == null ? DEFAULT_AI_INPUT_MAX_CHARS : Math.max(4e3, Number(maxChars));
+    if (source.length <= limit) {
+      return { text: source, truncated: false, originalLen: source.length };
+    }
+    const markerBudget = 420;
+    const usable = Math.max(3e3, limit - markerBudget);
+    const headLen = Math.floor(usable * 0.44);
+    const tailLen = Math.floor(usable * 0.24);
+    const middleBudget = usable - headLen - tailLen;
+    const windows = 3;
+    const windowLen = Math.floor(middleBudget / windows);
+    const middleStart = headLen;
+    const middleEnd = source.length - tailLen;
+    const span = Math.max(1, middleEnd - middleStart - windowLen);
+    const parts = [source.slice(0, headLen).replace(/[^\n]*$/, "")];
+    for (let index = 0; index < windows; index += 1) {
+      const at = middleStart + Math.floor(span * (index + 1) / (windows + 1));
+      let piece = source.slice(at, at + windowLen);
+      piece = piece.replace(/^[^\n]*\n?/, "").replace(/[^\n]*$/, "");
+      parts.push(`
+…[中段采样 ${index + 1}/${windows}]…
+${piece}`);
+    }
+    parts.push(
+      `
+…[省略 ${source.length - usable} 字；保留结尾]…
+${source.slice(-tailLen).replace(/^[^\n]*\n?/, "")}`
+    );
+    return {
+      text: parts.join(""),
+      truncated: true,
+      originalLen: source.length
+    };
+  }
+  function parseSseDataLine(line) {
+    const text = String(line || "").trim();
+    if (!text || text.startsWith(":") || !text.startsWith("data:")) {
+      return { kind: "skip" };
+    }
+    const data = text.slice(5).trim();
+    if (!data) return { kind: "skip" };
+    if (data === "[DONE]") return { kind: "done" };
+    try {
+      const payload = JSON.parse(data);
+      if (payload.error) {
+        const error = payload.error && typeof payload.error === "object" ? payload.error : null;
+        return {
+          kind: "error",
+          message: typeof error?.message === "string" && error.message || JSON.stringify(payload.error)
+        };
+      }
+      const choices = Array.isArray(payload.choices) ? payload.choices : [];
+      const choice = choices[0];
+      const piece = extractFromChoice(choice);
+      const finishReason = choice && typeof choice === "object" ? String(choice.finish_reason || "") : "";
+      return {
+        kind: "delta",
+        ...piece,
+        finishReason,
+        usage: payload.usage || null
+      };
+    } catch {
+      return { kind: "skip" };
+    }
+  }
   const SHIFT = [
     7,
     12,
@@ -2394,6 +2488,13 @@ ${prompt2.userPromptTemplate}`
     );
   }
   const CORE_VERSION = "0.6.0";
+  const ai = {
+    extractText: extractAssistantText,
+    extractChoice: extractFromChoice,
+    display: formatAiDisplay,
+    truncateInput: truncateForAi,
+    parseSseLine: parseSseDataLine
+  };
   const aiSession = {
     ttlMs: aiSessionCacheTtlMs,
     cacheKey: aiSessionCacheKey,
@@ -2514,11 +2615,13 @@ ${prompt2.userPromptTemplate}`
     AI_SESSION_CACHE_PREFIX,
     AI_SESSION_CACHE_TTL_MS,
     CORE_VERSION,
+    DEFAULT_AI_INPUT_MAX_CHARS,
     PROMPT_KEYS,
     SHORTCUT_COMMANDS,
     SPACE_LOOSE_VIDEOS_FOLDER,
     SUBTITLE_EXPORT_INDEX_NAME,
     SUBTITLE_EXPORT_ROOT,
+    ai,
     aiRunIdentityKey,
     aiSession,
     aiSessionCacheKey,
@@ -2552,9 +2655,12 @@ ${prompt2.userPromptTemplate}`
     describeSubtitleExport,
     draftHydratedAiRun,
     draftHydratedPreprocessRun,
+    extractAssistantText,
+    extractFromChoice,
     flattenFolioOutline,
     folio,
     folioOutlineSummary,
+    formatAiDisplay,
     formatClock,
     formatFolioChapterIndex,
     formatSrtTimestamp,
@@ -2575,6 +2681,7 @@ ${prompt2.userPromptTemplate}`
     parseExportIndexMd,
     parseKnowledgeOutput,
     parseSeconds,
+    parseSseDataLine,
     partitionPlannedAiRuns,
     preprocess,
     preprocessCacheKey,
@@ -2613,6 +2720,7 @@ ${prompt2.userPromptTemplate}`
     toCues,
     transcript,
     trimProcessedOverlap,
+    truncateForAi,
     upsertCollectionExportIndex,
     upsertExportIndexMap,
     upsertIndexForExportItem,
@@ -4176,63 +4284,6 @@ ${prompt2.userPromptTemplate}`
 
   // ─── pure helpers (offline harness extracts // #region pure-logic) ─────
   // #region pure-logic
-  function extractAssistantText(piece) {
-    if (!piece || typeof piece !== "object") return { content: "", reasoning: "" };
-    const content =
-      (typeof piece.content === "string" && piece.content) ||
-      (typeof piece.text === "string" && piece.text) ||
-      "";
-    const reasoning =
-      (typeof piece.reasoning_content === "string" && piece.reasoning_content) ||
-      (typeof piece.reasoning === "string" && piece.reasoning) ||
-      "";
-    return { content, reasoning };
-  }
-
-  function extractFromChoice(choice) {
-    if (!choice) return { content: "", reasoning: "" };
-    const fromDelta = extractAssistantText(choice.delta);
-    const fromMsg = extractAssistantText(choice.message);
-    return {
-      content: fromDelta.content || fromMsg.content || "",
-      reasoning: fromDelta.reasoning || fromMsg.reasoning || "",
-    };
-  }
-
-  function formatAiDisplay(content, reasoning) {
-    const body = String(content || "");
-    if (body.trim()) return body;
-    // 不把供应商返回的 reasoning / chain-of-thought 暴露到界面。
-    return reasoning && String(reasoning).trim() ? "正在分析字幕并组织笔记…" : "";
-  }
-
-  function truncateForAi(text, maxChars) {
-    const s = String(text || "");
-    const lim = maxChars == null ? MAX_SUBTITLE_CHARS : Math.max(4000, Number(maxChars));
-    if (s.length <= lim) return { text: s, truncated: false, originalLen: s.length };
-
-    // 比“只保留开头”更稳：保留首尾，并从中段均匀抽取连续窗口。
-    const markerBudget = 420;
-    const usable = Math.max(3000, lim - markerBudget);
-    const headLen = Math.floor(usable * 0.44);
-    const tailLen = Math.floor(usable * 0.24);
-    const middleBudget = usable - headLen - tailLen;
-    const windows = 3;
-    const winLen = Math.floor(middleBudget / windows);
-    const middleStart = headLen;
-    const middleEnd = s.length - tailLen;
-    const span = Math.max(1, middleEnd - middleStart - winLen);
-    const parts = [s.slice(0, headLen).replace(/[^\n]*$/, "")];
-    for (let i = 0; i < windows; i++) {
-      const at = middleStart + Math.floor((span * (i + 1)) / (windows + 1));
-      let piece = s.slice(at, at + winLen);
-      piece = piece.replace(/^[^\n]*\n?/, "").replace(/[^\n]*$/, "");
-      parts.push(`\n…[中段采样 ${i + 1}/${windows}]…\n${piece}`);
-    }
-    parts.push(`\n…[省略 ${s.length - usable} 字；保留结尾]…\n${s.slice(-tailLen).replace(/^[^\n]*\n?/, "")}`);
-    return { text: parts.join(""), truncated: true, originalLen: s.length };
-  }
-
   /** Peer scroll pattern: stick when distance-to-bottom < threshold */
   function shouldStickBottom(scrollHeight, scrollTop, clientHeight, threshold) {
     const th = threshold == null ? 48 : threshold;
@@ -4404,33 +4455,6 @@ ${prompt2.userPromptTemplate}`
     });
   }
 
-  function parseSseDataLine(line) {
-    const t = String(line || "").trim();
-    if (!t || t.startsWith(":")) return { kind: "skip" };
-    if (!t.startsWith("data:")) return { kind: "skip" };
-    const data = t.slice(5).trim();
-    if (!data) return { kind: "skip" };
-    if (data === "[DONE]") return { kind: "done" };
-    try {
-      const j = JSON.parse(data);
-      if (j.error) {
-        return {
-          kind: "error",
-          message: j.error.message || JSON.stringify(j.error),
-        };
-      }
-      const choice = j.choices && j.choices[0];
-      const piece = extractFromChoice(choice);
-      return {
-        kind: "delta",
-        ...piece,
-        finishReason: String(choice?.finish_reason || ""),
-        usage: j.usage || null,
-      };
-    } catch (_) {
-      return { kind: "skip" };
-    }
-  }
   // #endregion pure-logic
 
   // ─── HTTP ───────────────────────────────────────────────────────────────
@@ -4542,28 +4566,6 @@ ${prompt2.userPromptTemplate}`
 
 
 
-  function toCues(body) {
-    const out = [];
-    (body || []).forEach((c, i) => {
-      const fr = Number(c.from) || 0;
-      const to = Number(c.to) || 0;
-      let index = i + 1;
-      if (c.sid != null) {
-        const n = Number(c.sid);
-        if (Number.isFinite(n)) index = n;
-      }
-      out.push({
-        index,
-        from: `${fr.toFixed(2)}s`,
-        to: `${to.toFixed(2)}s`,
-        from_sec: fr,
-        to_sec: to,
-        content: String(c.content || ""),
-      });
-    });
-    return out;
-  }
-
   function dedupeCues(cues) {
     const out = [];
     for (const cue of cues || []) {
@@ -4572,10 +4574,13 @@ ${prompt2.userPromptTemplate}`
       const normalized = content.toLocaleLowerCase();
       const previous = out[out.length - 1];
       if (previous && previous._normalized === normalized) {
-        const previousTo = Number(previous.to_sec ?? parseSeconds(previous.to));
-        const currentFrom = Number(cue.from_sec ?? parseSeconds(cue.from));
+        const previousTo = Number(previous.to_sec ?? coreCall("parseSeconds", previous.to));
+        const currentFrom = Number(cue.from_sec ?? coreCall("parseSeconds", cue.from));
         if (currentFrom - previousTo <= 1.25) {
-          const nextTo = Math.max(previousTo, Number(cue.to_sec ?? parseSeconds(cue.to)));
+          const nextTo = Math.max(
+            previousTo,
+            Number(cue.to_sec ?? coreCall("parseSeconds", cue.to)),
+          );
           previous.to_sec = nextTo;
           previous.to = `${nextTo.toFixed(2)}s`;
           continue;
@@ -4584,86 +4589,6 @@ ${prompt2.userPromptTemplate}`
       out.push({ ...cue, content, _normalized: normalized });
     }
     return out.map(({ _normalized, ...cue }) => cue);
-  }
-
-  function parseSeconds(val) {
-    if (val == null) return 0;
-    if (typeof val === "number") return val;
-    const s = String(val).trim().replace(/s$/i, "");
-    const n = Number(s);
-    return Number.isFinite(n) ? n : 0;
-  }
-
-  function formatSrtTimestamp(sec) {
-    if (sec < 0) sec = 0;
-    const totalMs = Math.round(sec * 1000);
-    const h = Math.floor(totalMs / 3_600_000);
-    const rem = totalMs % 3_600_000;
-    const m = Math.floor(rem / 60_000);
-    const rem2 = rem % 60_000;
-    const s = Math.floor(rem2 / 1000);
-    const ms = rem2 % 1000;
-    return (
-      String(h).padStart(2, "0") +
-      ":" +
-      String(m).padStart(2, "0") +
-      ":" +
-      String(s).padStart(2, "0") +
-      "," +
-      String(ms).padStart(3, "0")
-    );
-  }
-
-  function cuesToSrt(cues) {
-    const lines = [];
-    let n = 0;
-    for (const c of cues) {
-      const text = String(c.content || "")
-        .replace(/\r\n/g, "\n")
-        .replace(/\r/g, "\n")
-        .trim();
-      if (!text) continue;
-      n += 1;
-      const fr = c.from_sec != null ? c.from_sec : c.from;
-      const to = c.to_sec != null ? c.to_sec : c.to;
-      lines.push(String(n));
-      lines.push(
-        `${formatSrtTimestamp(parseSeconds(fr))} --> ${formatSrtTimestamp(parseSeconds(to))}`,
-      );
-      lines.push(text);
-      lines.push("");
-    }
-    return lines.join("\n");
-  }
-
-  function cuesToTxt(cues) {
-    return cues
-      .map((c) => String(c.content || "").trim())
-      .filter(Boolean)
-      .join("\n");
-  }
-
-  function formatClock(sec) {
-    const total = Math.max(0, Math.floor(Number(sec) || 0));
-    const h = Math.floor(total / 3600);
-    const m = Math.floor((total % 3600) / 60);
-    const s = total % 60;
-    return h > 0
-      ? `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
-      : `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
-
-  function cuesToAiText(cues, bvid, page) {
-    const rows = [];
-    let previous = "";
-    for (const cue of cues || []) {
-      const content = String(cue.content || "").replace(/\s+/g, " ").trim();
-      if (!content || content === previous) continue;
-      previous = content;
-      const sec = cue.from_sec != null ? cue.from_sec : parseSeconds(cue.from);
-      rows.push(`[${bvid || "BV"} P${Math.max(1, Number(page) || 1)} ${formatClock(sec)}] ${content}`);
-    }
-    return rows.join("\n");
   }
 
   function stripHtml(s) {
@@ -5741,7 +5666,7 @@ ${prompt2.userPromptTemplate}`
     if (!body.length) {
       return { ...base, status: "empty", lan, tracks, activeTrackIndex: trackIndex, source: "NET 空字幕" };
     }
-    const cues = dedupeCues(toCues(body));
+    const cues = dedupeCues(coreCall("toCues", body));
     const result = {
       ...base,
       status: "ok",
@@ -5876,7 +5801,7 @@ ${prompt2.userPromptTemplate}`
       return { ...base, status: "empty", lan };
     }
 
-    const cues = toCues(body);
+    const cues = coreCall("toCues", body);
     return {
       ...base,
       status: "ok",
@@ -12629,9 +12554,9 @@ ${prompt2.userPromptTemplate}`
       const time = document.createElement("button");
       time.type = "button";
       time.className = "bsb-transcript-time";
-      time.dataset.transcriptTime = String(cue.from_sec ?? parseSeconds(cue.from));
-      time.textContent = formatTranscriptTime(cue.from_sec ?? parseSeconds(cue.from));
-      time.title = `跳转到 ${formatTranscriptTime(cue.from_sec ?? parseSeconds(cue.from), true)}`;
+      time.dataset.transcriptTime = String(cue.from_sec ?? coreCall("parseSeconds", cue.from));
+      time.textContent = formatTranscriptTime(cue.from_sec ?? coreCall("parseSeconds", cue.from));
+      time.title = `跳转到 ${formatTranscriptTime(cue.from_sec ?? coreCall("parseSeconds", cue.from), true)}`;
 
       const text = document.createElement("p");
       text.className = "bsb-transcript-text";
@@ -12650,13 +12575,13 @@ ${prompt2.userPromptTemplate}`
     let candidate = -1;
     while (low <= high) {
       const mid = (low + high) >> 1;
-      const from = Number(cues[mid].from_sec ?? parseSeconds(cues[mid].from));
+      const from = Number(cues[mid].from_sec ?? coreCall("parseSeconds", cues[mid].from));
       if (time < from) high = mid - 1;
       else { candidate = mid; low = mid + 1; }
     }
     if (candidate < 0) return -1;
     const cue = cues[candidate];
-    const to = Number(cue.to_sec ?? parseSeconds(cue.to));
+    const to = Number(cue.to_sec ?? coreCall("parseSeconds", cue.to));
     return time <= to + 0.2 ? candidate : -1;
   }
 
@@ -14046,7 +13971,7 @@ ${prompt2.userPromptTemplate}`
     const active = anchor.id === activeAnchorId;
     return `<button type="button" class="bsb-knowledge-list-item${active ? " active" : ""}" data-knowledge-anchor-list="${escapeAttr(anchor.id)}">
       <span class="bsb-knowledge-list-dot"></span>
-      <span class="bsb-knowledge-list-main"><strong>${escapeHtml(anchor.selectedText)}</strong><small>${count} 个追问${anchor.timeStart != null ? ` · ${formatClock(anchor.timeStart)}` : ""}${anchor.starred ? " · ★" : ""}</small></span>
+      <span class="bsb-knowledge-list-main"><strong>${escapeHtml(anchor.selectedText)}</strong><small>${count} 个追问${anchor.timeStart != null ? ` · ${coreCall("formatClock", anchor.timeStart)}` : ""}${anchor.starred ? " · ★" : ""}</small></span>
       ${anchor.starred ? '<span class="bsb-knowledge-star">★</span>' : ""}
     </button>`;
   }
@@ -14084,7 +14009,7 @@ ${prompt2.userPromptTemplate}`
     const meta = [
       anchor.title || "",
       anchor.bvid ? `${anchor.bvid}${anchor.page > 1 ? ` P${anchor.page}` : ""}` : "",
-      anchor.timeStart != null ? formatClock(anchor.timeStart) : "",
+      anchor.timeStart != null ? coreCall("formatClock", anchor.timeStart) : "",
     ].filter(Boolean).join(" · ");
     return `<header class="bsb-knowledge-reader-head">
         <div class="bsb-knowledge-reader-head-main">
@@ -14162,7 +14087,7 @@ ${prompt2.userPromptTemplate}`
     }
     rail.innerHTML = `<button type="button" class="bsb-knowledge-rail-resize" data-role="knowledge-rail-resize" title="拖拽调整 Knowledge 宽度" aria-label="调整 Knowledge 宽度"></button>
       <div class="bsb-knowledge-rail-head">
-        <div class="bsb-knowledge-anchor-title"><span class="bsb-knowledge-kicker">KNOWLEDGE ANCHOR</span><strong>${escapeHtml(anchor.selectedText)}</strong><small>${escapeHtml(anchor.title || anchor.bvid)} · ${anchor.timeStart != null ? formatClock(anchor.timeStart) : "局部字幕"}${anchor.timeEnd > anchor.timeStart ? `–${formatClock(anchor.timeEnd)}` : ""}</small></div>
+        <div class="bsb-knowledge-anchor-title"><span class="bsb-knowledge-kicker">KNOWLEDGE ANCHOR</span><strong>${escapeHtml(anchor.selectedText)}</strong><small>${escapeHtml(anchor.title || anchor.bvid)} · ${anchor.timeStart != null ? coreCall("formatClock", anchor.timeStart) : "局部字幕"}${anchor.timeEnd > anchor.timeStart ? `–${coreCall("formatClock", anchor.timeEnd)}` : ""}</small></div>
         <div class="bsb-knowledge-rail-actions">${state.knowledgeBusy ? '<button type="button" class="bsb-icon-btn" data-knowledge-stop title="停止回答">■</button>' : ''}<button type="button" class="bsb-icon-btn${anchor.starred ? " active" : ""}" data-knowledge-star-anchor title="${anchor.starred ? "取消收藏锚点" : "收藏锚点"}">${anchor.starred ? "★" : "☆"}</button><button type="button" class="bsb-icon-btn" data-knowledge-new-root title="新建独立根问题">＋</button><button type="button" class="bsb-icon-btn${state.knowledgeTreeOpen ? " active" : ""}" data-knowledge-tree-toggle title="${state.knowledgeTreeOpen ? "收起追问树" : "展开追问树（并排）"}">☷</button><button type="button" class="bsb-icon-btn" data-knowledge-open-workspace title="在 Knowledge 工作区打开">↗</button><button type="button" class="bsb-icon-btn" data-knowledge-close title="关闭">×</button></div>
       </div>
       <div class="bsb-knowledge-rail-body">${knowledgeRailBodyHtml(anchor, activeNode)}</div>`;
@@ -17057,7 +16982,7 @@ ${prompt2.userPromptTemplate}`
     return items
       .map((it) => {
         const head = `=== ${it.bvid}${it.page > 1 ? " P" + it.page : ""} ${it.title || ""} ===`;
-        return `${head}\n${cuesToAiText(it.data || [], it.bvid, it.page || 1)}`;
+        return `${head}\n${coreCall("cuesToAiText", it.data || [], it.bvid, it.page || 1)}`;
       })
       .join("\n\n");
   }
@@ -18687,7 +18612,7 @@ body{padding:48px 20px 80px}
       if (err) onError && onError(err);
       else {
         onDone &&
-          onDone(formatAiDisplay(assembledContent, assembledReasoning), {
+          onDone(coreCall("formatAiDisplay", assembledContent, assembledReasoning), {
             content: assembledContent,
             reasoning: assembledReasoning,
             finishReason,
@@ -18698,7 +18623,7 @@ body{padding:48px 20px 80px}
 
     const emit = () => {
       onDelta &&
-        onDelta("", formatAiDisplay(assembledContent, assembledReasoning), {
+        onDelta("", coreCall("formatAiDisplay", assembledContent, assembledReasoning), {
           content: assembledContent,
           reasoning: assembledReasoning,
         });
@@ -18718,7 +18643,7 @@ body{padding:48px 20px 80px}
     };
 
     const handleSseLine = (line) => {
-      const parsed = parseSseDataLine(line);
+      const parsed = coreCall("parseSseDataLine", line);
       if (parsed.kind === "done") sawDone = true;
       if (parsed.kind === "delta") {
         applyPiece(parsed.content, parsed.reasoning);
@@ -18754,7 +18679,7 @@ body{padding:48px 20px 80px}
           const j = JSON.parse(text);
           if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
           const choice = j.choices?.[0];
-          const { content, reasoning } = extractFromChoice(choice);
+          const { content, reasoning } = coreCall("extractFromChoice", choice);
           finishReason = String(choice?.finish_reason || "");
           assembledContent = content || "";
           assembledReasoning = reasoning || "";
@@ -18864,7 +18789,7 @@ body{padding:48px 20px 80px}
       if (err) onError && onError(err);
       else {
         onDone &&
-          onDone(formatAiDisplay(assembledContent, assembledReasoning), {
+          onDone(coreCall("formatAiDisplay", assembledContent, assembledReasoning), {
             content: assembledContent,
             reasoning: assembledReasoning,
             finishReason,
@@ -18882,7 +18807,7 @@ body{padding:48px 20px 80px}
 
     const emit = () => {
       onDelta &&
-        onDelta("", formatAiDisplay(assembledContent, assembledReasoning), {
+        onDelta("", coreCall("formatAiDisplay", assembledContent, assembledReasoning), {
           content: assembledContent,
           reasoning: assembledReasoning,
         });
@@ -18902,7 +18827,7 @@ body{padding:48px 20px 80px}
     };
 
     const handleSseLine = (line) => {
-      const parsed = parseSseDataLine(line);
+      const parsed = coreCall("parseSseDataLine", line);
       if (parsed.kind === "done") sawDone = true;
       if (parsed.kind === "delta") {
         applyPiece(parsed.content, parsed.reasoning);
@@ -19005,7 +18930,7 @@ body{padding:48px 20px 80px}
                 throw new Error(j.error.message || JSON.stringify(j.error));
               }
               const choice = j.choices?.[0];
-              const { content, reasoning } = extractFromChoice(choice);
+              const { content, reasoning } = coreCall("extractFromChoice", choice);
               finishReason = String(choice?.finish_reason || "");
               assembledContent = content || "";
               assembledReasoning = reasoning || "";
@@ -19170,8 +19095,8 @@ body{padding:48px 20px 80px}
   }
 
   function cueTextLength(cue, bvid, page) {
-    const sec = cue?.from_sec != null ? cue.from_sec : parseSeconds(cue?.from);
-    return String(`[${bvid || "BV"} P${Math.max(1, Number(page) || 1)} ${formatClock(sec)}] ${String(cue?.content || "").trim()}\n`).length;
+    const sec = cue?.from_sec != null ? cue.from_sec : coreCall("parseSeconds", cue?.from);
+    return String(`[${bvid || "BV"} P${Math.max(1, Number(page) || 1)} ${coreCall("formatClock", sec)}] ${String(cue?.content || "").trim()}\n`).length;
   }
 
   /**
@@ -19193,13 +19118,13 @@ body{padding:48px 20px 80px}
     let coreStartIdx = 0;
 
     while (coreStartIdx < cues.length) {
-      const coreStartSec = Number(cues[coreStartIdx].from_sec ?? parseSeconds(cues[coreStartIdx].from));
+      const coreStartSec = Number(cues[coreStartIdx].from_sec ?? coreCall("parseSeconds", cues[coreStartIdx].from));
       let endIdx = coreStartIdx;
       let chars = 0;
       while (endIdx < cues.length) {
         const cue = cues[endIdx];
         const nextChars = chars + cueTextLength(cue, bvid, page);
-        const cueEnd = Number(cue.to_sec ?? parseSeconds(cue.to) ?? cue.from_sec ?? 0);
+        const cueEnd = Number(cue.to_sec ?? coreCall("parseSeconds", cue.to) ?? cue.from_sec ?? 0);
         const duration = Math.max(0, cueEnd - coreStartSec);
         if (endIdx > coreStartIdx && (nextChars > hardChars || duration >= targetSec)) break;
         chars = nextChars;
@@ -19211,24 +19136,24 @@ body{padding:48px 20px 80px}
       if (specs.length && overlapSec > 0) {
         const wanted = coreStartSec - overlapSec;
         while (overlapStartIdx > 0) {
-          const prevSec = Number(cues[overlapStartIdx - 1].from_sec ?? parseSeconds(cues[overlapStartIdx - 1].from));
+          const prevSec = Number(cues[overlapStartIdx - 1].from_sec ?? coreCall("parseSeconds", cues[overlapStartIdx - 1].from));
           if (prevSec < wanted) break;
           overlapStartIdx -= 1;
         }
       }
 
       // overlap 也不能突破字符硬上限；必要时从最旧的 overlap cue 开始收缩。
-      let chunkText = cuesToAiText(cues.slice(overlapStartIdx, endIdx), bvid, page);
+      let chunkText = coreCall("cuesToAiText", cues.slice(overlapStartIdx, endIdx), bvid, page);
       while (chunkText.length > hardChars && overlapStartIdx < coreStartIdx) {
         overlapStartIdx += 1;
-        chunkText = cuesToAiText(cues.slice(overlapStartIdx, endIdx), bvid, page);
+        chunkText = coreCall("cuesToAiText", cues.slice(overlapStartIdx, endIdx), bvid, page);
       }
       // 极端单 cue 过长：沿用最后一道字符保险，不影响正常按 cue 边界切块。
       if (chunkText.length > hardChars) chunkText = chunkText.slice(0, hardChars);
 
-      const chunkStartSec = Number(cues[overlapStartIdx].from_sec ?? parseSeconds(cues[overlapStartIdx].from));
+      const chunkStartSec = Number(cues[overlapStartIdx].from_sec ?? coreCall("parseSeconds", cues[overlapStartIdx].from));
       const lastCue = cues[Math.max(coreStartIdx, endIdx - 1)];
-      const endSec = Number(lastCue.to_sec ?? parseSeconds(lastCue.to) ?? lastCue.from_sec ?? 0);
+      const endSec = Number(lastCue.to_sec ?? coreCall("parseSeconds", lastCue.to) ?? lastCue.from_sec ?? 0);
       specs.push({
         text: chunkText,
         coreStartSec,
@@ -19366,9 +19291,9 @@ body{padding:48px 20px 80px}
         rawSubtitle: job.raw,
         chunkIndex: job.chunkIndex + 1,
         chunkCount: job.chunkCount,
-        chunkStart: formatClock(job.chunk.chunkStartSec),
-        coreStart: formatClock(job.chunk.coreStartSec),
-        chunkEnd: formatClock(job.chunk.endSec),
+        chunkStart: coreCall("formatClock", job.chunk.chunkStartSec),
+        coreStart: coreCall("formatClock", job.chunk.coreStartSec),
+        chunkEnd: coreCall("formatClock", job.chunk.endSec),
       };
       const attemptSuffix = attempt ? ` · 重试 ${attempt}/${settings.retries}` : "";
       const label = `${job.itemIndex + 1}/${job.itemCount} ${job.item.bvid}${(job.item.page || 1) > 1 ? ` P${job.item.page}` : ""} · 块 ${job.chunkIndex + 1}/${job.chunkCount} · W${workerId}${attemptSuffix}`;
@@ -19438,7 +19363,7 @@ body{padding:48px 20px 80px}
     try {
       for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
         const item = items[itemIndex];
-        const raw = cuesToAiText(item.data || [], item.bvid, item.page || 1);
+        const raw = coreCall("cuesToAiText", item.data || [], item.bvid, item.page || 1);
         const cacheKey = preprocessCacheKey(item, raw, prompt, cfg, settings);
         const cached = state.forcePreprocessOnce ? null : await persistentCacheRead(cacheKey);
         if (cached?.value?.text) {
@@ -19826,7 +19751,7 @@ body{padding:48px 20px 80px}
         stageInput = await preprocessItemsForAi(ready, preprocessPrompt, preprocessConfig);
         if (state.aiAbort) throw new Error("用户停止");
       }
-      const cut = truncateForAi(stageInput, MAX_SUBTITLE_CHARS);
+      const cut = coreCall("truncateForAi", stageInput, MAX_SUBTITLE_CHARS);
       const vars = {
         title: ready.map((x) => x.title).filter(Boolean).join(" / ") || first.title || "",
         bvid: ready.map((x) => x.bvid).join(", "),
@@ -20426,7 +20351,7 @@ body{padding:48px 20px 80px}
               ready.length > 1
                 ? `=== ${it.bvid}${it.page > 1 ? " P" + it.page : ""} ${it.title || ""} ===\n`
                 : "";
-            return head + cuesToTxt(it.data);
+            return head + coreCall("cuesToTxt", it.data);
           })
           .join("\n\n");
         clipboardWrite(text);
@@ -20436,7 +20361,7 @@ body{padding:48px 20px 80px}
 
       if (act === "dl-srt" || act === "dl-txt" || act === "dl-ok-only") {
         const ext = act === "dl-txt" ? "txt" : "srt";
-        const convert = ext === "txt" ? cuesToTxt : cuesToSrt;
+        const convert = (cues) => coreCall(ext === "txt" ? "cuesToTxt" : "cuesToSrt", cues);
         const pool =
           act === "dl-ok-only"
             ? state.items.filter((it) => it.selected && it.subStatus === "ok" && it.data)
