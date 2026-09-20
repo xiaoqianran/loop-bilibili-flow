@@ -50,7 +50,7 @@ dist/userscript/loop-bilibili-flow.user.js
 只定义跨版本必须稳定的数据：
 
 - PromptStage
-- LLM / Prompt / Content / Transcript / Artifact / Job DTO
+- LLM / Prompt / Content / ContentRef / Transcript / Artifact / Job DTO
 - v6 storage keys
 - builtin prompt IDs
 - shortcut command IDs
@@ -87,7 +87,8 @@ core.prompt.render()
 core.transcript.toCues()
 core.transcript.toSrt()
 core.transcript.toTxt()
-core.transcript.toAiText()
+core.transcript.toEvidenceText()
+core.transcript.toAiText()   # legacy Bilibili-shaped wrapper
 core.transcript.clock()
 
 core.preprocess.splitCues()
@@ -208,10 +209,36 @@ runtime.shortcut
 
 应用层负责 orchestration，不作为稳定库 API。
 
+平台发现先经过 Provider Registry。跨平台身份统一使用 `schemas.ContentRef`：
+
+```text
+ContentRef
+├─ source
+├─ sourceId
+├─ segmentId?
+└─ url?
+```
+
+当前 Provider：
+
+```text
+providers
+├─ types.ts
+├─ registry.ts
+├─ transcript.ts
+├─ bilibili.ts
+├─ bilibili-acquisition.ts
+└─ bilibili-transcript.ts
+```
+
+Bilibili 是第一个 Provider；后续 YouTube 通过新增 adapter 注册，不在通用 resolver 中增加平台条件分支。Bilibili 网络编排也已移入 provider 边界，`app/acquisition.ts` 只保留兼容 re-export。
+
 ```text
 app
-├─ video.resolve()
-├─ acquisition
+├─ content.resolve()       provider-neutral
+├─ transcript.acquire()    provider-neutral
+├─ video.resolve()         Bilibili compatibility view
+├─ acquisition             Bilibili compatibility re-export
 │  ├─ signWbi()
 │  ├─ fetchVideoView()
 │  ├─ fetchVideoDetail()
@@ -234,6 +261,70 @@ runtime.network     只负责 HTTP I/O
 ```
 
 这些名称当前可以继续调整，直到 compat runtime 清零。
+
+## Provider 边界
+
+Provider 只负责把平台身份规范化为通用内容引用；Core 不知道 BV、YouTube videoId 或站点路由。
+
+```text
+Bilibili page/runtime
+        |
+        v
+Bilibili Provider
+        |
+        v
+ContentRef {
+  source: "bilibili",
+  sourceId: "BV...",
+  segmentId: "P2"
+}
+        |
+        v
+app.content.resolve()
+```
+
+当前兼容调用 `app.video.resolve()` 仍返回旧 Bilibili-native shape，但其内部已经委托给 `app.content.resolve()`。新跨平台代码只依赖 `ContentRef`。
+
+Provider Registry 保持简单：
+
+```text
+URL/page runtime
+      |
+      v
+providerRegistry
+      |
+      +-- matches()
+      +-- resolveCurrent()
+      +-- activationState()
+      |
+      v
+ResolvedContent / ready|defer
+```
+
+平台特有的延迟激活规则也属于 Provider。应用层只处理 `ready | defer`，不直接判断 Bilibili festival/blackboard 或未来 YouTube SPA 页面。
+
+字幕获取是独立 capability，不塞进 ContentProvider：
+
+```text
+ResolvedContent
+      |
+      v
+TranscriptSourceRegistry
+      |
+      +-- BilibiliTranscriptSource
+      +-- YouTubeTranscriptSource (future)
+      |
+      v
+AcquiredTranscript {
+  ref,
+  segments: TranscriptSegment[],
+  language?,
+  origin?,
+  metadata
+}
+```
+
+后续新增 YouTube 时，应新增 YouTube Provider / Transcript Source，而不是在 `current-content.ts` 或 `current-transcript.ts` 中写 `if (youtube)`。
 
 ## 模块如何对接
 
@@ -324,6 +415,12 @@ apps/userscript -> schemas
 apps/userscript -> core
 apps/userscript -> bilibili
 apps/userscript -> runtime
+
+apps/userscript/providers/types|registry       -> schemas / local provider types only
+apps/userscript/providers/transcript             -> schemas + runtime port types
+apps/userscript/providers/bilibili               -> bilibili + provider contract
+apps/userscript/providers/bilibili-acquisition   -> bilibili + core + runtime ports
+apps/userscript/providers/bilibili-transcript    -> bilibili + schemas + provider acquisition
 ```
 
 禁止：

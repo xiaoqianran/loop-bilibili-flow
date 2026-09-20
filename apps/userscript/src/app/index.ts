@@ -1,10 +1,20 @@
 import * as acquisitionApi from "./acquisition";
-import { resolve } from "./current-video";
+import { resolve as resolveContent } from "./current-content";
+import { acquire as acquireTranscript } from "./current-transcript";
+import { resolve as resolveVideo } from "./current-video";
 import { observe } from "./navigation";
 import { start } from "./video-carrier";
 
+export const content = {
+  resolve: resolveContent,
+} as const;
+
 export const video = {
-  resolve,
+  resolve: resolveVideo,
+} as const;
+
+export const transcript = {
+  acquire: acquireTranscript,
 } as const;
 
 export const acquisition = {
@@ -27,6 +37,8 @@ export const activation = {
 
 // Compatibility flat exports.
 export * from "./acquisition";
+export { resolveCurrentContent } from "./current-content";
+export { acquireCurrentTranscript } from "./current-transcript";
 export * from "./current-video";
 export * from "./navigation";
 export * from "./video-carrier";

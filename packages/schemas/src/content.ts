@@ -5,6 +5,14 @@ export type ContentType =
   | "pdf"
   | "selection";
 
+/** Stable cross-provider identity before full Content metadata is acquired. */
+export interface ContentRef {
+  source: string;
+  sourceId: string;
+  segmentId?: string;
+  url?: string;
+}
+
 export interface Content {
   id: string;
   type: ContentType;

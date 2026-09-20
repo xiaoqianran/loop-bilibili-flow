@@ -34,6 +34,7 @@ import {
   toCues,
   cuesToSrt,
   cuesToTxt,
+  cuesToEvidenceText,
   type PreprocessItem,
 } from "@subbatch/core";
 import { shortcutChordFromEvent, shortcutDisplayChord } from "@subbatch/runtime";
@@ -144,6 +145,15 @@ describe("P2 extracted Pure Core", () => {
         "2\n00:00:04,000 --> 00:00:05,000\n第二行\n续行\n",
     );
     expect(cuesToTxt(cues)).toBe("第一行\n第二行\n续行");
+    expect(
+      cuesToEvidenceText(cues, {
+        sourceId: "abcdefghijk",
+        segmentId: "main",
+      }),
+    ).toBe(
+      "[abcdefghijk main 00:01] 第一行\n" +
+        "[abcdefghijk main 00:04] 第二行 续行",
+    );
   });
 
   it("matches PRE chunk, stitch and cache Golden outputs", () => {
@@ -316,6 +326,24 @@ describe("P2 extracted Pure Core", () => {
         "8495553a552cf22f49f29877c3f174bd:" +
         "6e1d6b1c8ee6b9d809c489496c9b2995",
     );
+    expect(
+      preprocessCacheKey(
+        {
+          source: "youtube",
+          sourceId: "abcdefghijk",
+          segmentId: "main",
+        },
+        "raw transcript",
+        { systemPrompt: "system", userPromptTemplate: "Hello {{subtitle}}" },
+        { baseUrl: "http://127.0.0.1:1234", model: "test-model", temperature: 0.2, maxTokens: 4096 },
+        { targetMinutes: 8, overlapSeconds: 30, maxChars: 24_000 },
+      ),
+    ).toBe(
+      "ai-preprocess:youtube:abcdefghijk:main:cf7b263a3cc99460b01b27ec78c65d16:" +
+        "b246d03e9f11698199d7385eb19a3898:" +
+        "8495553a552cf22f49f29877c3f174bd:" +
+        "6e1d6b1c8ee6b9d809c489496c9b2995",
+    );
   });
 
   it("matches Prompt, Mermaid, Knowledge and shortcut Golden outputs", () => {
@@ -332,6 +360,13 @@ describe("P2 extracted Pure Core", () => {
         { chunkStart: "00:00", coreStart: "00:30", chunkEnd: "02:00" },
       ),
     ).toBe("00:00|00:30|02:00");
+    expect(
+      renderPromptTemplate("{{source}}/{{sourceId}}/{{segmentId}}", {
+        source: "youtube",
+        sourceId: "abcdefghijk",
+        segmentId: "main",
+      }),
+    ).toBe("youtube/abcdefghijk/main");
 
     const markdown =
       "正文 [BV1TEST P2 03:21]\n```mermaid\ngraph TD\nA[概念 [BV1TEST P2 03:21]] --> B[结论 [P2 04:00]]\n```";

@@ -80,6 +80,27 @@ async function main(): Promise<void> {
         `${relative(root, file)}: Bilibili endpoint literal belongs in packages/bilibili`,
       );
     }
+    if (/from\s+["']@subbatch\/bilibili["']/.test(source)) {
+      violations.push(
+        `${relative(root, file)}: app layer imports Bilibili directly instead of a provider adapter`,
+      );
+    }
+  }
+
+  const neutralProviderFiles = [
+    join(root, "apps", "userscript", "src", "providers", "types.ts"),
+    join(root, "apps", "userscript", "src", "providers", "registry.ts"),
+    join(root, "apps", "userscript", "src", "providers", "transcript.ts"),
+    join(root, "apps", "userscript", "src", "app", "current-content.ts"),
+    join(root, "apps", "userscript", "src", "app", "current-transcript.ts"),
+  ];
+  for (const file of neutralProviderFiles) {
+    const source = await readFile(file, "utf8");
+    if (/from\s+["']@subbatch\/bilibili["']/.test(source)) {
+      violations.push(
+        `${relative(root, file)}: provider-neutral boundary imports Bilibili directly`,
+      );
+    }
   }
 
   if (violations.length) {
@@ -89,7 +110,7 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    "Architecture boundaries verified: packages are isolated; core/schemas are platform-free; app has no Bilibili endpoint literals",
+    "Architecture boundaries verified: packages are isolated; core/schemas are platform-free; provider-neutral resolver is platform-free; app has no Bilibili endpoint literals",
   );
 }
 

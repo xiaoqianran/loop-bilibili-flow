@@ -1,9 +1,9 @@
 import { md5 } from "../utils/md5";
 import {
-  cuesToAiText,
-  formatClock,
+  cuesToEvidenceText,
   parseSeconds,
   type SubtitleCue,
+  type TranscriptEvidenceContext,
 } from "../transcript";
 
 export interface PreprocessSettings {
@@ -13,7 +13,12 @@ export interface PreprocessSettings {
 }
 
 export interface PreprocessItem {
+  source?: string;
+  sourceId?: string;
+  segmentId?: string;
+  /** @deprecated Use sourceId. */
   bvid?: string;
+  /** @deprecated Use segmentId. */
   page?: number;
   data?: SubtitleCue[];
 }
@@ -40,10 +45,39 @@ export interface PreprocessModelConfig {
   maxTokens: number;
 }
 
-function cueTextLength(cue: SubtitleCue, bvid: string, page: number): number {
-  return String(
-    `[${bvid || "BV"} P${Math.max(1, Number(page) || 1)} ${formatClock(cue.from_sec ?? parseSeconds(cue.from))}] ${String(cue.content || "").trim()}\n`,
-  ).length;
+function preprocessEvidence(
+  item: Pick<PreprocessItem, "source" | "sourceId" | "segmentId" | "bvid" | "page">,
+): TranscriptEvidenceContext {
+  const sourceId = String(
+    item.sourceId || item.bvid || item.source || "source",
+  ).trim() || "source";
+  const explicitSegment = String(item.segmentId || "").trim();
+  const legacySegment =
+    item.bvid || item.page
+      ? `P${Math.max(1, Number(item.page) || 1)}`
+      : "";
+  const segmentId = explicitSegment || legacySegment;
+  return segmentId ? { sourceId, segmentId } : { sourceId };
+}
+
+function preprocessSourceKey(
+  item: Pick<PreprocessItem, "source" | "sourceId" | "segmentId" | "bvid" | "page">,
+): string {
+  const legacyBvid = String(item.bvid || "").trim();
+  if (!item.sourceId && legacyBvid) {
+    return `${legacyBvid}:P${Math.max(1, Number(item.page) || 1)}`;
+  }
+  const source = String(item.source || "content").trim() || "content";
+  const sourceId = String(item.sourceId || legacyBvid || "unknown").trim() || "unknown";
+  const segmentId = String(item.segmentId || "").trim();
+  return [source, sourceId, ...(segmentId ? [segmentId] : [])].join(":");
+}
+
+function cueTextLength(
+  cue: SubtitleCue,
+  evidence: TranscriptEvidenceContext,
+): number {
+  return `${cuesToEvidenceText([cue], evidence)}\n`.length;
 }
 
 export function splitCuesForPreprocess(
@@ -54,8 +88,7 @@ export function splitCuesForPreprocess(
     String(cue.content || "").trim(),
   );
   if (!cues.length) return [];
-  const page = item.page || 1;
-  const bvid = item.bvid || "BV";
+  const evidence = preprocessEvidence(item);
   const targetSeconds = Math.max(120, settings.targetMinutes * 60);
   const overlapSeconds = Math.max(0, settings.overlapSeconds);
   const hardChars = Math.max(8000, settings.maxChars);
@@ -73,7 +106,7 @@ export function splitCuesForPreprocess(
     while (endIndex < cues.length) {
       const cue = cues[endIndex];
       if (!cue) break;
-      const nextChars = chars + cueTextLength(cue, bvid, page);
+      const nextChars = chars + cueTextLength(cue, evidence);
       const cueEnd = Number(cue.to_sec ?? parseSeconds(cue.to));
       const duration = Math.max(0, cueEnd - coreStartSeconds);
       if (
@@ -101,17 +134,15 @@ export function splitCuesForPreprocess(
       }
     }
 
-    let chunkText = cuesToAiText(
+    let chunkText = cuesToEvidenceText(
       cues.slice(overlapStartIndex, endIndex),
-      bvid,
-      page,
+      evidence,
     );
     while (chunkText.length > hardChars && overlapStartIndex < coreStartIndex) {
       overlapStartIndex += 1;
-      chunkText = cuesToAiText(
+      chunkText = cuesToEvidenceText(
         cues.slice(overlapStartIndex, endIndex),
-        bvid,
-        page,
+        evidence,
       );
     }
     if (chunkText.length > hardChars) chunkText = chunkText.slice(0, hardChars);
@@ -213,13 +244,16 @@ export function stitchPreprocessChunks(
 }
 
 export function preprocessCacheKey(
-  item: Pick<PreprocessItem, "bvid" | "page">,
+  item: Pick<
+    PreprocessItem,
+    "source" | "sourceId" | "segmentId" | "bvid" | "page"
+  >,
   raw: string,
   prompt: PreprocessPrompt,
   config: PreprocessModelConfig,
   settings: PreprocessSettings,
 ): string {
-  const source = `${item.bvid || "BV"}:P${item.page || 1}`;
+  const source = preprocessSourceKey(item);
   const promptSignature = md5(
     `${prompt.systemPrompt}\n---\n${prompt.userPromptTemplate}`,
   );

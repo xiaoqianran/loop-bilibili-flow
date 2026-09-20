@@ -166,6 +166,7 @@ export const transcript = {
   toSrt: transcriptApi.cuesToSrt,
   toTxt: transcriptApi.cuesToTxt,
   clock: transcriptApi.formatClock,
+  toEvidenceText: transcriptApi.cuesToEvidenceText,
   toAiText: transcriptApi.cuesToAiText,
 } as const;
 

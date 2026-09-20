@@ -1,36 +1,22 @@
-import * as bilibili from "@subbatch/bilibili";
+import {
+  bilibiliProvider,
+  type BilibiliCurrentVideoRef,
+} from "../providers";
+import { resolve as resolveContent } from "./current-content";
 
-export interface CurrentVideoRef extends bilibili.PlayingVideoSnapshot {
-  ctx: bilibili.BilibiliContext;
-}
-
-function pageFromHref(href: string): number {
-  try {
-    return Math.max(1, Number(new URL(href).searchParams.get("p")) || 1);
-  } catch {
-    return 1;
-  }
-}
+export type CurrentVideoRef = BilibiliCurrentVideoRef;
 
 /**
- * Resolve the video that is actually playing on the current page.
- *
- * Application code owns the browser/runtime read; Bilibili package owns the
- * identity rules. Live player state wins over stale URL state.
+ * Compatibility view for callers that still consume the Bilibili-native
+ * current-video shape. Provider-neutral code should use app.content.resolve().
  */
 export function resolve(
   href: string,
   pageRuntime: unknown,
 ): CurrentVideoRef | null {
-  const ctx = bilibili.route.detect(href);
-  const playing = bilibili.route.playingHint(pageRuntime);
-  const ref = bilibili.route.resolveVideo({
-    href,
-    urlBvid: ctx.bvid || bilibili.route.bvidFrom(href),
-    urlPage: ctx.page || pageFromHref(href),
-    playing,
-  });
-  return ref ? { ...ref, ctx } : null;
+  const resolved = resolveContent(href, pageRuntime);
+  if (!resolved || resolved.ref.source !== bilibiliProvider.id) return null;
+  return resolved.native as CurrentVideoRef;
 }
 
 /** @deprecated Use `video.resolve` from the app namespace. */

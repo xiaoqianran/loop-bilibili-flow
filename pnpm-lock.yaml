@@ -47,6 +47,9 @@ importers:
       '@subbatch/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+      '@subbatch/schemas':
+        specifier: workspace:*
+        version: link:../../packages/schemas
 
   packages/bilibili: {}
 

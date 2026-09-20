@@ -26,6 +26,8 @@ export type AiRunCacheSnapshot = {
   status?: string;
   statusText?: string;
   error?: string;
+  sourceIds?: string[];
+  /** @deprecated Use sourceIds. */
   sourceBvids?: string[];
   startedAt?: number;
   finishedAt?: number;
@@ -66,6 +68,8 @@ export type HydratedAiRunDraft = {
   status: string;
   statusText: string;
   error: string;
+  sourceIds: string[];
+  /** @deprecated Use sourceIds. */
   sourceBvids: string[];
   startedAt: number;
   finishedAt: number;
@@ -101,6 +105,7 @@ export function serializeAiRunForCache(
     run.config && typeof run.config === "object" ? { ...run.config } : null;
   if (config && "apiKey" in config) config.apiKey = "";
   const snapshot = run.taskSnapshot;
+  const sourceIds = Array.isArray(run.sourceIds) ? [...run.sourceIds] : null;
   return {
     id: String(run.id || ""),
     profileId: String(run.profileId || ""),
@@ -120,6 +125,7 @@ export function serializeAiRunForCache(
     status: String(run.status || ""),
     statusText: String(run.statusText || ""),
     error: String(run.error || ""),
+    ...(sourceIds ? { sourceIds } : {}),
     sourceBvids: Array.isArray(run.sourceBvids) ? [...run.sourceBvids] : [],
     startedAt: Number(run.startedAt) || 0,
     finishedAt: Number(run.finishedAt) || 0,
@@ -226,6 +232,11 @@ export function draftHydratedAiRun(
         : "缓存中无完整结果"
       : String(saved.statusText || "缓存"),
     error: String(saved.error || ""),
+    sourceIds: Array.isArray(saved.sourceIds)
+      ? [...saved.sourceIds]
+      : Array.isArray(saved.sourceBvids)
+        ? [...saved.sourceBvids]
+        : [],
     sourceBvids: Array.isArray(saved.sourceBvids) ? [...saved.sourceBvids] : [],
     startedAt: Number(saved.startedAt) || 0,
     finishedAt: Number(saved.finishedAt) || 0,

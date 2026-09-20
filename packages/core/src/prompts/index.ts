@@ -1,5 +1,8 @@
 const PROMPT_KEYS = [
   "title",
+  "source",
+  "sourceId",
+  "segmentId",
   "bvid",
   "author",
   "subtitle",
@@ -20,7 +23,7 @@ export type PromptVariableKey = (typeof PROMPT_KEYS)[number];
 export type PromptVariables = Partial<Record<PromptVariableKey, unknown>>;
 
 const PROMPT_KEY_PATTERN =
-  /\{\{\s*(title|bvid|author|subtitle|rawSubtitle|processedSubtitle|chunkIndex|chunkCount|chunkStart|coreStart|chunkEnd|anchorText|sourceContext|ancestorPath|question)\s*\}\}/g;
+  /\{\{\s*(title|source|sourceId|segmentId|bvid|author|subtitle|rawSubtitle|processedSubtitle|chunkIndex|chunkCount|chunkStart|coreStart|chunkEnd|anchorText|sourceContext|ancestorPath|question)\s*\}\}/g;
 
 /**
  * Render a prompt template.

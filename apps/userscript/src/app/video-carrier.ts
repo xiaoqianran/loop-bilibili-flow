@@ -1,6 +1,4 @@
-import { route } from "@subbatch/bilibili";
-
-import { resolve } from "./current-video";
+import { providerRegistry } from "../providers";
 
 export interface UserscriptLifecycleOptions {
   pageWindow: Window;
@@ -14,14 +12,19 @@ export interface UserscriptLifecycleOptions {
 /**
  * Own the userscript activation boundary.
  *
- * Normal supported pages boot immediately. Activity shells such as
- * /festival/* and /blackboard/* defer boot until a real BV can be observed
- * from the URL or live player state.
+ * Provider-specific activation rules live in the provider adapter. The app
+ * only asks whether the current page is ready or should defer activation.
  */
 export function start(
   options: UserscriptLifecycleOptions,
 ): () => void {
-  if (!route.isCarrierShell(options.href())) {
+  const activationState = () =>
+    providerRegistry.activationState({
+      href: options.href(),
+      pageRuntime: options.pageWindow,
+    });
+
+  if (activationState() === "ready") {
     options.boot();
     return () => {};
   }
@@ -50,14 +53,7 @@ export function start(
       cleanup();
       return;
     }
-    const href = options.href();
-    if (!route.isCarrierShell(href)) {
-      bootOnce();
-      return;
-    }
-
-    const ref = resolve(href, options.pageWindow);
-    if (route.hasCarrierIdentity(href, ref?.bvid || "")) bootOnce();
+    if (activationState() === "ready") bootOnce();
   };
 
   const onCandidate = () => {

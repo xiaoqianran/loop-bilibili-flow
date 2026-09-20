@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { acquisition } from "../../apps/userscript/src/app";
+import { acquisition, transcript } from "../../apps/userscript/src/app";
 import type { NetworkAdapter } from "@subbatch/runtime";
 
 function networkWith(
@@ -106,6 +106,68 @@ describe("Userscript acquisition orchestration", () => {
         fallback: "network-or-http",
       }),
     );
+  });
+
+  it("acquires a provider-neutral transcript through the Bilibili transcript source", async () => {
+    const network = networkWith((url) => {
+      if (url.endsWith("/x/web-interface/nav")) {
+        return {
+          code: 0,
+          data: {
+            wbi_img: {
+              img_url: "https://i0.hdslb.com/bfs/wbi/abcdefghijklmnopqrstuvwxyz123456.png",
+              sub_url: "https://i0.hdslb.com/bfs/wbi/654321zyxwvutsrqponmlkjihgfedcba.png",
+            },
+          },
+        };
+      }
+      if (url.includes("/x/player/wbi/v2?")) {
+        return {
+          code: 0,
+          data: {
+            subtitle: {
+              subtitles: [
+                { lan: "zh-CN", subtitle_url: "//sub.example/current.json" },
+              ],
+            },
+          },
+        };
+      }
+      if (url === "https://sub.example/current.json") {
+        return {
+          body: [
+            { sid: 7, from: 1.25, to: 2.5, content: "hello" },
+            { sid: 8, from: 2.5, to: 4, content: "world" },
+          ],
+        };
+      }
+      throw new Error(`unexpected URL: ${url}`);
+    });
+    const pageRuntime = {
+      player: {
+        getManifest: () => ({ bvid: "BV1TEST", cid: 2, aid: 1 }),
+      },
+    };
+
+    await expect(
+      transcript.acquire(
+        "https://www.bilibili.com/video/BV1TEST",
+        pageRuntime,
+        network,
+      ),
+    ).resolves.toMatchObject({
+      ref: {
+        source: "bilibili",
+        sourceId: "BV1TEST",
+        segmentId: "P1",
+      },
+      language: "zh-CN",
+      origin: "player_wbi",
+      segments: [
+        { id: "7", start: 1.25, end: 2.5, text: "hello" },
+        { id: "8", start: 2.5, end: 4, text: "world" },
+      ],
+    });
   });
 
   it("uses signed WBI acquisition before the dm-view subtitle fallback", async () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   activation,
+  content,
   navigation,
   video,
 } from "../../apps/userscript/src/app";
@@ -80,6 +81,41 @@ describe("userscript app boundary", () => {
       key: "BV1LIVEPLAYER01:P2",
       source: "player",
     });
+  });
+
+  it("normalizes the active Bilibili video into a provider-neutral content ref", () => {
+    const runtime = {
+      player: {
+        getManifest: () => ({
+          bvid: "BV1CONTENT0001",
+          cid: 202,
+          pages: [{ cid: 101 }, { cid: 202 }],
+        }),
+      },
+    };
+
+    const resolved = content.resolve(
+      "https://www.bilibili.com/video/BV1STALE00001?p=1",
+      runtime,
+    );
+
+    expect(resolved).toMatchObject({
+      ref: {
+        source: "bilibili",
+        sourceId: "BV1CONTENT0001",
+        segmentId: "P2",
+      },
+      key: "bilibili:BV1CONTENT0001:P2",
+      native: {
+        bvid: "BV1CONTENT0001",
+        page: 2,
+        cid: 202,
+      },
+    });
+  });
+
+  it("returns no active content for an unregistered site", () => {
+    expect(content.resolve("https://www.youtube.com/watch?v=abcdefghijk", {})).toBeNull();
   });
 
   it("boots normal pages immediately", () => {

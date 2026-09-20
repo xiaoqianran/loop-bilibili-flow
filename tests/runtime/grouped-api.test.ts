@@ -32,6 +32,7 @@ describe("grouped public API", () => {
     expect(core.subtitleExport.buildPath).toBe(
       core.buildSubtitleExportRelativePath,
     );
+    expect(core.transcript.toEvidenceText).toBe(core.cuesToEvidenceText);
     expect(core.preprocess.stitchChunks).toBe(core.stitchPreprocessChunks);
     expect(core.command.shortcuts).toBe(core.SHORTCUT_COMMANDS);
 
@@ -69,7 +70,9 @@ describe("grouped public API", () => {
   });
 
   it("groups userscript application APIs", () => {
+    expect(app.content.resolve).toBe(app.resolveCurrentContent);
     expect(app.video.resolve).toBe(app.resolveCurrentVideoRef);
+    expect(app.transcript.acquire).toBe(app.acquireCurrentTranscript);
     expect(app.acquisition.signWbi).toBe(app.signWbi);
     expect(app.acquisition.fetchVideoView).toBe(app.fetchVideoView);
     expect(app.acquisition.fetchVideoDetail).toBe(app.fetchVideoDetail);

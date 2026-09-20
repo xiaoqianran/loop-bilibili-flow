@@ -84,11 +84,18 @@ export function formatClock(seconds: number): string {
     : `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
 
-export function cuesToAiText(
+export interface TranscriptEvidenceContext {
+  sourceId?: string;
+  segmentId?: string;
+}
+
+export function cuesToEvidenceText(
   cues: readonly SubtitleCue[],
-  bvid: string,
-  page: number,
+  context: TranscriptEvidenceContext = {},
 ): string {
+  const sourceId = String(context.sourceId || "source").trim() || "source";
+  const segmentId = String(context.segmentId || "").trim();
+  const identity = [sourceId, segmentId].filter(Boolean).join(" ");
   const rows: string[] = [];
   let previous = "";
   for (const cue of cues) {
@@ -96,9 +103,24 @@ export function cuesToAiText(
     if (!content || content === previous) continue;
     previous = content;
     rows.push(
-      `[${bvid || "BV"} P${Math.max(1, Number(page) || 1)} ${formatClock(cue.from_sec ?? parseSeconds(cue.from))}] ${content}`,
+      `[${identity} ${formatClock(cue.from_sec ?? parseSeconds(cue.from))}] ${content}`,
     );
   }
   return rows.join("\n");
+}
+
+/**
+ * @deprecated Bilibili-shaped compatibility wrapper.
+ * New provider-neutral code should use cuesToEvidenceText().
+ */
+export function cuesToAiText(
+  cues: readonly SubtitleCue[],
+  bvid: string,
+  page: number,
+): string {
+  return cuesToEvidenceText(cues, {
+    sourceId: bvid || "BV",
+    segmentId: `P${Math.max(1, Number(page) || 1)}`,
+  });
 }
 

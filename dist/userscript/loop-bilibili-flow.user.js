@@ -753,9 +753,9 @@ var SubBatch = (function(exports) {
       return { content: "", reasoning: "" };
     }
     const value = piece;
-    const content = typeof value.content === "string" && value.content || typeof value.text === "string" && value.text || "";
+    const content2 = typeof value.content === "string" && value.content || typeof value.text === "string" && value.text || "";
     const reasoning = typeof value.reasoning_content === "string" && value.reasoning_content || typeof value.reasoning === "string" && value.reasoning || "";
-    return { content, reasoning };
+    return { content: content2, reasoning };
   }
   function extractFromChoice(choice) {
     if (!choice || typeof choice !== "object") {
@@ -769,8 +769,8 @@ var SubBatch = (function(exports) {
       reasoning: fromDelta.reasoning || fromMessage.reasoning || ""
     };
   }
-  function formatAiDisplay(content, reasoning) {
-    const body = String(content || "");
+  function formatAiDisplay(content2, reasoning) {
+    const body = String(content2 || "");
     if (body.trim()) return body;
     return reasoning && String(reasoning).trim() ? "正在分析字幕并组织笔记…" : "";
   }
@@ -991,6 +991,7 @@ ${source.slice(-tailLen).replace(/^[^\n]*\n?/, "")}`
     const config = run.config && typeof run.config === "object" ? { ...run.config } : null;
     if (config && "apiKey" in config) config.apiKey = "";
     const snapshot = run.taskSnapshot;
+    const sourceIds = Array.isArray(run.sourceIds) ? [...run.sourceIds] : null;
     return {
       id: String(run.id || ""),
       profileId: String(run.profileId || ""),
@@ -1004,6 +1005,7 @@ ${source.slice(-tailLen).replace(/^[^\n]*\n?/, "")}`
       status: String(run.status || ""),
       statusText: String(run.statusText || ""),
       error: String(run.error || ""),
+      ...sourceIds ? { sourceIds } : {},
       sourceBvids: Array.isArray(run.sourceBvids) ? [...run.sourceBvids] : [],
       startedAt: Number(run.startedAt) || 0,
       finishedAt: Number(run.finishedAt) || 0,
@@ -1077,6 +1079,7 @@ ${source.slice(-tailLen).replace(/^[^\n]*\n?/, "")}`
       status: unfinished ? raw.trim() ? "done" : "stopped" : String(saved.status || "done"),
       statusText: unfinished ? raw.trim() ? "缓存" : "缓存中无完整结果" : String(saved.statusText || "缓存"),
       error: String(saved.error || ""),
+      sourceIds: Array.isArray(saved.sourceIds) ? [...saved.sourceIds] : Array.isArray(saved.sourceBvids) ? [...saved.sourceBvids] : [],
       sourceBvids: Array.isArray(saved.sourceBvids) ? [...saved.sourceBvids] : [],
       startedAt: Number(saved.startedAt) || 0,
       finishedAt: Number(saved.finishedAt) || 0,
@@ -1635,9 +1638,9 @@ ${prompt2.userPromptTemplate || ""}`);
   function collectionIndexKey(shortUrl) {
     return `collection:${String(shortUrl || "").trim()}`;
   }
-  function parseExportIndexMd(content) {
+  function parseExportIndexMd(content2) {
     const map = {};
-    for (const rawLine of String(content || "").split(/\r?\n/)) {
+    for (const rawLine of String(content2 || "").split(/\r?\n/)) {
       const line = rawLine.trim();
       if (!line || line.startsWith("#")) continue;
       const col = line.match(
@@ -2287,32 +2290,57 @@ ${stripMermaidTimestampCitations(nextCode)}
     const secs = total % 60;
     return hours > 0 ? `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}` : `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
   }
-  function cuesToAiText(cues, bvid, page) {
+  function cuesToEvidenceText(cues, context = {}) {
+    const sourceId = String(context.sourceId || "source").trim() || "source";
+    const segmentId = String(context.segmentId || "").trim();
+    const identity = [sourceId, segmentId].filter(Boolean).join(" ");
     const rows = [];
     let previous = "";
     for (const cue of cues) {
-      const content = String(cue.content || "").replace(/\s+/g, " ").trim();
-      if (!content || content === previous) continue;
-      previous = content;
+      const content2 = String(cue.content || "").replace(/\s+/g, " ").trim();
+      if (!content2 || content2 === previous) continue;
+      previous = content2;
       rows.push(
-        `[${bvid || "BV"} P${Math.max(1, Number(page) || 1)} ${formatClock(cue.from_sec ?? parseSeconds(cue.from))}] ${content}`
+        `[${identity} ${formatClock(cue.from_sec ?? parseSeconds(cue.from))}] ${content2}`
       );
     }
     return rows.join("\n");
   }
-  function cueTextLength(cue, bvid, page) {
-    return String(
-      `[${bvid} P${Math.max(1, Number(page) || 1)} ${formatClock(cue.from_sec ?? parseSeconds(cue.from))}] ${String(cue.content || "").trim()}
-`
-    ).length;
+  function cuesToAiText(cues, bvid, page) {
+    return cuesToEvidenceText(cues, {
+      sourceId: bvid || "BV",
+      segmentId: `P${Math.max(1, Number(page) || 1)}`
+    });
+  }
+  function preprocessEvidence(item) {
+    const sourceId = String(
+      item.sourceId || item.bvid || item.source || "source"
+    ).trim() || "source";
+    const explicitSegment = String(item.segmentId || "").trim();
+    const legacySegment = item.bvid || item.page ? `P${Math.max(1, Number(item.page) || 1)}` : "";
+    const segmentId = explicitSegment || legacySegment;
+    return segmentId ? { sourceId, segmentId } : { sourceId };
+  }
+  function preprocessSourceKey(item) {
+    const legacyBvid = String(item.bvid || "").trim();
+    if (!item.sourceId && legacyBvid) {
+      return `${legacyBvid}:P${Math.max(1, Number(item.page) || 1)}`;
+    }
+    const source = String(item.source || "content").trim() || "content";
+    const sourceId = String(item.sourceId || legacyBvid || "unknown").trim() || "unknown";
+    const segmentId = String(item.segmentId || "").trim();
+    return [source, sourceId, ...segmentId ? [segmentId] : []].join(":");
+  }
+  function cueTextLength(cue, evidence) {
+    return `${cuesToEvidenceText([cue], evidence)}
+`.length;
   }
   function splitCuesForPreprocess(item, settings) {
     const cues = (item.data ?? []).filter(
       (cue) => String(cue.content || "").trim()
     );
     if (!cues.length) return [];
-    const page = item.page || 1;
-    const bvid = item.bvid || "BV";
+    const evidence = preprocessEvidence(item);
     const targetSeconds = Math.max(120, settings.targetMinutes * 60);
     const overlapSeconds = Math.max(0, settings.overlapSeconds);
     const hardChars = Math.max(8e3, settings.maxChars);
@@ -2329,7 +2357,7 @@ ${stripMermaidTimestampCitations(nextCode)}
       while (endIndex < cues.length) {
         const cue = cues[endIndex];
         if (!cue) break;
-        const nextChars = chars + cueTextLength(cue, bvid, page);
+        const nextChars = chars + cueTextLength(cue, evidence);
         const cueEnd = Number(cue.to_sec ?? parseSeconds(cue.to));
         const duration = Math.max(0, cueEnd - coreStartSeconds);
         if (endIndex > coreStartIndex && (nextChars > hardChars || duration >= targetSeconds)) {
@@ -2352,17 +2380,15 @@ ${stripMermaidTimestampCitations(nextCode)}
           overlapStartIndex -= 1;
         }
       }
-      let chunkText = cuesToAiText(
+      let chunkText = cuesToEvidenceText(
         cues.slice(overlapStartIndex, endIndex),
-        bvid,
-        page
+        evidence
       );
       while (chunkText.length > hardChars && overlapStartIndex < coreStartIndex) {
         overlapStartIndex += 1;
-        chunkText = cuesToAiText(
+        chunkText = cuesToEvidenceText(
           cues.slice(overlapStartIndex, endIndex),
-          bvid,
-          page
+          evidence
         );
       }
       if (chunkText.length > hardChars) chunkText = chunkText.slice(0, hardChars);
@@ -2444,7 +2470,7 @@ ${stripMermaidTimestampCitations(nextCode)}
     return dedupeExactBlocks(parts.join("\n\n"));
   }
   function preprocessCacheKey(item, raw, prompt2, config, settings) {
-    const source = `${item.bvid || "BV"}:P${item.page || 1}`;
+    const source = preprocessSourceKey(item);
     const promptSignature = md5(
       `${prompt2.systemPrompt}
 ---
@@ -2531,6 +2557,9 @@ ${prompt2.userPromptTemplate}`
   }
   const PROMPT_KEYS = [
     "title",
+    "source",
+    "sourceId",
+    "segmentId",
     "bvid",
     "author",
     "subtitle",
@@ -2546,7 +2575,7 @@ ${prompt2.userPromptTemplate}`
     "ancestorPath",
     "question"
   ];
-  const PROMPT_KEY_PATTERN = /\{\{\s*(title|bvid|author|subtitle|rawSubtitle|processedSubtitle|chunkIndex|chunkCount|chunkStart|coreStart|chunkEnd|anchorText|sourceContext|ancestorPath|question)\s*\}\}/g;
+  const PROMPT_KEY_PATTERN = /\{\{\s*(title|source|sourceId|segmentId|bvid|author|subtitle|rawSubtitle|processedSubtitle|chunkIndex|chunkCount|chunkStart|coreStart|chunkEnd|anchorText|sourceContext|ancestorPath|question)\s*\}\}/g;
   function renderPromptTemplate(template, variables) {
     const values = Object.fromEntries(
       // Legacy uses `value || ""`; retain false/zero compatibility while the
@@ -2686,13 +2715,14 @@ ${prompt2.userPromptTemplate}`
   const prompt = {
     render: renderPromptTemplate
   };
-  const transcript = {
+  const transcript$1 = {
     parseSeconds,
     toCues,
     srtTimestamp: formatSrtTimestamp,
     toSrt: cuesToSrt,
     toTxt: cuesToTxt,
     clock: formatClock,
+    toEvidenceText: cuesToEvidenceText,
     toAiText: cuesToAiText
   };
   const core = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
@@ -2737,6 +2767,7 @@ ${prompt2.userPromptTemplate}`
     createAiProfile,
     createPromptProfile,
     cuesToAiText,
+    cuesToEvidenceText,
     cuesToSrt,
     cuesToTxt,
     dedupeExactBlocks,
@@ -2812,7 +2843,7 @@ ${prompt2.userPromptTemplate}`
     subtitleExport,
     suggestCaptureMode,
     toCues,
-    transcript,
+    transcript: transcript$1,
     trimProcessedOverlap,
     truncateForAi,
     upsertCollectionExportIndex,
@@ -3240,6 +3271,10 @@ ${prompt2.userPromptTemplate}`
     if (!result.subs.length && result.error) throw result.error;
     return result.subs;
   }
+  function contentRefKey(ref) {
+    const segment = String(ref.segmentId || "").trim();
+    return [ref.source, ref.sourceId, ...segment ? [segment] : []].join(":");
+  }
   function pageFromHref(href) {
     try {
       return Math.max(1, Number(new URL(href).searchParams.get("p")) || 1);
@@ -3247,16 +3282,173 @@ ${prompt2.userPromptTemplate}`
       return 1;
     }
   }
-  function resolve(href, pageRuntime) {
-    const ctx = route.detect(href);
-    const playing = route.playingHint(pageRuntime);
+  function matchesBilibili(href) {
+    try {
+      const host2 = new URL(href).hostname.toLowerCase();
+      return host2 === "bilibili.com" || host2.endsWith(".bilibili.com");
+    } catch {
+      return false;
+    }
+  }
+  function resolveCurrent(context) {
+    const ctx = route.detect(context.href);
+    const playing = route.playingHint(context.pageRuntime);
     const ref = route.resolveVideo({
-      href,
-      urlBvid: ctx.bvid || route.bvidFrom(href),
-      urlPage: ctx.page || pageFromHref(href),
+      href: context.href,
+      urlBvid: ctx.bvid || route.bvidFrom(context.href),
+      urlPage: ctx.page || pageFromHref(context.href),
       playing
     });
-    return ref ? { ...ref, ctx } : null;
+    if (!ref) return null;
+    const native = { ...ref, ctx };
+    const contentRef = {
+      source: BILIBILI_SOURCE,
+      sourceId: ref.bvid,
+      segmentId: "P" + Math.max(1, Number(ref.page) || 1),
+      url: context.href
+    };
+    return {
+      ref: contentRef,
+      key: contentRefKey(contentRef),
+      native
+    };
+  }
+  const bilibiliProvider = {
+    id: BILIBILI_SOURCE,
+    matches: matchesBilibili,
+    resolveCurrent,
+    activationState(context) {
+      if (!route.isCarrierShell(context.href)) return "ready";
+      return resolveCurrent(context) ? "ready" : "defer";
+    }
+  };
+  function normalizeSegments(body) {
+    const segments = [];
+    for (let index = 0; index < body.length; index += 1) {
+      const cue = body[index];
+      if (!cue || typeof cue !== "object") continue;
+      const text = String(cue.content || "").trim();
+      if (!text) continue;
+      const start2 = Number(cue.from) || 0;
+      const end = Number(cue.to);
+      segments.push({
+        id: String(cue.sid ?? index + 1),
+        start: start2,
+        ...Number.isFinite(end) ? { end } : {},
+        text
+      });
+    }
+    return segments;
+  }
+  const bilibiliTranscriptSource = {
+    id: BILIBILI_SOURCE,
+    async acquire(resolved, context) {
+      const native = resolved.native;
+      const bvid = String(native.bvid || resolved.ref.sourceId).trim();
+      if (!bvid) return null;
+      let cid = Number(native.cid) || 0;
+      let aid = Number(native.aid) || 0;
+      if (!cid) {
+        const view = await fetchVideoView(context.network, bvid, context.signal);
+        if (video$1.isChargeBlocked(view)) return null;
+        const meta2 = video$1.pageMeta(view, bvid, native.page || 1);
+        cid = Number(meta2.cid) || 0;
+        aid = Number(meta2.aid) || aid;
+      }
+      if (!cid) return null;
+      const meta = {
+        bvid,
+        cid,
+        ...aid ? { aid } : {}
+      };
+      const collected = await collectSubtitleTracks(
+        context.network,
+        meta,
+        context.signal
+      );
+      const track = subtitle.pickTrack(collected.subs);
+      if (!track) return null;
+      const resolution = await resolveSubtitleUrl(
+        context.network,
+        track,
+        { aid, cid },
+        collected.source,
+        context.signal
+      );
+      if (!resolution.url) return null;
+      const body = await fetchSubtitleBody(
+        context.network,
+        resolution.url,
+        context.signal
+      );
+      const segments = normalizeSegments(body);
+      if (!segments.length) return null;
+      const language = String(track.lan || "").trim();
+      return {
+        ref: resolved.ref,
+        segments,
+        ...language ? { language } : {},
+        ...resolution.source ? { origin: resolution.source } : {},
+        metadata: {
+          track: { ...track }
+        }
+      };
+    }
+  };
+  function createProviderRegistry(providers) {
+    const list = [...providers];
+    return {
+      match(href) {
+        return list.find((provider) => provider.matches(href)) ?? null;
+      },
+      resolveCurrent(context) {
+        for (const provider of list) {
+          if (!provider.matches(context.href)) continue;
+          const resolved = provider.resolveCurrent(context);
+          if (resolved) return resolved;
+        }
+        return null;
+      },
+      activationState(context) {
+        const provider = list.find((candidate) => candidate.matches(context.href));
+        return provider?.activationState?.(context) ?? "ready";
+      }
+    };
+  }
+  function createTranscriptSourceRegistry(sources) {
+    const byId = new Map(sources.map((source) => [source.id, source]));
+    return {
+      get(source) {
+        return byId.get(source) ?? null;
+      },
+      async acquire(resolved, context) {
+        const source = byId.get(resolved.ref.source);
+        return source ? source.acquire(resolved, context) : null;
+      }
+    };
+  }
+  const providerRegistry = createProviderRegistry([bilibiliProvider]);
+  const transcriptSourceRegistry = createTranscriptSourceRegistry([
+    bilibiliTranscriptSource
+  ]);
+  function resolve$1(href, pageRuntime) {
+    return providerRegistry.resolveCurrent({ href, pageRuntime });
+  }
+  const resolveCurrentContent = resolve$1;
+  async function acquire(href, pageRuntime, network, signal) {
+    const resolved = providerRegistry.resolveCurrent({ href, pageRuntime });
+    if (!resolved) return null;
+    return transcriptSourceRegistry.acquire(resolved, {
+      network,
+      pageRuntime,
+      ...signal ? { signal } : {}
+    });
+  }
+  const acquireCurrentTranscript = acquire;
+  function resolve(href, pageRuntime) {
+    const resolved = resolve$1(href, pageRuntime);
+    if (!resolved || resolved.ref.source !== bilibiliProvider.id) return null;
+    return resolved.native;
   }
   const resolveCurrentVideoRef = resolve;
   function observe(options) {
@@ -3315,7 +3507,11 @@ ${prompt2.userPromptTemplate}`
   }
   const installNavigationLifecycle = observe;
   function start(options) {
-    if (!route.isCarrierShell(options.href())) {
+    const activationState = () => providerRegistry.activationState({
+      href: options.href(),
+      pageRuntime: options.pageWindow
+    });
+    if (activationState() === "ready") {
       options.boot();
       return () => {
       };
@@ -3341,13 +3537,7 @@ ${prompt2.userPromptTemplate}`
         cleanup();
         return;
       }
-      const href = options.href();
-      if (!route.isCarrierShell(href)) {
-        bootOnce();
-        return;
-      }
-      const ref = resolve(href, options.pageWindow);
-      if (route.hasCarrierIdentity(href, ref?.bvid || "")) bootOnce();
+      if (activationState() === "ready") bootOnce();
     };
     const onCandidate = () => {
       options.eventWindow.setTimeout(tryActivate, 0);
@@ -3369,8 +3559,14 @@ ${prompt2.userPromptTemplate}`
     return cleanup;
   }
   const startUserscriptLifecycle = start;
+  const content = {
+    resolve: resolve$1
+  };
   const video = {
     resolve
+  };
+  const transcript = {
+    acquire
   };
   const acquisition = {
     signWbi,
@@ -3389,9 +3585,11 @@ ${prompt2.userPromptTemplate}`
   };
   const app = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
+    acquireCurrentTranscript,
     acquisition,
     activation,
     collectSubtitleTracks,
+    content,
     fetchSubtitleBody,
     fetchSubtitleTracks,
     fetchVideoDetail,
@@ -3400,11 +3598,13 @@ ${prompt2.userPromptTemplate}`
     navigation,
     observe,
     resolve,
+    resolveCurrentContent,
     resolveCurrentVideoRef,
     resolveSubtitleUrl,
     signWbi,
     start,
     startUserscriptLifecycle,
+    transcript,
     video
   }, Symbol.toStringTag, { value: "Module" }));
   function parseResponseHeaders(raw) {
