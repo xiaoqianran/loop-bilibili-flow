@@ -4086,6 +4086,66 @@ ${prompt2.userPromptTemplate}`
     transcript,
     video
   }, Symbol.toStringTag, { value: "Module" }));
+  const PANEL_SIZE_PRESETS = {
+    small: { viewportRatio: 0.32, min: 440, max: 560 },
+    medium: { viewportRatio: 0.48, min: 620, max: 820 },
+    large: { viewportRatio: 0.68, min: 860, max: 1180 }
+  };
+  const DEFAULT_PANEL_SIZE = "medium";
+  const MIN_PANEL_WIDTH = 420;
+  const MIN_PANEL_HEIGHT = 520;
+  function isPanelSizePreset(value) {
+    return typeof value === "string" && Object.hasOwn(PANEL_SIZE_PRESETS, value);
+  }
+  function panelPresetWidth(name, viewportWidth) {
+    const preset = isPanelSizePreset(name) ? PANEL_SIZE_PRESETS[name] : PANEL_SIZE_PRESETS[DEFAULT_PANEL_SIZE];
+    const desired = Math.round((Number(viewportWidth) || 0) * preset.viewportRatio);
+    const available = Math.max(MIN_PANEL_WIDTH, (Number(viewportWidth) || 0) - 16);
+    return Math.min(available, Math.max(preset.min, Math.min(preset.max, desired)));
+  }
+  function highPanelHeight(viewportHeight) {
+    const available = Math.max(MIN_PANEL_HEIGHT, (Number(viewportHeight) || 0) - 16);
+    return Math.min(available, Math.max(MIN_PANEL_HEIGHT, Math.round((Number(viewportHeight) || 0) * 0.9)));
+  }
+  function panelSizeClassFromWidth(width, viewportWidth) {
+    const value = Number(width) || panelPresetWidth(DEFAULT_PANEL_SIZE, viewportWidth);
+    const names = Object.keys(PANEL_SIZE_PRESETS);
+    return names.reduce((best, name) => Math.abs(value - panelPresetWidth(name, viewportWidth)) < Math.abs(value - panelPresetWidth(best, viewportWidth)) ? name : best, DEFAULT_PANEL_SIZE);
+  }
+  function clampPanelRect(ui2, vw, vh) {
+    const next = { ...ui2 };
+    if (isPanelSizePreset(next.sizePreset)) {
+      next.w = panelPresetWidth(next.sizePreset, vw);
+    } else {
+      next.sizePreset = "custom";
+      next.w = Math.min(Math.max(MIN_PANEL_WIDTH, next.w), Math.max(MIN_PANEL_WIDTH, vw - 8));
+    }
+    if (next.heightMode !== "custom") {
+      next.heightMode = "high";
+      next.h = highPanelHeight(vh);
+    } else {
+      next.h = Math.min(Math.max(MIN_PANEL_HEIGHT, next.h), Math.max(MIN_PANEL_HEIGHT, vh - 8));
+    }
+    next.x = Math.min(Math.max(0, next.x), Math.max(0, vw - next.w));
+    next.y = Math.min(Math.max(0, next.y), Math.max(0, vh - next.h));
+    return next;
+  }
+  const geometry = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    DEFAULT_PANEL_SIZE,
+    MIN_PANEL_HEIGHT,
+    MIN_PANEL_WIDTH,
+    PANEL_SIZE_PRESETS,
+    clampPanelRect,
+    highPanelHeight,
+    isPanelSizePreset,
+    panelPresetWidth,
+    panelSizeClassFromWidth
+  }, Symbol.toStringTag, { value: "Module" }));
+  const ui = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    panelGeometry: geometry
+  }, Symbol.toStringTag, { value: "Module" }));
   function parseResponseHeaders(raw) {
     const headers = {};
     for (const line of String(raw || "").split(/\r?\n/)) {
@@ -4341,7 +4401,8 @@ ${prompt2.userPromptTemplate}`
     core,
     bilibili,
     youtube,
-    app
+    app,
+    ui
   };
   exports.SubBatchMonorepo = SubBatchMonorepo;
   Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });

@@ -14,6 +14,7 @@ import { userscript as runtimeUserscript } from "@subbatch/runtime";
 import * as youtube from "@subbatch/youtube";
 
 import * as app from "./app";
+import * as ui from "./ui";
 import { createUserscriptHost } from "./userscript-host";
 
 const host = createUserscriptHost();
@@ -32,6 +33,7 @@ const SubBatchMonorepo = {
   bilibili,
   youtube,
   app,
+  ui,
 };
 
 export { SubBatchMonorepo };
