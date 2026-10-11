@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { renderShellStyles } from "../../apps/userscript/src/ui/shell/styles";
 
 import {
   extractFunctionSource,
@@ -25,6 +26,10 @@ function functionNames(source: string): Set<string> {
 }
 
 describe("Maintained full-feature compatibility source", () => {
+  it("delegates foundational shell CSS without removing workspace styles", () => {
+    expect(maintainedSource).toContain("ui.panelStyles.renderShellStyles(PANEL_ID, MIN_W, MIN_H, DOCK_EDGE_PX)");
+    expect(maintainedSource).toContain('#${PANEL_ID} .bsb-body');
+  });
   it("renders Studio chrome header from the extracted UI shell", () => {
     expect(maintainedSource).toContain("ui.panelMarkup.renderPanelHeader(SCRIPT_VERSION)");
     expect(maintainedSource).not.toContain('<div class="bsb-size-switch" role="group"');
@@ -372,11 +377,11 @@ describe("Maintained full-feature compatibility source", () => {
     expect(startSource).toContain('appFn("startUserscriptLifecycle")');
     expect(startSource).toContain("isDeferredVideoCarrierPage(location.href)");
     expect(maintainedSource).toContain('bilibiliFn("extractPlayingVideoHint")');
-    expect(maintainedSource).toContain("--bsb-ui-font: 14px");
+    expect(renderShellStyles("bili-subbatch-panel", 420, 520, 32)).toContain("--bsb-ui-font: 14px");
     expect(maintainedSource).toContain("font-size: 14px !important");
     expect(maintainedSource).toContain("CORE_LOCAL_FALLBACKS");
     expect(maintainedSource).toContain("NOTE_FONT_DEFAULT = 14");
-    expect(maintainedSource).toContain("--bsb-knowledge-font: 14px");
+    expect(renderShellStyles("bili-subbatch-panel", 420, 520, 32)).toContain("--bsb-knowledge-font: 14px");
     expect(maintainedSource).toContain("font-size:var(--bsb-knowledge-font)");
     expect(maintainedSource).toContain("<strong>对话</strong>");
     expect(maintainedSource).toContain("function flowTaskModelsHtml(");
