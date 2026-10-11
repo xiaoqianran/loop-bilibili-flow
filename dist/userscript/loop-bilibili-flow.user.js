@@ -4765,6 +4765,41 @@ ${prompt2.userPromptTemplate}`
     __proto__: null,
     renderShellStyles
   }, Symbol.toStringTag, { value: "Module" }));
+  function renderWorkspaceLayoutStyles(panelId) {
+    return `
+      #${panelId} .bsb-body {
+        padding: 0;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        flex: 1;
+      }
+      #${panelId} .bsb-view {
+        display: none;
+        flex-direction: column;
+        gap: 10px;
+        padding: 12px 14px 10px;
+        min-height: 0;
+        flex: 1 1 0;
+        overflow: hidden;
+      }
+      #${panelId} .bsb-view.active { display: flex; }
+      /* AI 页：画布吃掉剩余高度（给绝对定位阅读器当基准） */
+      #${panelId} .bsb-view[data-view-panel="ai"] {
+        gap: 8px;
+      }
+      #${panelId} .bsb-view[data-view-panel="ai"] .bsb-ai-canvas-wrap {
+        flex: 1 1 0;
+        min-height: 260px;
+      }
+
+  `;
+  }
+  const layoutStyles = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    renderWorkspaceLayoutStyles
+  }, Symbol.toStringTag, { value: "Module" }));
   const ui = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
     panelChrome: chromeController,
@@ -4773,7 +4808,8 @@ ${prompt2.userPromptTemplate}`
     panelMarkup: markup,
     panelPointer: pointerController,
     panelState: state,
-    panelStyles: styles
+    panelStyles: styles,
+    workspaceLayoutStyles: layoutStyles
   }, Symbol.toStringTag, { value: "Module" }));
   function parseResponseHeaders(raw) {
     const headers = {};
@@ -8071,33 +8107,7 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
       ${buildCtpFlavorCss(PANEL_ID)}
 
       ${SubBatch.SubBatchMonorepo.ui.panelStyles.renderShellStyles(PANEL_ID, MIN_W, MIN_H, DOCK_EDGE_PX)}
-      #${PANEL_ID} .bsb-body {
-        padding: 0;
-        overflow: hidden;
-        display: flex;
-        flex-direction: column;
-        min-height: 0;
-        flex: 1;
-      }
-      #${PANEL_ID} .bsb-view {
-        display: none;
-        flex-direction: column;
-        gap: 10px;
-        padding: 12px 14px 10px;
-        min-height: 0;
-        flex: 1 1 0;
-        overflow: hidden;
-      }
-      #${PANEL_ID} .bsb-view.active { display: flex; }
-      /* AI 页：画布吃掉剩余高度（给绝对定位阅读器当基准） */
-      #${PANEL_ID} .bsb-view[data-view-panel="ai"] {
-        gap: 8px;
-      }
-      #${PANEL_ID} .bsb-view[data-view-panel="ai"] .bsb-ai-canvas-wrap {
-        flex: 1 1 0;
-        min-height: 260px;
-      }
-
+      ${SubBatch.SubBatchMonorepo.ui.workspaceLayoutStyles.renderWorkspaceLayoutStyles(PANEL_ID)}
       #${PANEL_ID} .bsb-badge {
         display: inline-flex; align-items: center; gap: 4px;
         background: color-mix(in srgb, var(--ctp-sapphire) 16%, transparent);
