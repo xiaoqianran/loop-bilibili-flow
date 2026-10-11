@@ -8,3 +8,4 @@ export * as panelStyles from "./shell/styles";
 export * as workspaceLayoutStyles from "./workspaces/layout-styles";
 export * as workspaceMarkup from "./workspaces/markup";
 export * as workspaceControlsStyles from "./workspaces/controls-styles";
+export * as subsStyles from "./workspaces/subs-styles";
