@@ -373,10 +373,10 @@ describe("Maintained full-feature compatibility source", () => {
     expect(maintainedSource).toContain("function paintStudioAnswer(");
     expect(maintainedSource).toContain("data-role=\"studio-answer\"");
     expect(renderAiStyles("bili-subbatch-panel")).toContain("align-self: flex-end");
-    expect(maintainedSource).toContain("// @version      6.9.16");
+    expect(maintainedSource).toContain("// @version      6.10.1");
     expect(maintainedSource).toContain("// @match        *://www.bilibili.com/festival/*");
     expect(maintainedSource).toContain("// @match        *://www.bilibili.com/blackboard/*");
-    expect(maintainedSource).toContain('|| "6.9.16"');
+    expect(maintainedSource).toContain('|| "6.10.1"');
     expect(maintainedSource).toContain("function isDeferredVideoCarrierPage(");
     expect(maintainedSource).toContain("function startUserscript(");
     const startSource = extractFunctionSource(maintainedSource, "startUserscript");

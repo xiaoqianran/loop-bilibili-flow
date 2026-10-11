@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Bili SubBatch (loop-bilibili)
 // @namespace    https://github.com/loop-bilibili/bili-subbatch
-// @version      6.9.16
+// @version      6.10.1
 // @description  B站知识阅读工作台：字幕预处理、多产物后处理、Anchor 局部追问树与持久 Knowledge Workspace
 // @author       loop-bilibili
 // @match        *://www.bilibili.com/video/*
@@ -35,7 +35,7 @@
 // ==/UserScript==
 
 /**
- * v6.9.16 — Video Carrier 抽象：festival/blackboard 仅在检测到真实 BV / active player 后启动完整工作台；修正 live-player helper bridge。
+ * v6.10.1 — Video Carrier 抽象：festival/blackboard 仅在检测到真实 BV / active player 后启动完整工作台；修正 live-player helper bridge。
  * v6.9.15 — 支持 B 站 /festival/* 专题页：复用 BV 路由与现有字幕链路，不引入专题页专用抓取分支。
  * v6.9.14 — 工作台可见文字默认统一 14px。
  * v6.9.13 — 单独安装 loop-bilibili-flow 时补齐 core 回退，避免字幕库渲染崩溃；打开页面先点开中文字幕。
@@ -116,7 +116,7 @@
    */
 
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.9.16";
+    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.10.1";
   const PANEL_ID = "bili-subbatch-panel";
   const UI_STORE_KEY = "bili-subbatch-ui-v2";
   /** Catppuccin flavors — official palette https://catppuccin.com/palette/ */

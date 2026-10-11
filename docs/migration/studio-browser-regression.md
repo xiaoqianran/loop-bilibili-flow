@@ -1,6 +1,6 @@
 # Studio browser regression (P3 baseline)
 
-Target: Bilibili video page with installed Full userscript v6.9.17. The floating `CC` button is the visible entry when the panel is closed; `.bsb-sidebar` being `display:none` before opening is expected, not a startup failure.
+Target: Bilibili video page with installed Full userscript v6.10.1. The floating `CC` button is the visible entry when the panel is closed; `.bsb-sidebar` being `display:none` before opening is expected, not a startup failure.
 
 Verified on 2026-10-11 using PC1 Chrome DevTools against a real Bilibili video page:
 

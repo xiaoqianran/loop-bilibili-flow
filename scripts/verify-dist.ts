@@ -20,7 +20,7 @@ const maintainedSourcePath = resolve(
 );
 
 const requiredMetadata = [
-  "// @version      6.9.17",
+  "// @version      6.10.1",
   "// @run-at       document-idle",
   "// @match        *://www.bilibili.com/video/*",
   "// @match        *://www.bilibili.com/festival/*",
