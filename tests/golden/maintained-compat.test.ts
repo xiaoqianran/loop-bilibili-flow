@@ -30,7 +30,7 @@ function functionNames(source: string): Set<string> {
 describe("Maintained full-feature compatibility source", () => {
   it("delegates foundational shell CSS without removing workspace styles", () => {
     expect(maintainedSource).toContain("ui.panelStyles.renderShellStyles(PANEL_ID, MIN_W, MIN_H, DOCK_EDGE_PX)");
-    expect(maintainedSource).toContain('#${PANEL_ID} .bsb-body');
+    expect(maintainedSource).toContain("ui.workspaceLayoutStyles.renderWorkspaceLayoutStyles(PANEL_ID)");
   });
   it("renders Studio chrome header from the extracted UI shell", () => {
     expect(maintainedSource).toContain("ui.panelMarkup.renderPanelHeader(SCRIPT_VERSION)");
