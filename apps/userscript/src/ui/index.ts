@@ -11,3 +11,5 @@ export * as workspaceControlsStyles from "./workspaces/controls-styles";
 export * as subsStyles from "./workspaces/subs-styles";
 export * as aiStyles from "./workspaces/ai-styles";
 export * as knowledgeDrilldownStyles from "./workspaces/knowledge-styles";
+export * as settingsStyles from "./workspaces/settings-styles";
+export * as knowledgeWorkspaceStyles from "./workspaces/knowledge-workspace-styles";
