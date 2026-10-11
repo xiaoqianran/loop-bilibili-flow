@@ -7,8 +7,17 @@ function networkWith(
   handler: (url: string) => unknown | Promise<unknown>,
 ): NetworkAdapter {
   const json = vi.fn(async (url: string) => handler(url));
+  const request = vi.fn(async (url: string) => {
+    const value = await handler(url);
+    return {
+      status: 200,
+      ok: true,
+      text: typeof value === "string" ? value : JSON.stringify(value),
+      headers: {},
+    };
+  });
   return {
-    request: vi.fn(),
+    request: request as NetworkAdapter["request"],
     json: json as NetworkAdapter["json"],
   };
 }
@@ -168,6 +177,82 @@ describe("Userscript acquisition orchestration", () => {
         { id: "8", start: 2.5, end: 4, text: "world" },
       ],
     });
+  });
+
+  it("acquires a provider-neutral YouTube transcript from caption tracks", async () => {
+    const playerResponse = {
+      videoDetails: {
+        videoId: "abcdefghijk",
+        title: "Video",
+        author: "Channel",
+      },
+      captions: {
+        playerCaptionsTracklistRenderer: {
+          captionTracks: [
+            {
+              baseUrl:
+                "https://www.youtube.com/api/timedtext?v=abcdefghijk&lang=en",
+              languageCode: "en",
+              name: { simpleText: "English" },
+            },
+          ],
+        },
+      },
+    };
+    const network = networkWith((url) => {
+      if (url === "https://www.youtube.com/watch?v=abcdefghijk") {
+        return (
+          "<script>var ytInitialPlayerResponse = " +
+          JSON.stringify(playerResponse) +
+          ";</script>"
+        );
+      }
+      if (url.includes("/api/timedtext")) {
+        return JSON.stringify({
+          events: [
+            {
+              tStartMs: 1000,
+              dDurationMs: 1500,
+              segs: [{ utf8: "hello" }],
+            },
+            {
+              tStartMs: 2500,
+              dDurationMs: 1500,
+              segs: [{ utf8: "world" }],
+            },
+          ],
+        });
+      }
+      throw new Error(`unexpected URL: ${url}`);
+    });
+    const pageRuntime = {
+      ytInitialPlayerResponse: {
+        videoDetails: { videoId: "ZYXWVUTSRQ", title: "stale" },
+      },
+      navigator: { languages: ["en-US"] },
+    };
+
+    await expect(
+      transcript.acquire(
+        "https://www.youtube.com/watch?v=abcdefghijk",
+        pageRuntime,
+        network,
+      ),
+    ).resolves.toMatchObject({
+      ref: {
+        source: "youtube",
+        sourceId: "abcdefghijk",
+        segmentId: "main",
+      },
+      language: "en",
+      origin: "caption_track",
+      segments: [
+        { id: "1", start: 1, end: 2.5, text: "hello" },
+        { id: "2", start: 2.5, end: 4, text: "world" },
+      ],
+    });
+
+    expect(network.request).toHaveBeenCalledTimes(2);
   });
 
   it("uses signed WBI acquisition before the dm-view subtitle fallback", async () => {

@@ -114,8 +114,35 @@ describe("userscript app boundary", () => {
     });
   });
 
+  it("normalizes the active YouTube video and ignores stale initial player state", () => {
+    const resolved = content.resolve(
+      "https://www.youtube.com/watch?v=abcdefghijk",
+      {
+        ytInitialPlayerResponse: {
+          videoDetails: {
+            videoId: "ZYXWVUTSRQ",
+            title: "stale",
+          },
+        },
+      },
+    );
+
+    expect(resolved).toMatchObject({
+      ref: {
+        source: "youtube",
+        sourceId: "abcdefghijk",
+        segmentId: "main",
+      },
+      key: "youtube:abcdefghijk:main",
+      native: {
+        videoId: "abcdefghijk",
+        kind: "watch",
+      },
+    });
+  });
+
   it("returns no active content for an unregistered site", () => {
-    expect(content.resolve("https://www.youtube.com/watch?v=abcdefghijk", {})).toBeNull();
+    expect(content.resolve("https://example.com/watch?v=abcdefghijk", {})).toBeNull();
   });
 
   it("boots normal pages immediately", () => {
@@ -208,9 +235,13 @@ describe("userscript app boundary", () => {
     document.emit("visibilitychange");
     expect(navigations).toBe(4);
 
+    pageWindow.emit("yt-navigate-finish");
+    expect(navigations).toBe(5);
+
     cleanup();
     expect(pageWindow.history.pushState).toBe(originalPush);
     pageWindow.emit("popstate");
-    expect(navigations).toBe(4);
+    pageWindow.emit("yt-navigate-finish");
+    expect(navigations).toBe(5);
   });
 });

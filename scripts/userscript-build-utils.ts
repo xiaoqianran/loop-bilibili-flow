@@ -10,3 +10,11 @@ export function stripUserscriptMetadata(source: string): string {
   else if (source.startsWith("\n", bodyStart)) bodyStart += 1;
   return source.slice(bodyStart);
 }
+
+export function guardCompatRuntimeForBilibili(source: string): string {
+  return [
+    'if (typeof location !== "undefined" && /(^|\\.)bilibili\\.com$/i.test(location.hostname)) {',
+    source,
+    "}",
+  ].join("\n");
+}

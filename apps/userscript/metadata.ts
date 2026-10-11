@@ -15,9 +15,9 @@ export const userscriptMetadata: UserscriptMetadata = {
   // Keep the historical identity so Tampermonkey upgrades the installed v6.0.2.
   name: "Bili SubBatch (loop-bilibili)",
   namespace: "https://github.com/loop-bilibili/bili-subbatch",
-  version: "6.9.16",
+  version: "6.9.17",
   description:
-    "B站知识阅读工作台：字幕预处理、多产物后处理、Anchor 局部追问树与持久 Knowledge Workspace",
+    "B站 / YouTube 知识阅读工作台：字幕预处理、多产物后处理、Anchor 局部追问树与持久 Knowledge Workspace",
   author: "loop-bilibili",
   match: [
     "*://www.bilibili.com/video/*",
@@ -29,12 +29,19 @@ export const userscriptMetadata: UserscriptMetadata = {
     "*://www.bilibili.com/favlist*",
     "*://space.bilibili.com/*",
     "*://search.bilibili.com/*",
+    "*://www.youtube.com/*",
+    "*://m.youtube.com/*",
+    "*://youtube.com/*",
+    "*://youtu.be/*",
   ],
   connect: [
     "api.bilibili.com",
     "aisubtitle.hdslb.com",
     "*.hdslb.com",
     "bilibili.com",
+    "youtube.com",
+    "*.youtube.com",
+    "youtu.be",
     "*",
     "cdn.jsdelivr.net",
   ],

@@ -5,6 +5,7 @@ import { Script } from "node:vm";
 
 import {
   COMPAT_BODY_MARKER,
+  guardCompatRuntimeForBilibili,
   stripUserscriptMetadata,
 } from "./userscript-build-utils";
 
@@ -19,12 +20,13 @@ const maintainedSourcePath = resolve(
 );
 
 const requiredMetadata = [
-  "// @version      6.9.16",
+  "// @version      6.9.17",
   "// @run-at       document-idle",
   "// @match        *://www.bilibili.com/video/*",
   "// @match        *://www.bilibili.com/festival/*",
   "// @match        *://www.bilibili.com/blackboard/*",
   "// @match        *://www.bilibili.com/list/*",
+  "// @match        *://www.youtube.com/*",
   "// @grant        GM_xmlhttpRequest",
   "// @grant        GM_setClipboard",
   "// @grant        GM_addStyle",
@@ -101,7 +103,9 @@ async function verify(): Promise<void> {
   const markerIndex = output.indexOf(marker);
   if (markerIndex < 0) throw new Error("Temporary maintained runtime marker not found");
   const outputBehaviorBody = output.slice(markerIndex + marker.length);
-  const expectedBehaviorBody = stripUserscriptMetadata(maintainedSource);
+  const expectedBehaviorBody = guardCompatRuntimeForBilibili(
+    stripUserscriptMetadata(maintainedSource),
+  );
   if (outputBehaviorBody !== expectedBehaviorBody) {
     throw new Error(
       `Maintained behavior body mismatch: expected ${hash(expectedBehaviorBody)}, received ${hash(outputBehaviorBody)}`,

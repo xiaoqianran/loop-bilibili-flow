@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Bili SubBatch (loop-bilibili)
 // @namespace    https://github.com/loop-bilibili/bili-subbatch
-// @version      6.9.16
-// @description  B站知识阅读工作台：字幕预处理、多产物后处理、Anchor 局部追问树与持久 Knowledge Workspace
+// @version      6.9.17
+// @description  B站 / YouTube 知识阅读工作台：字幕预处理、多产物后处理、Anchor 局部追问树与持久 Knowledge Workspace
 // @author       loop-bilibili
 // @match        *://www.bilibili.com/video/*
 // @match        *://www.bilibili.com/festival/*
@@ -13,10 +13,17 @@
 // @match        *://www.bilibili.com/favlist*
 // @match        *://space.bilibili.com/*
 // @match        *://search.bilibili.com/*
+// @match        *://www.youtube.com/*
+// @match        *://m.youtube.com/*
+// @match        *://youtube.com/*
+// @match        *://youtu.be/*
 // @connect      api.bilibili.com
 // @connect      aisubtitle.hdslb.com
 // @connect      *.hdslb.com
 // @connect      bilibili.com
+// @connect      youtube.com
+// @connect      *.youtube.com
+// @connect      youtu.be
 // @connect      *
 // @connect      cdn.jsdelivr.net
 // @grant        unsafeWindow
@@ -32,42 +39,42 @@
 // @license      MIT
 // ==/UserScript==
 
-// SubBatch runtime (6.9.16)
+// SubBatch runtime (6.9.17)
 var SubBatch = (function(exports) {
   "use strict";
   function videoViewUrl(bvid) {
     return `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`;
   }
-  function record(value) {
+  function record$1(value) {
     return value && typeof value === "object" ? value : null;
   }
   function parseRecord(value) {
     if (typeof value === "string") {
       try {
-        return record(JSON.parse(value));
+        return record$1(JSON.parse(value));
       } catch {
         return null;
       }
     }
-    return record(value);
+    return record$1(value);
   }
   function nested(root, ...keys) {
     let current = root;
     for (const key of keys) {
-      const item = record(current);
+      const item = record$1(current);
       if (!item) return void 0;
       current = item[key];
     }
     return current;
   }
   function runtimeVideoView(runtime2, bvid) {
-    const root = record(runtime2);
-    const initial = record(root?.__INITIAL_STATE__);
+    const root = record$1(runtime2);
+    const initial = record$1(root?.__INITIAL_STATE__);
     const key = String(bvid || "").toUpperCase();
     const candidates = [
-      record(initial?.videoData),
-      record(initial?.videoInfo),
-      record(initial?.epInfo)
+      record$1(initial?.videoData),
+      record$1(initial?.videoInfo),
+      record$1(initial?.epInfo)
     ];
     for (const candidate of candidates) {
       if (!candidate) continue;
@@ -115,7 +122,7 @@ var SubBatch = (function(exports) {
   function normalizeTracks(value) {
     if (!Array.isArray(value)) return [];
     return value.map((track) => {
-      const item = record(track) ?? {};
+      const item = record$1(track) ?? {};
       return {
         ...item,
         subtitle_url: normalizeSubtitleUrl(item.subtitle_url)
@@ -123,9 +130,9 @@ var SubBatch = (function(exports) {
     });
   }
   function runtimeSubtitleTracks(runtime2, meta) {
-    const root = record(runtime2);
-    const initial = record(root?.__INITIAL_STATE__);
-    const initialVideo = record(initial?.videoData);
+    const root = record$1(runtime2);
+    const initial = record$1(root?.__INITIAL_STATE__);
+    const initialVideo = record$1(initial?.videoData);
     const roots = [
       root?.__playinfo__,
       root?.__PLAYINFO__,
@@ -199,7 +206,7 @@ var SubBatch = (function(exports) {
   function routeVideoKey$1(bvid, page) {
     return `${String(bvid || "").toUpperCase()}:P${Math.max(1, Number(page) || 1)}`;
   }
-  function asRecord(value) {
+  function asRecord$1(value) {
     return value && typeof value === "object" ? value : null;
   }
   function readPositiveNumber(value) {
@@ -230,15 +237,15 @@ var SubBatch = (function(exports) {
     return "";
   }
   function extractPlayingVideoHint(runtime2) {
-    const root = asRecord(runtime2);
+    const root = asRecord$1(runtime2);
     if (!root) return {};
-    const player = asRecord(root.player);
-    const manifest = asRecord(callMethod(player, "getManifest")) || asRecord(callMethod(player, "getPlayerInfo")) || asRecord(callMethod(player, "getVideoMessage"));
-    const state = asRecord(root.__INITIAL_STATE__);
-    const playinfo = asRecord(root.__playinfo__) || asRecord(root.__PLAYINFO__);
-    const playData = asRecord(playinfo?.data) || playinfo;
-    const videoData = asRecord(state?.videoData) || asRecord(state?.videoInfo);
-    const epInfo = asRecord(state?.epInfo);
+    const player = asRecord$1(root.player);
+    const manifest = asRecord$1(callMethod(player, "getManifest")) || asRecord$1(callMethod(player, "getPlayerInfo")) || asRecord$1(callMethod(player, "getVideoMessage"));
+    const state = asRecord$1(root.__INITIAL_STATE__);
+    const playinfo = asRecord$1(root.__playinfo__) || asRecord$1(root.__PLAYINFO__);
+    const playData = asRecord$1(playinfo?.data) || playinfo;
+    const videoData = asRecord$1(state?.videoData) || asRecord$1(state?.videoInfo);
+    const epInfo = asRecord$1(state?.epInfo);
     const pages = Array.isArray(manifest?.pages) ? manifest.pages : Array.isArray(videoData?.pages) ? videoData.pages : Array.isArray(epInfo?.pages) ? epInfo.pages : null;
     const hint = {};
     const playerCid = readPositiveNumber(manifest?.cid) || readPositiveNumber(callMethod(player, "getCid")) || readPositiveNumber(player?.cid);
@@ -3120,6 +3127,269 @@ ${prompt2.userPromptTemplate}`
     shouldIgnore,
     register
   };
+  const YOUTUBE_SOURCE = "youtube";
+  const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
+  function validVideoId(value) {
+    const id = String(value || "").trim();
+    return VIDEO_ID_PATTERN.test(id) ? id : "";
+  }
+  function isYoutubeHost(hostname) {
+    const host2 = String(hostname || "").toLowerCase();
+    return host2 === "youtube.com" || host2.endsWith(".youtube.com") || host2 === "youtu.be" || host2.endsWith(".youtu.be");
+  }
+  function matchesYoutubeUrl(href) {
+    try {
+      return isYoutubeHost(new URL(href).hostname);
+    } catch {
+      return false;
+    }
+  }
+  function extractVideoRef(href) {
+    let url;
+    try {
+      url = new URL(href);
+    } catch {
+      return null;
+    }
+    if (!isYoutubeHost(url.hostname)) return null;
+    const host2 = url.hostname.toLowerCase();
+    if (host2 === "youtu.be" || host2.endsWith(".youtu.be")) {
+      const id = validVideoId(url.pathname.split("/").filter(Boolean)[0]);
+      return id ? { videoId: id, kind: "shortlink" } : null;
+    }
+    if (url.pathname === "/watch") {
+      const id = validVideoId(url.searchParams.get("v"));
+      return id ? { videoId: id, kind: "watch" } : null;
+    }
+    for (const [prefix, kind] of [
+      ["/shorts/", "shorts"],
+      ["/live/", "live"],
+      ["/embed/", "embed"]
+    ]) {
+      if (!url.pathname.startsWith(prefix)) continue;
+      const id = validVideoId(url.pathname.slice(prefix.length).split("/")[0]);
+      return id ? { videoId: id, kind } : null;
+    }
+    return null;
+  }
+  function videoWatchUrl(videoId) {
+    const id = validVideoId(videoId);
+    return id ? `https://www.youtube.com/watch?v=${id}` : "";
+  }
+  function record(value) {
+    return value && typeof value === "object" ? value : null;
+  }
+  function textOf$1(value) {
+    const root = record(value);
+    if (!root) return String(value || "").trim();
+    const simple = String(root.simpleText || "").trim();
+    if (simple) return simple;
+    const runs = Array.isArray(root.runs) ? root.runs : [];
+    return runs.map((run) => String(record(run)?.text || "")).join("").trim();
+  }
+  function videoDetails(response) {
+    const root = record(response);
+    const nested2 = record(root?.playerResponse);
+    const details = record(root?.videoDetails) ?? record(nested2?.videoDetails);
+    const videoId = String(details?.videoId || "").trim();
+    if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return null;
+    const title = String(details?.title || "").trim();
+    const author = String(details?.author || "").trim();
+    return {
+      videoId,
+      ...title ? { title } : {},
+      ...author ? { author } : {}
+    };
+  }
+  function runtimePlayerResponse(runtime2, expectedVideoId) {
+    const root = record(runtime2);
+    if (!root) return null;
+    const direct = root.ytInitialPlayerResponse;
+    const ytplayer = record(root.ytplayer);
+    const config = record(ytplayer?.config);
+    const args = record(config?.args);
+    const candidates = [direct];
+    const serialized = args?.player_response;
+    if (typeof serialized === "string" && serialized.trim()) {
+      try {
+        candidates.push(JSON.parse(serialized));
+      } catch {
+      }
+    }
+    for (const candidate of candidates) {
+      const details = videoDetails(candidate);
+      if (!details) continue;
+      if (expectedVideoId && details.videoId !== expectedVideoId) continue;
+      return candidate;
+    }
+    return null;
+  }
+  function resolveCurrentVideo(href, runtime2) {
+    const route2 = extractVideoRef(href);
+    if (!route2) return null;
+    const response = runtimePlayerResponse(runtime2, route2.videoId);
+    const details = response ? videoDetails(response) : null;
+    return {
+      videoId: route2.videoId,
+      kind: route2.kind,
+      ...details?.title ? { title: details.title } : {},
+      ...details?.author ? { author: details.author } : {},
+      ...response ? { playerResponse: response } : {}
+    };
+  }
+  function balancedJson(source, start2) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start2; index < source.length; index += 1) {
+      const char = source[index];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (char === "\\") {
+          escaped = true;
+        } else if (char === '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (char === '"') {
+        inString = true;
+        continue;
+      }
+      if (char === "{") depth += 1;
+      else if (char === "}") {
+        depth -= 1;
+        if (depth === 0) return source.slice(start2, index + 1);
+      }
+    }
+    return "";
+  }
+  function playerResponseFromHtml(html) {
+    const source = String(html || "");
+    const markers = [
+      "ytInitialPlayerResponse =",
+      "ytInitialPlayerResponse=",
+      'window["ytInitialPlayerResponse"] =',
+      'window["ytInitialPlayerResponse"]='
+    ];
+    for (const marker of markers) {
+      let offset = source.indexOf(marker);
+      while (offset >= 0) {
+        const objectStart = source.indexOf("{", offset + marker.length);
+        if (objectStart < 0) break;
+        const json = balancedJson(source, objectStart);
+        if (json) {
+          try {
+            const parsed = JSON.parse(json);
+            if (videoDetails(parsed)) return parsed;
+          } catch {
+          }
+        }
+        offset = source.indexOf(marker, offset + marker.length);
+      }
+    }
+    return null;
+  }
+  function captionTracks(response) {
+    const root = record(response);
+    const nested2 = record(root?.playerResponse);
+    const captions = record(root?.captions) ?? record(nested2?.captions);
+    const renderer = record(captions?.playerCaptionsTracklistRenderer);
+    const tracks = Array.isArray(renderer?.captionTracks) ? renderer.captionTracks : [];
+    return tracks.flatMap((value) => {
+      const track = record(value);
+      const baseUrl = String(track?.baseUrl || "").trim();
+      const languageCode = String(track?.languageCode || "").trim();
+      if (!baseUrl || !languageCode) return [];
+      const name = textOf$1(track?.name) || languageCode;
+      const kind = String(track?.kind || "").trim();
+      const vssId = String(track?.vssId || "").trim();
+      return [{
+        baseUrl,
+        languageCode,
+        name,
+        ...kind ? { kind } : {},
+        ...vssId ? { vssId } : {},
+        ...typeof track?.isTranslatable === "boolean" ? { isTranslatable: track.isTranslatable } : {}
+      }];
+    });
+  }
+  function languageScore(languageCode, preferred) {
+    const code = languageCode.toLowerCase();
+    for (let index = 0; index < preferred.length; index += 1) {
+      const wanted = String(preferred[index] || "").toLowerCase();
+      if (!wanted) continue;
+      if (code === wanted) return 1e3 - index * 10;
+      const codeBase = code.split("-")[0];
+      const wantedBase = wanted.split("-")[0];
+      if (codeBase && wantedBase && codeBase === wantedBase) {
+        return 500 - index * 10;
+      }
+    }
+    return 0;
+  }
+  function pickCaptionTrack(tracks, preferredLanguages2 = []) {
+    if (!tracks?.length) return null;
+    return [...tracks].sort((a, b) => {
+      const language = languageScore(b.languageCode, preferredLanguages2) - languageScore(a.languageCode, preferredLanguages2);
+      if (language) return language;
+      const manualA = a.kind === "asr" ? 0 : 1;
+      const manualB = b.kind === "asr" ? 0 : 1;
+      return manualB - manualA;
+    })[0] ?? null;
+  }
+  function captionJson3Url(track) {
+    const raw = String(track?.baseUrl || "").trim();
+    if (!raw) return "";
+    try {
+      const url = new URL(raw);
+      url.searchParams.set("fmt", "json3");
+      return url.toString();
+    } catch {
+      return raw + (raw.includes("?") ? "&" : "?") + "fmt=json3";
+    }
+  }
+  function parseJson3Transcript(payload) {
+    const root = record(payload);
+    const events = Array.isArray(root?.events) ? root.events : [];
+    const segments = [];
+    for (let index = 0; index < events.length; index += 1) {
+      const event = record(events[index]);
+      if (!event) continue;
+      const pieces = Array.isArray(event.segs) ? event.segs : [];
+      const text = pieces.map((piece) => String(record(piece)?.utf8 || "")).join("").replace(/\s+/g, " ").trim();
+      if (!text) continue;
+      const startMs = Number(event.tStartMs);
+      if (!Number.isFinite(startMs)) continue;
+      const durationMs = Number(event.dDurationMs);
+      const start2 = startMs / 1e3;
+      const end = Number.isFinite(durationMs) && durationMs >= 0 ? (startMs + durationMs) / 1e3 : void 0;
+      segments.push({
+        id: String(index + 1),
+        start: start2,
+        ...end !== void 0 ? { end } : {},
+        text
+      });
+    }
+    return segments;
+  }
+  const youtube = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    YOUTUBE_SOURCE,
+    captionJson3Url,
+    captionTracks,
+    extractVideoRef,
+    isYoutubeHost,
+    matchesYoutubeUrl,
+    parseJson3Transcript,
+    pickCaptionTrack,
+    playerResponseFromHtml,
+    resolveCurrentVideo,
+    runtimePlayerResponse,
+    videoDetails,
+    videoWatchUrl
+  }, Symbol.toStringTag, { value: "Module" }));
   const WBI_TTL_MS = 6e5;
   const wbiCache = /* @__PURE__ */ new WeakMap();
   const JSON_REQUEST = {
@@ -3290,7 +3560,7 @@ ${prompt2.userPromptTemplate}`
       return false;
     }
   }
-  function resolveCurrent(context) {
+  function resolveCurrent$1(context) {
     const ctx = route.detect(context.href);
     const playing = route.playingHint(context.pageRuntime);
     const ref = route.resolveVideo({
@@ -3316,10 +3586,10 @@ ${prompt2.userPromptTemplate}`
   const bilibiliProvider = {
     id: BILIBILI_SOURCE,
     matches: matchesBilibili,
-    resolveCurrent,
+    resolveCurrent: resolveCurrent$1,
     activationState(context) {
       if (!route.isCarrierShell(context.href)) return "ready";
-      return resolveCurrent(context) ? "ready" : "defer";
+      return resolveCurrent$1(context) ? "ready" : "defer";
     }
   };
   function normalizeSegments(body) {
@@ -3412,6 +3682,9 @@ ${prompt2.userPromptTemplate}`
       activationState(context) {
         const provider = list.find((candidate) => candidate.matches(context.href));
         return provider?.activationState?.(context) ?? "ready";
+      },
+      navigationEvents() {
+        return [...new Set(list.flatMap((provider) => provider.navigationEvents ?? []))];
       }
     };
   }
@@ -3427,9 +3700,208 @@ ${prompt2.userPromptTemplate}`
       }
     };
   }
-  const providerRegistry = createProviderRegistry([bilibiliProvider]);
+  function resolveCurrent(context) {
+    const current = resolveCurrentVideo(context.href, context.pageRuntime);
+    if (!current) return null;
+    const ref = {
+      source: YOUTUBE_SOURCE,
+      sourceId: current.videoId,
+      segmentId: "main",
+      url: context.href
+    };
+    return {
+      ref,
+      key: contentRefKey(ref),
+      native: current
+    };
+  }
+  const youtubeProvider = {
+    id: YOUTUBE_SOURCE,
+    matches: matchesYoutubeUrl,
+    resolveCurrent,
+    navigationEvents: ["yt-navigate-finish"]
+  };
+  const SEGMENT_SELECTOR = "ytd-transcript-segment-renderer, transcript-segment-view-model";
+  function asRecord(value) {
+    return value && typeof value === "object" ? value : null;
+  }
+  function runtimeDocument(runtime2) {
+    const root = asRecord(runtime2);
+    const value = root?.document;
+    return value && typeof value === "object" ? value : null;
+  }
+  function preferredLanguages(runtime2) {
+    const root = asRecord(runtime2);
+    const navigator2 = asRecord(root?.navigator);
+    const languages = Array.isArray(navigator2?.languages) ? navigator2.languages.map((value) => String(value || "").trim()).filter(Boolean) : [];
+    const language = String(navigator2?.language || "").trim();
+    if (language && !languages.includes(language)) languages.push(language);
+    return languages;
+  }
+  async function requestText(context, url) {
+    const response = await context.network.request(url, {
+      credentials: "include",
+      cache: "no-store",
+      fallback: "network-or-http",
+      ...context.signal ? { signal: context.signal } : {}
+    });
+    if (!response.ok) {
+      throw new Error(`YouTube request failed (${response.status})`);
+    }
+    return response.text;
+  }
+  async function acquireFromCaptionTrack(resolved, context) {
+    const native = resolved.native;
+    const videoId = String(native.videoId || resolved.ref.sourceId).trim();
+    if (!videoId) return null;
+    let response = native.playerResponse ?? runtimePlayerResponse(context.pageRuntime, videoId);
+    let tracks = captionTracks(response);
+    if (!tracks.length) {
+      const watchUrl = videoWatchUrl(videoId);
+      if (!watchUrl) return null;
+      const html = await requestText(context, watchUrl);
+      response = playerResponseFromHtml(html);
+      tracks = captionTracks(response);
+    }
+    const track = pickCaptionTrack(
+      tracks,
+      preferredLanguages(context.pageRuntime)
+    );
+    const captionUrl = captionJson3Url(track);
+    if (!track || !captionUrl) return null;
+    const captionText = await requestText(context, captionUrl);
+    let payload;
+    try {
+      payload = JSON.parse(captionText);
+    } catch {
+      return null;
+    }
+    const segments = parseJson3Transcript(payload);
+    if (!segments.length) return null;
+    return {
+      ref: resolved.ref,
+      segments,
+      language: track.languageCode,
+      origin: "caption_track",
+      metadata: {
+        track: {
+          languageCode: track.languageCode,
+          name: track.name,
+          ...track.kind ? { kind: track.kind } : {},
+          ...track.vssId ? { vssId: track.vssId } : {}
+        }
+      }
+    };
+  }
+  function secondsFromLabel(label) {
+    const parts = String(label || "").trim().split(":").map((part) => Number(part));
+    if (!parts.length || parts.length > 3 || parts.some((part) => !Number.isFinite(part) || part < 0)) {
+      return null;
+    }
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    if (parts.length === 3) {
+      return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    }
+    return parts[0];
+  }
+  function textOf(element) {
+    return String(element?.textContent || "").replace(/\s+/g, " ").trim();
+  }
+  function parseDomTranscript(document2) {
+    const first = document2.querySelector(SEGMENT_SELECTOR);
+    const scope = first?.closest("ytd-engagement-panel-section-list-renderer") ?? document2;
+    const nodes = [...scope.querySelectorAll(SEGMENT_SELECTOR)];
+    const draft = nodes.flatMap((element, index) => {
+      const classic = element.matches("ytd-transcript-segment-renderer");
+      const timestamp = textOf(
+        element.querySelector(
+          classic ? ".segment-timestamp" : '[class*="Timestamp"]'
+        )
+      );
+      const text = textOf(
+        element.querySelector(
+          classic ? ".segment-text" : '.ytAttributedStringHost, [class*="AttributedString"]'
+        )
+      );
+      const start2 = secondsFromLabel(timestamp);
+      if (start2 === null || !text) return [];
+      return [{ id: String(index + 1), start: start2, text }];
+    });
+    return draft.map((segment, index) => {
+      const next = draft[index + 1];
+      return {
+        ...segment,
+        ...next && next.start >= segment.start ? { end: next.start } : {}
+      };
+    });
+  }
+  function findTranscriptButton(document2) {
+    return document2.querySelector(
+      "ytd-video-description-transcript-section-renderer button, ytd-video-description-transcript-section-renderer tp-yt-paper-button"
+    ) ?? document2.querySelector('button[aria-label*="transcript" i]');
+  }
+  function hasDomTranscript(document2) {
+    return document2.querySelector(SEGMENT_SELECTOR) != null;
+  }
+  async function waitFor(predicate, timeoutMs, stepMs = 150) {
+    const start2 = Date.now();
+    while (Date.now() - start2 < timeoutMs) {
+      if (predicate()) return true;
+      await new Promise((resolve2) => globalThis.setTimeout(resolve2, stepMs));
+    }
+    return predicate();
+  }
+  async function ensureTranscriptPanel(document2) {
+    if (hasDomTranscript(document2)) return true;
+    const expand = document2.querySelector(
+      "ytd-text-inline-expander #expand, ytd-watch-metadata #expand"
+    );
+    if (expand && !findTranscriptButton(document2)) {
+      expand.click();
+      await waitFor(() => findTranscriptButton(document2) != null, 1500);
+    }
+    const button = findTranscriptButton(document2);
+    if (button) {
+      button.click();
+      await waitFor(() => hasDomTranscript(document2), 5e3);
+    }
+    return hasDomTranscript(document2);
+  }
+  async function acquireFromDom(resolved, context) {
+    const document2 = runtimeDocument(context.pageRuntime);
+    if (!document2) return null;
+    const current = extractVideoRef(document2.location?.href || "");
+    if (current?.videoId !== resolved.ref.sourceId) return null;
+    if (!await ensureTranscriptPanel(document2)) return null;
+    const segments = parseDomTranscript(document2);
+    if (!segments.length) return null;
+    return {
+      ref: resolved.ref,
+      segments,
+      origin: "transcript_panel",
+      metadata: {}
+    };
+  }
+  const youtubeTranscriptSource = {
+    id: YOUTUBE_SOURCE,
+    async acquire(resolved, context) {
+      const current = resolved;
+      try {
+        const network = await acquireFromCaptionTrack(current, context);
+        if (network) return network;
+      } catch (error) {
+        if (context.signal?.aborted) throw error;
+      }
+      return acquireFromDom(current, context);
+    }
+  };
+  const providerRegistry = createProviderRegistry([
+    bilibiliProvider,
+    youtubeProvider
+  ]);
   const transcriptSourceRegistry = createTranscriptSourceRegistry([
-    bilibiliTranscriptSource
+    bilibiliTranscriptSource,
+    youtubeTranscriptSource
   ]);
   function resolve$1(href, pageRuntime) {
     return providerRegistry.resolveCurrent({ href, pageRuntime });
@@ -3483,6 +3955,10 @@ ${prompt2.userPromptTemplate}`
     };
     options.pageWindow.addEventListener("popstate", options.onNavigate);
     options.pageWindow.addEventListener("hashchange", options.onNavigate);
+    const providerNavigationEvents = providerRegistry.navigationEvents();
+    for (const eventName of providerNavigationEvents) {
+      options.pageWindow.addEventListener(eventName, options.onNavigate);
+    }
     options.eventWindow.addEventListener("pageshow", onPageShow);
     options.document.addEventListener("visibilitychange", onVisibilityChange);
     options.document.addEventListener("loadstart", onMediaLoad, true);
@@ -3494,6 +3970,9 @@ ${prompt2.userPromptTemplate}`
       options.eventWindow.clearInterval(timer);
       options.pageWindow.removeEventListener("popstate", options.onNavigate);
       options.pageWindow.removeEventListener("hashchange", options.onNavigate);
+      for (const eventName of providerNavigationEvents) {
+        options.pageWindow.removeEventListener(eventName, options.onNavigate);
+      }
       options.eventWindow.removeEventListener("pageshow", onPageShow);
       options.document.removeEventListener("visibilitychange", onVisibilityChange);
       options.document.removeEventListener("loadstart", onMediaLoad, true);
@@ -3854,10 +4333,11 @@ ${prompt2.userPromptTemplate}`
   const host = createUserscriptHost();
   const runtime = userscript.create(host);
   const SubBatchMonorepo = {
-    version: "6.9.16",
+    version: "6.9.17",
     runtime,
     core,
     bilibili,
+    youtube,
     app
   };
   exports.SubBatchMonorepo = SubBatchMonorepo;
@@ -3866,6 +4346,7 @@ ${prompt2.userPromptTemplate}`
 })({});
 
 // ---- SubBatch temporary maintained compatibility runtime ----
+if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hostname)) {
 
 /**
  * v6.9.16 — Video Carrier 抽象：festival/blackboard 仅在检测到真实 BV / active player 后启动完整工作台；修正 live-player helper bridge。
@@ -20975,3 +21456,5 @@ body{padding:48px 20px 80px}
     startUserscript();
   }
 })();
+
+}

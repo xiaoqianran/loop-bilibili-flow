@@ -24,24 +24,30 @@ dist/userscript/loop-bilibili-flow.user.js
                            │ Application Shell │
                            └─────────┬─────────┘
                                      │ compose
-                  ┌──────────────────┼──────────────────┐
-                  │                  │                  │
-                  v                  v                  v
-          ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
-          │     core     │   │   bilibili   │   │   runtime    │
-          │ pure domain  │   │ B站 domain   │   │ browser port │
-          └──────────────┘   └──────────────┘   └──────────────┘
-                  ^                  ^                  ^
-                  │                  │                  │
-                  └──────────────────┼──────────────────┘
-                                     │ contracts
+             ┌───────────────────────┼───────────────────────┐
+             │                       │                       │
+             v                       v                       v
+      ┌──────────────┐       ┌──────────────┐       ┌──────────────┐
+      │     core     │       │  providers   │       │   runtime    │
+      │ pure domain  │       │ app adapters │       │ browser port │
+      └──────────────┘       └───────┬──────┘       └──────────────┘
+                                     │
+                         ┌───────────┴───────────┐
+                         v                       v
+                 ┌──────────────┐       ┌──────────────┐
+                 │   bilibili   │       │   youtube    │
+                 │ B站 domain   │       │ YouTube domain│
+                 └──────────────┘       └──────────────┘
+                                     │
+                               contracts
+                                     │
                               ┌──────┴──────┐
                               │   schemas   │
                               │ persistence│
                               └─────────────┘
 ```
 
-当前为了最大限度降低耦合，四个 package 彼此不直接 import。真正需要组合时，由 `apps/userscript` 完成。
+当前共享 package 彼此不直接 import；平台规则集中在 `packages/bilibili` / `packages/youtube`，真正需要组合时由 `apps/userscript/providers` 完成。
 
 ## 模块职责
 
@@ -164,6 +170,28 @@ resolveVideo
 videoChanged
 ```
 
+### youtube — FROZEN DOMAIN API
+
+只负责 YouTube 特有的 URL / playerResponse / caption 纯规则，不负责网络请求、DOM UI 或存储。
+
+```text
+youtube.route
+├─ extractVideoRef()
+├─ matchesYoutubeUrl()
+└─ videoWatchUrl()
+
+youtube.player
+├─ resolveCurrentVideo()
+├─ runtimePlayerResponse()
+├─ playerResponseFromHtml()
+├─ captionTracks()
+├─ pickCaptionTrack()
+├─ captionJson3Url()
+└─ parseJson3Transcript()
+```
+
+SPA 身份规则：URL 中的 videoId 是 canonical identity；`ytInitialPlayerResponse` 只有在其 `videoDetails.videoId` 与当前 URL 完全一致时才可复用，避免 SPA 导航后的 stale state。
+
 ### runtime — FROZEN PLATFORM API
 
 只负责浏览器 / Userscript 环境能力。
@@ -228,10 +256,12 @@ providers
 ├─ transcript.ts
 ├─ bilibili.ts
 ├─ bilibili-acquisition.ts
-└─ bilibili-transcript.ts
+├─ bilibili-transcript.ts
+├─ youtube.ts
+└─ youtube-transcript.ts
 ```
 
-Bilibili 是第一个 Provider；后续 YouTube 通过新增 adapter 注册，不在通用 resolver 中增加平台条件分支。Bilibili 网络编排也已移入 provider 边界，`app/acquisition.ts` 只保留兼容 re-export。
+当前已注册 Bilibili 与 YouTube 两个 Provider。平台扩展通过新增 adapter 注册，不在通用 resolver 中增加平台条件分支。Bilibili 旧 acquisition API 仅保留兼容 re-export；YouTube 从第一天只走新 Provider/TranscriptSource 路径。
 
 ```text
 app
@@ -296,12 +326,13 @@ providerRegistry
       +-- matches()
       +-- resolveCurrent()
       +-- activationState()
+      +-- navigationEvents()
       |
       v
 ResolvedContent / ready|defer
 ```
 
-平台特有的延迟激活规则也属于 Provider。应用层只处理 `ready | defer`，不直接判断 Bilibili festival/blackboard 或未来 YouTube SPA 页面。
+平台特有的延迟激活规则与 SPA 事件名都属于 Provider。Bilibili 可声明 carrier activation；YouTube 声明 `yt-navigate-finish`。应用层只做统一事件 wiring，不出现 `if youtube` / `if bilibili`。
 
 字幕获取是独立 capability，不塞进 ContentProvider：
 
@@ -312,7 +343,7 @@ ResolvedContent
 TranscriptSourceRegistry
       |
       +-- BilibiliTranscriptSource
-      +-- YouTubeTranscriptSource (future)
+      +-- YouTubeTranscriptSource
       |
       v
 AcquiredTranscript {
@@ -324,7 +355,7 @@ AcquiredTranscript {
 }
 ```
 
-后续新增 YouTube 时，应新增 YouTube Provider / Transcript Source，而不是在 `current-content.ts` 或 `current-transcript.ts` 中写 `if (youtube)`。
+YouTubeTranscriptSource 主路径读取 caption track JSON3；若网络路径不可用，则回退到当前页面 Transcript panel，并兼容 classic renderer 与 view-model renderer。以后新增平台仍遵循同一规则：新增 Provider / TranscriptSource，不修改 `current-content.ts` / `current-transcript.ts` 的平台分支。
 
 ## 模块如何对接
 
@@ -349,52 +380,67 @@ runtime.page / runtime.network
               |
               v
              app
-        /      |      \
-       v       v       v
-    core   bilibili   runtime
+        /      |       \
+       v       v        v
+    core   providers   runtime
+             |
+        ┌────┴────┐
+        v         v
+    bilibili   youtube
 ```
 
-App 决定“什么时候做什么”，Core / Bilibili 决定“规则是什么”，Runtime 决定“如何访问外部世界”。
+App 决定“什么时候做什么”，Core 决定通用处理规则，Bilibili / YouTube 决定各自平台规则，Runtime 决定“如何访问外部世界”。
 
-### 3. 典型视频识别
+### 3. 典型内容识别
 
 ```text
 Browser page
     |
     v
-app.video.resolve()
+app.content.resolve()
     |
-    ├── bilibili.route.detect(href)
-    ├── bilibili.route.playingHint(page)
-    └── bilibili.route.resolveVideo(...)
-             |
-             v
-       CurrentVideoRef
+    v
+ProviderRegistry
+    |
+    ├── BilibiliProvider
+    │      └─ bilibili.route.*
+    |
+    └── YouTubeProvider
+           └─ youtube.resolveCurrentVideo()
+    |
+    v
+ContentRef { source, sourceId, segmentId }
 ```
+
+`app.video.resolve()` 仅保留给旧 Bilibili compat 调用。
 
 ### 4. 典型字幕获取与处理
 
 ```text
-Bilibili page/runtime
-      |
-      ├─ bilibili.video.runtimeView()
-      └─ bilibili.subtitle.runtimeTracks()
+app.content.resolve()
       |
       v
-compat cache (temporary)
-      |
-    cache miss
-      v
-app.acquisition
-      |
-      ├─ bilibili.video/subtitle rules
-      └─ runtime.network
+ResolvedContent
       |
       v
-subtitle body
+app.transcript.acquire()
       |
       v
-core.transcript.toCues()
+TranscriptSourceRegistry
+      |
+      ├─ BilibiliTranscriptSource
+      │    └─ WBI / player v2 / dm fallback
+      |
+      └─ YouTubeTranscriptSource
+           ├─ matching playerResponse
+           ├─ watch HTML -> caption track -> JSON3
+           └─ Transcript panel DOM fallback
+      |
+      v
+TranscriptSegment[]
+      |
+      v
+core.transcript.toEvidenceText()
       |
       v
 core.preprocess.splitCues()
@@ -414,13 +460,16 @@ core.preprocess.stitchChunks()
 apps/userscript -> schemas
 apps/userscript -> core
 apps/userscript -> bilibili
+apps/userscript -> youtube
 apps/userscript -> runtime
 
 apps/userscript/providers/types|registry       -> schemas / local provider types only
-apps/userscript/providers/transcript             -> schemas + runtime port types
-apps/userscript/providers/bilibili               -> bilibili + provider contract
-apps/userscript/providers/bilibili-acquisition   -> bilibili + core + runtime ports
-apps/userscript/providers/bilibili-transcript    -> bilibili + schemas + provider acquisition
+apps/userscript/providers/transcript           -> schemas + runtime port types
+apps/userscript/providers/bilibili             -> bilibili + provider contract
+apps/userscript/providers/bilibili-acquisition -> bilibili + core + runtime ports
+apps/userscript/providers/bilibili-transcript  -> bilibili + schemas + provider acquisition
+apps/userscript/providers/youtube              -> youtube + provider contract
+apps/userscript/providers/youtube-transcript   -> youtube + schemas + runtime port
 ```
 
 禁止：
@@ -428,8 +477,10 @@ apps/userscript/providers/bilibili-transcript    -> bilibili + schemas + provide
 ```text
 core      -> runtime
 core      -> bilibili
+core      -> youtube
 runtime   -> core
 bilibili  -> core
+youtube   -> core
 
 packages/* -> compat
 packages/* -> GM_*
@@ -447,6 +498,7 @@ FROZEN
   core canonical grouped API（上文 v1 子集）
   bilibili.route v1
   bilibili.video / bilibili.subtitle acquisition rules
+  youtube route / player / caption pure rules
   runtime ports + runtime.shortcut/spa/userscript
 
 INTERNAL

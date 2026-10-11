@@ -50,6 +50,9 @@ importers:
       '@subbatch/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas
+      '@subbatch/youtube':
+        specifier: workspace:*
+        version: link:../../packages/youtube
 
   packages/bilibili: {}
 
@@ -58,6 +61,8 @@ importers:
   packages/runtime: {}
 
   packages/schemas: {}
+
+  packages/youtube: {}
 
 packages:
 

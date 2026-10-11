@@ -27,6 +27,9 @@
       "@subbatch/bilibili": [
         "packages/bilibili/src/index.ts"
       ],
+      "@subbatch/youtube": [
+        "packages/youtube/src/index.ts"
+      ],
       "@subbatch/runtime": [
         "packages/runtime/src/index.ts"
       ],

@@ -10,6 +10,9 @@ export default defineConfig({
       "@subbatch/bilibili": fileURLToPath(
         new URL("./packages/bilibili/src/index.ts", import.meta.url),
       ),
+      "@subbatch/youtube": fileURLToPath(
+        new URL("./packages/youtube/src/index.ts", import.meta.url),
+      ),
       "@subbatch/runtime": fileURLToPath(
         new URL("./packages/runtime/src/index.ts", import.meta.url),
       ),

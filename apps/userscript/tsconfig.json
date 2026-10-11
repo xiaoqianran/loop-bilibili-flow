@@ -16,6 +16,9 @@
       "path": "../../packages/bilibili"
     },
     {
+      "path": "../../packages/youtube"
+    },
+    {
       "path": "../../packages/runtime"
     },
     {

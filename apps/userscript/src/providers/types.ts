@@ -18,12 +18,14 @@ export interface ContentProvider<TNative = unknown> {
   matches(href: string): boolean;
   resolveCurrent(context: ProviderPageContext): ResolvedContent<TNative> | null;
   activationState?(context: ProviderPageContext): ProviderActivationState;
+  navigationEvents?: readonly string[];
 }
 
 export interface ProviderRegistry {
   match(href: string): ContentProvider | null;
   resolveCurrent(context: ProviderPageContext): ResolvedContent | null;
   activationState(context: ProviderPageContext): ProviderActivationState;
+  navigationEvents(): readonly string[];
 }
 
 export function contentRefKey(ref: ContentRef): string {

@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@subbatch/bilibili": "workspace:*",
+    "@subbatch/youtube": "workspace:*",
     "@subbatch/core": "workspace:*",
     "@subbatch/runtime": "workspace:*",
     "@subbatch/schemas": "workspace:*"

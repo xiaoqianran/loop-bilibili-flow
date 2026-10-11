@@ -2,7 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
 
 const root = process.cwd();
-const packages = ["schemas", "core", "bilibili", "runtime"] as const;
+const packages = ["schemas", "core", "bilibili", "youtube", "runtime"] as const;
 
 const forbiddenPlatform = [
   { name: "Userscript global", pattern: /\bGM_[A-Za-z0-9_]+/ },
@@ -80,9 +80,9 @@ async function main(): Promise<void> {
         `${relative(root, file)}: Bilibili endpoint literal belongs in packages/bilibili`,
       );
     }
-    if (/from\s+["']@subbatch\/bilibili["']/.test(source)) {
+    if (/from\s+["']@subbatch\/(?:bilibili|youtube)["']/.test(source)) {
       violations.push(
-        `${relative(root, file)}: app layer imports Bilibili directly instead of a provider adapter`,
+        `${relative(root, file)}: app layer imports a platform package directly instead of a provider adapter`,
       );
     }
   }
@@ -96,9 +96,9 @@ async function main(): Promise<void> {
   ];
   for (const file of neutralProviderFiles) {
     const source = await readFile(file, "utf8");
-    if (/from\s+["']@subbatch\/bilibili["']/.test(source)) {
+    if (/from\s+["']@subbatch\/(?:bilibili|youtube)["']/.test(source)) {
       violations.push(
-        `${relative(root, file)}: provider-neutral boundary imports Bilibili directly`,
+        `${relative(root, file)}: provider-neutral boundary imports a platform package directly`,
       );
     }
   }
@@ -110,7 +110,7 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    "Architecture boundaries verified: packages are isolated; core/schemas are platform-free; provider-neutral resolver is platform-free; app has no Bilibili endpoint literals",
+    "Architecture boundaries verified: packages are isolated; core/schemas are platform-free; provider-neutral resolver is platform-free; app has no direct platform imports",
   );
 }
 

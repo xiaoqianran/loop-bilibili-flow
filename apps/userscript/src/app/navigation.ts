@@ -1,3 +1,5 @@
+import { providerRegistry } from "../providers";
+
 export interface NavigationLifecycleOptions {
   pageWindow: Window;
   eventWindow: Window;
@@ -9,10 +11,10 @@ export interface NavigationLifecycleOptions {
 }
 
 /**
- * Install browser navigation observation for Bilibili SPA/player changes.
+ * Install browser navigation observation for supported provider SPA/player changes.
  *
- * This owns the imperative history/event wiring; product code only supplies
- * callbacks describing what a navigation means for the application.
+ * Provider-specific navigation event names are declared by provider adapters;
+ * this layer only owns imperative browser event wiring.
  */
 export function observe(
   options: NavigationLifecycleOptions,
@@ -52,6 +54,12 @@ export function observe(
 
   options.pageWindow.addEventListener("popstate", options.onNavigate);
   options.pageWindow.addEventListener("hashchange", options.onNavigate);
+
+  const providerNavigationEvents = providerRegistry.navigationEvents();
+  for (const eventName of providerNavigationEvents) {
+    options.pageWindow.addEventListener(eventName, options.onNavigate);
+  }
+
   options.eventWindow.addEventListener("pageshow", onPageShow);
   options.document.addEventListener("visibilitychange", onVisibilityChange);
   options.document.addEventListener("loadstart", onMediaLoad, true);
@@ -65,6 +73,9 @@ export function observe(
     options.eventWindow.clearInterval(timer);
     options.pageWindow.removeEventListener("popstate", options.onNavigate);
     options.pageWindow.removeEventListener("hashchange", options.onNavigate);
+    for (const eventName of providerNavigationEvents) {
+      options.pageWindow.removeEventListener(eventName, options.onNavigate);
+    }
     options.eventWindow.removeEventListener("pageshow", onPageShow);
     options.document.removeEventListener("visibilitychange", onVisibilityChange);
     options.document.removeEventListener("loadstart", onMediaLoad, true);

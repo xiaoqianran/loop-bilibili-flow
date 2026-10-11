@@ -63,6 +63,24 @@ describe("provider registry", () => {
     ).toBe("ready");
   });
 
+  it("collects provider-declared navigation events without hardcoding platforms", () => {
+    const alpha: ContentProvider = {
+      ...provider("alpha", "alpha.example", "A1"),
+      navigationEvents: ["alpha-navigate", "shared-navigate"],
+    };
+    const beta: ContentProvider = {
+      ...provider("beta", "beta.example", "B1"),
+      navigationEvents: ["shared-navigate", "beta-navigate"],
+    };
+    const registry = createProviderRegistry([alpha, beta]);
+
+    expect(registry.navigationEvents()).toEqual([
+      "alpha-navigate",
+      "shared-navigate",
+      "beta-navigate",
+    ]);
+  });
+
   it("returns null when no provider matches", () => {
     const registry = createProviderRegistry([
       provider("alpha", "alpha.example", "A1"),

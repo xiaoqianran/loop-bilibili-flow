@@ -5,8 +5,10 @@
   "references": [
     { "path": "../packages/core" },
     { "path": "../packages/bilibili" },
+    { "path": "../packages/youtube" },
     { "path": "../packages/runtime" },
     { "path": "../packages/schemas" },
-    { "path": "../apps/userscript" }
+    { "path": "../apps/userscript" },
+    { "path": "../scripts" }
   ]
 }

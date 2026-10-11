@@ -11,6 +11,7 @@
 import * as bilibili from "@subbatch/bilibili";
 import * as core from "@subbatch/core";
 import { userscript as runtimeUserscript } from "@subbatch/runtime";
+import * as youtube from "@subbatch/youtube";
 
 import * as app from "./app";
 import { createUserscriptHost } from "./userscript-host";
@@ -25,10 +26,11 @@ const runtime = runtimeUserscript.create(host);
  * only wires modules together.
  */
 const SubBatchMonorepo = {
-  version: "6.9.16",
+  version: "6.9.17",
   runtime,
   core,
   bilibili,
+  youtube,
   app,
 };
 

@@ -28,5 +28,9 @@ export function createProviderRegistry(
       const provider = list.find((candidate) => candidate.matches(context.href));
       return provider?.activationState?.(context) ?? "ready";
     },
+
+    navigationEvents(): readonly string[] {
+      return [...new Set(list.flatMap((provider) => provider.navigationEvents ?? []))];
+    },
   };
 }

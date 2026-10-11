@@ -10,6 +10,7 @@ import {
 } from "../apps/userscript/metadata";
 import {
   COMPAT_BODY_MARKER,
+  guardCompatRuntimeForBilibili,
   stripUserscriptMetadata,
 } from "./userscript-build-utils";
 
@@ -104,7 +105,9 @@ async function buildFullUserscript(): Promise<void> {
     buildBundle(),
     readFile(maintainedSourcePath, "utf8"),
   ]);
-  const maintainedBody = stripUserscriptMetadata(maintainedSource);
+  const maintainedBody = guardCompatRuntimeForBilibili(
+    stripUserscriptMetadata(maintainedSource),
+  );
   const output = [
     renderUserscriptMetadata(userscriptMetadata),
     "",
