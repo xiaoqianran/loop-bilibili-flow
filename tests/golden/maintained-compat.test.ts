@@ -25,6 +25,11 @@ function functionNames(source: string): Set<string> {
 }
 
 describe("Maintained full-feature compatibility source", () => {
+  it("delegates pointer event ownership to the extracted Studio shell controller", () => {
+    expect(maintainedSource).toContain("ui?.panelPointer?.bindPanelPointerController");
+    expect(maintainedSource).not.toContain('head.addEventListener("pointerdown"');
+    expect(maintainedSource).not.toContain('handle.addEventListener("pointermove"');
+  });
   it("routes both collection metadata lookups through the canonical acquisition owner", () => {
     expect(maintainedSource).not.toMatch(/await viewDetail\(/);
     expect(
@@ -42,6 +47,8 @@ describe("Maintained full-feature compatibility source", () => {
       "aiSubtitleStat",
       "collectTracks",
       "dmViewSubs",
+      "endDrag",
+      "endResize",
       "encWbi",
       "extractAssistantText",
       "extractFromChoice",

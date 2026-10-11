@@ -4230,10 +4230,87 @@ ${prompt2.userPromptTemplate}`
     shouldAutoHideDock,
     snapPanelSide
   }, Symbol.toStringTag, { value: "Module" }));
+  function bindPanelPointerController(options) {
+    const { root } = options;
+    const sidebar = root.querySelector(".bsb-sidebar");
+    const head = root.querySelector(".bsb-head");
+    if (!sidebar || !head) throw new Error("Studio shell pointer elements are missing");
+    let drag = null;
+    head.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || event.target.closest("button, select, input, a, label")) return;
+      const ui2 = options.getState();
+      if (ui2.dock) {
+        options.update({ dock: null, dockExpanded: false });
+        options.setOpen(true);
+      }
+      drag = { pid: event.pointerId, ox: event.clientX - ui2.x, oy: event.clientY - ui2.y };
+      head.setPointerCapture(event.pointerId);
+      sidebar.classList.add("dragging");
+      event.preventDefault();
+    });
+    head.addEventListener("pointermove", (event) => {
+      if (!drag || event.pointerId !== drag.pid) return;
+      const viewport = options.viewport();
+      const next = clampPanelRect(movePanel(options.getState(), drag, event.clientX, event.clientY), viewport.width, viewport.height);
+      options.update(next);
+      options.render();
+    });
+    const endDrag = (event) => {
+      if (!drag || event.pointerId !== drag.pid) return;
+      drag = null;
+      sidebar.classList.remove("dragging");
+      const side = snapPanelSide(options.getState(), options.viewport().width, options.snapThreshold);
+      if (side) options.setDock(side);
+      else options.persist();
+    };
+    head.addEventListener("pointerup", endDrag);
+    head.addEventListener("pointercancel", endDrag);
+    root.querySelectorAll(".bsb-resize").forEach((handle) => {
+      let resize = null;
+      handle.addEventListener("pointerdown", (event) => {
+        const ui2 = options.getState();
+        if (event.button !== 0 || ui2.dock) return;
+        resize = {
+          pid: event.pointerId,
+          dir: handle.getAttribute("data-dir") || "",
+          sx: event.clientX,
+          sy: event.clientY,
+          ox: ui2.x,
+          oy: ui2.y,
+          ow: ui2.w,
+          oh: ui2.h
+        };
+        handle.setPointerCapture(event.pointerId);
+        sidebar.classList.add("resizing");
+        event.preventDefault();
+        event.stopPropagation();
+      });
+      handle.addEventListener("pointermove", (event) => {
+        if (!resize || event.pointerId !== resize.pid) return;
+        const viewport = options.viewport();
+        const next = clampPanelRect(resizePanel(options.getState(), resize, event.clientX, event.clientY), viewport.width, viewport.height);
+        options.update(next);
+        options.render();
+      });
+      const endResize = (event) => {
+        if (!resize || event.pointerId !== resize.pid) return;
+        resize = null;
+        sidebar.classList.remove("resizing");
+        options.persist();
+      };
+      handle.addEventListener("pointerup", endResize);
+      handle.addEventListener("pointercancel", endResize);
+    });
+  }
+  const pointerController = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    bindPanelPointerController
+  }, Symbol.toStringTag, { value: "Module" }));
   const ui = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
     panelGeometry: geometry,
     panelInteraction: interaction,
+    panelPointer: pointerController,
     panelState: state
   }, Symbol.toStringTag, { value: "Module" }));
   function parseResponseHeaders(raw) {
@@ -11218,81 +11295,21 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
     sidebar.addEventListener("mouseleave", () => scheduleAutoHide());
     dockTab.addEventListener("mouseleave", () => scheduleAutoHide());
 
-    // ── drag ──
-    let drag = null;
-    head.addEventListener("pointerdown", (e) => {
-      if (e.button !== 0) return;
-      if (e.target.closest("button, select, input, a, label")) return;
-      if (state.ui.dock) {
-        // 贴边时拖标题：取消贴边进入悬浮
-        state.ui.dock = null;
-        state.ui.dockExpanded = false;
-        state.open = true;
-      }
-      drag = {
-        pid: e.pointerId,
-        ox: e.clientX - state.ui.x,
-        oy: e.clientY - state.ui.y,
-      };
-      head.setPointerCapture(e.pointerId);
-      sidebar.classList.add("dragging");
-      e.preventDefault();
+    const pointerController = typeof SubBatch !== "undefined"
+      ? SubBatch?.SubBatchMonorepo?.ui?.panelPointer?.bindPanelPointerController
+      : null;
+    if (typeof pointerController !== "function") throw new Error("[bili-subbatch] missing panel pointer controller");
+    pointerController({
+      root,
+      getState: () => state.ui,
+      update: (patch) => Object.assign(state.ui, patch),
+      setOpen: (open) => { state.open = open; },
+      setDock,
+      render: applyPanelGeometry,
+      persist: saveUiGeom,
+      viewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
+      snapThreshold: DOCK_SNAP_PX,
     });
-    head.addEventListener("pointermove", (e) => {
-      if (!drag || e.pointerId !== drag.pid) return;
-      Object.assign(state.ui, panelInteractionCall("movePanel", state.ui, drag, e.clientX, e.clientY));
-      clampUiToViewport(state.ui);
-      applyPanelGeometry();
-    });
-    function endDrag(e) {
-      if (!drag || (e && e.pointerId !== drag.pid)) return;
-      drag = null;
-      sidebar.classList.remove("dragging");
-      // 贴边吸附
-      const snap = panelInteractionCall("snapPanelSide", state.ui, window.innerWidth, DOCK_SNAP_PX);
-      if (snap) setDock(snap);
-      else saveUiGeom();
-    }
-    head.addEventListener("pointerup", endDrag);
-    head.addEventListener("pointercancel", endDrag);
-
-    // ── resize ──
-    let resize = null;
-    root.querySelectorAll(".bsb-resize").forEach((handle) => {
-      handle.addEventListener("pointerdown", (e) => {
-        if (e.button !== 0 || state.ui.dock) return;
-        const dir = handle.getAttribute("data-dir");
-        resize = {
-          pid: e.pointerId,
-          dir,
-          sx: e.clientX,
-          sy: e.clientY,
-          ox: state.ui.x,
-          oy: state.ui.y,
-          ow: state.ui.w,
-          oh: state.ui.h,
-        };
-        handle.setPointerCapture(e.pointerId);
-        sidebar.classList.add("resizing");
-        e.preventDefault();
-        e.stopPropagation();
-      });
-      handle.addEventListener("pointermove", (e) => {
-        if (!resize || e.pointerId !== resize.pid) return;
-        Object.assign(state.ui, panelInteractionCall("resizePanel", state.ui, resize, e.clientX, e.clientY));
-        clampUiToViewport(state.ui);
-        applyPanelGeometry();
-      });
-      function endResize(e) {
-        if (!resize || (e && e.pointerId !== resize.pid)) return;
-        resize = null;
-        sidebar.classList.remove("resizing");
-        saveUiGeom();
-      }
-      handle.addEventListener("pointerup", endResize);
-      handle.addEventListener("pointercancel", endResize);
-    });
-
     window.addEventListener("resize", () => {
       if (!state.ui) return;
       clampUiToViewport(state.ui);
