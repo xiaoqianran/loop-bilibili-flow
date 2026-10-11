@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { renderShellStyles } from "../../apps/userscript/src/ui/shell/styles";
+import { renderAiWorkspace } from "../../apps/userscript/src/ui/workspaces/ai-markup";
+import { renderKnowledgeWorkspaceMarkup } from "../../apps/userscript/src/ui/workspaces/knowledge-markup";
 
 import {
   extractFunctionSource,
@@ -330,8 +332,8 @@ describe("Maintained full-feature compatibility source", () => {
     expect(maintainedSource).toContain("function knowledgeNavigatorHtml(");
     expect(maintainedSource).toContain("function knowledgeReaderHtml(");
     expect(maintainedSource).toContain("function knowledgeContextHtml(");
-    expect(maintainedSource).toContain('data-role="knowledge-nav"');
-    expect(maintainedSource).toContain('data-role="knowledge-nav-split"');
+    expect(renderKnowledgeWorkspaceMarkup()).toContain('data-role="knowledge-nav"');
+    expect(renderKnowledgeWorkspaceMarkup()).toContain('data-role="knowledge-nav-split"');
     expect(maintainedSource).toContain("bsb-knowledge-reader");
     expect(maintainedSource).toContain("bsb-knowledge-evidence-chip");
     expect(maintainedSource).toContain("knowledgeNavW");
@@ -388,7 +390,7 @@ describe("Maintained full-feature compatibility source", () => {
     expect(maintainedSource).toContain("function bindFlowModelDrag(");
     expect(maintainedSource).toContain("function compressStudioTranscript(");
     expect(maintainedSource).toContain("function refreshStudioMemory(");
-    expect(maintainedSource).toContain("data-ai-stage=\"chat\"");
+    expect(renderAiWorkspace()).toContain("data-ai-stage=\"chat\"");
     expect(maintainedSource).toContain("看完能懂");
     expect(maintainedSource).toContain("builtin-html-reading-folio");
     expect(maintainedSource).toContain("function extractHtmlFolioSource(");
