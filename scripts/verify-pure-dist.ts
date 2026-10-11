@@ -30,7 +30,9 @@ async function verify(): Promise<void> {
   if (output.includes(COMPAT_BODY_MARKER)) {
     throw new Error("Pure laboratory output must not include the maintained behavior body");
   }
-  if (outputStats.size > 350_000) {
+  // Pure exports the UI composition API: migrating CSS/markup from Compat legitimately grows this bundle.
+  // Keep a generous finite guard; the compatibility body is independently forbidden above.
+  if (outputStats.size > 500_000) {
     throw new Error(`Pure output is suspiciously large (${outputStats.size} bytes)`);
   }
   if (

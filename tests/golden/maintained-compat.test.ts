@@ -6,6 +6,7 @@ import { renderAiWorkspace } from "../../apps/userscript/src/ui/workspaces/ai-ma
 import { renderKnowledgeDrilldownStyles } from "../../apps/userscript/src/ui/workspaces/knowledge-styles";
 import { renderAiStyles } from "../../apps/userscript/src/ui/workspaces/ai-styles";
 import { renderReadingStyles } from "../../apps/userscript/src/ui/workspaces/reading-styles";
+import { renderWorkspaceOverrides } from "../../apps/userscript/src/ui/workspaces/workspace-overrides-styles";
 import { renderKnowledgeWorkspaceMarkup } from "../../apps/userscript/src/ui/workspaces/knowledge-markup";
 
 import {
@@ -349,7 +350,7 @@ describe("Maintained full-feature compatibility source", () => {
     expect(maintainedSource).not.toMatch(
       /\[data-view-panel="knowledge"\]\s*\{\s*min-height:0;\s*height:100%;\s*display:flex/,
     );
-    expect(maintainedSource).toContain(
+    expect(renderWorkspaceOverrides("bili-subbatch-panel")).toContain(
       '.bsb-view[data-view-panel="knowledge"]',
     );
     // Knowledge answers reuse AI 处理字幕 segmented card chrome.
@@ -383,7 +384,7 @@ describe("Maintained full-feature compatibility source", () => {
     expect(startSource).toContain("isDeferredVideoCarrierPage(location.href)");
     expect(maintainedSource).toContain('bilibiliFn("extractPlayingVideoHint")');
     expect(renderShellStyles("bili-subbatch-panel", 420, 520, 32)).toContain("--bsb-ui-font: 14px");
-    expect(maintainedSource).toContain("font-size: 14px !important");
+    expect(renderWorkspaceOverrides("bili-subbatch-panel")).toContain("font-size: 14px !important");
     expect(maintainedSource).toContain("CORE_LOCAL_FALLBACKS");
     expect(maintainedSource).toContain("NOTE_FONT_DEFAULT = 14");
     expect(renderShellStyles("bili-subbatch-panel", 420, 520, 32)).toContain("--bsb-knowledge-font: 14px");
