@@ -2895,6 +2895,14 @@
     return panelGeometryCall("panelPresetWidth", name, viewportWidth);
   }
 
+  function panelStateCall(name, ...args) {
+    const fn = typeof SubBatch !== "undefined"
+      ? SubBatch?.SubBatchMonorepo?.ui?.panelState?.[name]
+      : null;
+    if (typeof fn !== "function") throw new Error(`[bili-subbatch] panel state API missing "${name}"`);
+    return fn(...args);
+  }
+
   function highPanelHeight(viewportHeight = window.innerHeight) {
     return panelGeometryCall("highPanelHeight", viewportHeight);
   }
@@ -6618,16 +6626,15 @@
     applyCtpFlavor(state.ui.ctpFlavor, { silent: true, persist: false });
 
     function setOpen(open) {
-      state.open = open;
+      const next = panelStateCall("setPanelOpen", { ...state.ui, open: state.open, aiFocus: state.aiFocus }, open);
+      state.open = next.open;
+      state.aiFocus = next.aiFocus;
+      state.ui.dock = next.dock;
+      state.ui.dockExpanded = next.dockExpanded;
       if (open) {
-        // 从收起打开时，若已 dock 则展开；否则悬浮
-        if (state.ui.dock) state.ui.dockExpanded = true;
         refreshContextUI();
       } else {
         closeMermaidFullscreen();
-        state.aiFocus = false;
-        state.ui.dock = null;
-        state.ui.dockExpanded = false;
       }
       applyPanelGeometry();
       saveUiGeom();
@@ -6635,21 +6642,12 @@
 
     function setDock(side) {
       // side: 'left' | 'right' | null
+      const next = panelStateCall("setPanelDock", { ...state.ui, open: state.open, aiFocus: state.aiFocus }, side, window.innerWidth);
+      Object.assign(state.ui, { dock: next.dock, dockExpanded: next.dockExpanded, x: next.x });
+      state.open = next.open;
+      state.aiFocus = next.aiFocus;
       if (side) {
         closeMermaidFullscreen();
-        state.aiFocus = false;
-        state.open = true;
-        state.ui.dock = side;
-        state.ui.dockExpanded = false;
-        if (side === "right") {
-          state.ui.x = Math.max(0, window.innerWidth - state.ui.w - 12);
-        } else {
-          state.ui.x = 12;
-        }
-      } else {
-        state.ui.dock = null;
-        state.ui.dockExpanded = false;
-        state.open = true;
       }
       applyPanelGeometry();
       saveUiGeom();
@@ -6662,9 +6660,9 @@
 
     function toggleDockExpanded(force) {
       if (!state.ui.dock) return;
-      state.ui.dockExpanded =
-        typeof force === "boolean" ? force : !state.ui.dockExpanded;
-      state.open = true;
+      const next = panelStateCall("expandPanelDock", { ...state.ui, open: state.open, aiFocus: state.aiFocus }, force);
+      state.ui.dockExpanded = next.dockExpanded;
+      state.open = next.open;
       applyPanelGeometry();
       if (state.ui.dockExpanded) refreshContextUI();
     }

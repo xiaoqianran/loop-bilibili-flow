@@ -241,11 +241,11 @@ var SubBatch = (function(exports) {
     if (!root) return {};
     const player = asRecord$1(root.player);
     const manifest = asRecord$1(callMethod(player, "getManifest")) || asRecord$1(callMethod(player, "getPlayerInfo")) || asRecord$1(callMethod(player, "getVideoMessage"));
-    const state = asRecord$1(root.__INITIAL_STATE__);
+    const state2 = asRecord$1(root.__INITIAL_STATE__);
     const playinfo = asRecord$1(root.__playinfo__) || asRecord$1(root.__PLAYINFO__);
     const playData = asRecord$1(playinfo?.data) || playinfo;
-    const videoData = asRecord$1(state?.videoData) || asRecord$1(state?.videoInfo);
-    const epInfo = asRecord$1(state?.epInfo);
+    const videoData = asRecord$1(state2?.videoData) || asRecord$1(state2?.videoInfo);
+    const epInfo = asRecord$1(state2?.epInfo);
     const pages = Array.isArray(manifest?.pages) ? manifest.pages : Array.isArray(videoData?.pages) ? videoData.pages : Array.isArray(epInfo?.pages) ? epInfo.pages : null;
     const hint = {};
     const playerCid = readPositiveNumber(manifest?.cid) || readPositiveNumber(callMethod(player, "getCid")) || readPositiveNumber(player?.cid);
@@ -269,18 +269,18 @@ var SubBatch = (function(exports) {
       if (cid) hint.cid = cid;
     }
     if (!hint.bvid) {
-      const bvid = firstBvid(videoData?.bvid, epInfo?.bvid, state?.bvid);
+      const bvid = firstBvid(videoData?.bvid, epInfo?.bvid, state2?.bvid);
       if (bvid) {
         hint.bvid = bvid;
         hint.source = hint.source || "initial-state";
       }
     }
     if (!hint.cid) {
-      const cid = readPositiveNumber(videoData?.cid) || readPositiveNumber(epInfo?.cid) || readPositiveNumber(state?.cid);
+      const cid = readPositiveNumber(videoData?.cid) || readPositiveNumber(epInfo?.cid) || readPositiveNumber(state2?.cid);
       if (cid) hint.cid = cid;
     }
     if (!hint.page) {
-      const page = pageFromCid(pages, hint.cid) || readPositiveNumber(state?.p) || readPositiveNumber(videoData?.p);
+      const page = pageFromCid(pages, hint.cid) || readPositiveNumber(state2?.p) || readPositiveNumber(videoData?.p);
       if (page) hint.page = page;
     }
     if (!hint.aid) {
@@ -4142,9 +4142,47 @@ ${prompt2.userPromptTemplate}`
     panelPresetWidth,
     panelSizeClassFromWidth
   }, Symbol.toStringTag, { value: "Module" }));
+  function setPanelOpen(state2, open) {
+    return {
+      ...state2,
+      open,
+      dock: open ? state2.dock : null,
+      dockExpanded: open ? Boolean(state2.dock) : false,
+      aiFocus: open ? state2.aiFocus : false
+    };
+  }
+  function setPanelDock(state2, side, viewportWidth) {
+    return {
+      ...state2,
+      open: true,
+      aiFocus: side ? false : state2.aiFocus,
+      dock: side,
+      dockExpanded: false,
+      x: side === "right" ? Math.max(0, viewportWidth - state2.w - 12) : side === "left" ? 12 : state2.x
+    };
+  }
+  function expandPanelDock(state2, force) {
+    if (!state2.dock) return { ...state2 };
+    return {
+      ...state2,
+      open: true,
+      dockExpanded: typeof force === "boolean" ? force : !state2.dockExpanded
+    };
+  }
+  function preferredDockSide(state2, viewportWidth) {
+    return state2.x + state2.w / 2 < viewportWidth / 2 ? "left" : "right";
+  }
+  const state = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    expandPanelDock,
+    preferredDockSide,
+    setPanelDock,
+    setPanelOpen
+  }, Symbol.toStringTag, { value: "Module" }));
   const ui = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
-    panelGeometry: geometry
+    panelGeometry: geometry,
+    panelState: state
   }, Symbol.toStringTag, { value: "Module" }));
   function parseResponseHeaders(raw) {
     const headers = {};
@@ -7271,6 +7309,14 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
 
   function panelPresetWidth(name, viewportWidth = window.innerWidth) {
     return panelGeometryCall("panelPresetWidth", name, viewportWidth);
+  }
+
+  function panelStateCall(name, ...args) {
+    const fn = typeof SubBatch !== "undefined"
+      ? SubBatch?.SubBatchMonorepo?.ui?.panelState?.[name]
+      : null;
+    if (typeof fn !== "function") throw new Error(`[bili-subbatch] panel state API missing "${name}"`);
+    return fn(...args);
   }
 
   function highPanelHeight(viewportHeight = window.innerHeight) {
@@ -10996,16 +11042,15 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
     applyCtpFlavor(state.ui.ctpFlavor, { silent: true, persist: false });
 
     function setOpen(open) {
-      state.open = open;
+      const next = panelStateCall("setPanelOpen", { ...state.ui, open: state.open, aiFocus: state.aiFocus }, open);
+      state.open = next.open;
+      state.aiFocus = next.aiFocus;
+      state.ui.dock = next.dock;
+      state.ui.dockExpanded = next.dockExpanded;
       if (open) {
-        // 从收起打开时，若已 dock 则展开；否则悬浮
-        if (state.ui.dock) state.ui.dockExpanded = true;
         refreshContextUI();
       } else {
         closeMermaidFullscreen();
-        state.aiFocus = false;
-        state.ui.dock = null;
-        state.ui.dockExpanded = false;
       }
       applyPanelGeometry();
       saveUiGeom();
@@ -11013,21 +11058,12 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
 
     function setDock(side) {
       // side: 'left' | 'right' | null
+      const next = panelStateCall("setPanelDock", { ...state.ui, open: state.open, aiFocus: state.aiFocus }, side, window.innerWidth);
+      Object.assign(state.ui, { dock: next.dock, dockExpanded: next.dockExpanded, x: next.x });
+      state.open = next.open;
+      state.aiFocus = next.aiFocus;
       if (side) {
         closeMermaidFullscreen();
-        state.aiFocus = false;
-        state.open = true;
-        state.ui.dock = side;
-        state.ui.dockExpanded = false;
-        if (side === "right") {
-          state.ui.x = Math.max(0, window.innerWidth - state.ui.w - 12);
-        } else {
-          state.ui.x = 12;
-        }
-      } else {
-        state.ui.dock = null;
-        state.ui.dockExpanded = false;
-        state.open = true;
       }
       applyPanelGeometry();
       saveUiGeom();
@@ -11040,9 +11076,9 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
 
     function toggleDockExpanded(force) {
       if (!state.ui.dock) return;
-      state.ui.dockExpanded =
-        typeof force === "boolean" ? force : !state.ui.dockExpanded;
-      state.open = true;
+      const next = panelStateCall("expandPanelDock", { ...state.ui, open: state.open, aiFocus: state.aiFocus }, force);
+      state.ui.dockExpanded = next.dockExpanded;
+      state.open = next.open;
       applyPanelGeometry();
       if (state.ui.dockExpanded) refreshContextUI();
     }
