@@ -3,3 +3,4 @@ export * as panelState from "./shell/state";
 export * as panelInteraction from "./shell/interaction";
 export * as panelPointer from "./shell/pointer-controller";
 export * as panelChrome from "./shell/chrome-controller";
+export * as panelMarkup from "./shell/markup";

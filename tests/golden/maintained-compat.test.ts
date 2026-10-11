@@ -25,6 +25,10 @@ function functionNames(source: string): Set<string> {
 }
 
 describe("Maintained full-feature compatibility source", () => {
+  it("renders Studio chrome header from the extracted UI shell", () => {
+    expect(maintainedSource).toContain("ui.panelMarkup.renderPanelHeader(SCRIPT_VERSION)");
+    expect(maintainedSource).not.toContain('<div class="bsb-size-switch" role="group"');
+  });
   it("delegates pointer event ownership to the extracted Studio shell controller", () => {
     expect(maintainedSource).toContain("ui?.panelPointer?.bindPanelPointerController");
     expect(maintainedSource).not.toContain('head.addEventListener("pointerdown"');
