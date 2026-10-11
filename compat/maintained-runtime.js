@@ -16151,7 +16151,7 @@ body{padding:48px 20px 80px}
     const bvid = ctx.bvid || extractBvid(location.href);
     if (!bvid) return ctx;
     try {
-      const detail = await viewDetail(bvid);
+      const detail = await appCall("acquisition.fetchVideoDetail", runtimeNetwork(), bvid);
       const view = (detail && detail.data && detail.data.View) || {};
       const season = view.ugc_season || {};
       const mid = season.mid || view.owner?.mid || ctx.mid;
@@ -16173,7 +16173,7 @@ body{padding:48px 20px 80px}
     const id = bvid || list[0]?.bvid;
     if (!id) return list;
     try {
-      const detail = await viewDetail(id);
+      const detail = await appCall("acquisition.fetchVideoDetail", runtimeNetwork(), id);
       const view = (detail && detail.data && detail.data.View) || {};
       if (!view.ugc_season?.id) return list;
       return applyUgcSeasonToItems(list, view);

@@ -261,6 +261,11 @@ export function createUserscriptHost(): UserscriptHost {
       if (typeof GM_deleteValue === "function") GM_deleteValue(key);
     },
     request: async (url, request) => {
+      // This CDN responds with ACAO:*; credentialed page fetch is blocked.
+      // Avoid the noisy failed request and use the privileged transport.
+      if (new URL(url, pageHrefOf(pageWindow)).hostname === "aisubtitle.hdslb.com") {
+        return privilegedRequest(url, request);
+      }
       try {
         const response = await fetchRequest(pageWindow, url, request);
         if (!response.ok && mayRetryHttpFailure(request ?? {})) {

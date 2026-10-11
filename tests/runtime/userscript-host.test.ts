@@ -31,6 +31,23 @@ afterEach(() => {
 });
 
 describe("Userscript host network policy", () => {
+  it("uses GM directly for AI subtitle CDN without attempting a credentialed CORS fetch", async () => {
+    const fetchMock = vi.fn();
+    installBrowserGlobals(fetchMock);
+    const gmRequest = vi.fn((details: GmTestRequestDetails) => {
+      queueMicrotask(() => details.onload({ status: 200, responseText: '{"body":[]}' }));
+      return { abort: vi.fn() };
+    });
+    vi.stubGlobal("GM_xmlhttpRequest", gmRequest);
+    const response = await createUserscriptHost().request(
+      "https://aisubtitle.hdslb.com/bfs/ai_subtitle/prod/example?auth_key=test",
+      { credentials: "include", fallback: "network-or-http" },
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(gmRequest).toHaveBeenCalledTimes(1);
+    expect(response).toMatchObject({ ok: true, status: 200 });
+  });
+
   it("uses page fetch credentials and retries failed idempotent requests via GM", async () => {
     const fetchMock = vi.fn(async () =>
       new Response("unauthorized", { status: 401 }),

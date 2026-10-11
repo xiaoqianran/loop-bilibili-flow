@@ -25,6 +25,13 @@ function functionNames(source: string): Set<string> {
 }
 
 describe("Maintained full-feature compatibility source", () => {
+  it("routes both collection metadata lookups through the canonical acquisition owner", () => {
+    expect(maintainedSource).not.toMatch(/await viewDetail\(/);
+    expect(
+      maintainedSource.match(/await appCall\("acquisition\.fetchVideoDetail", runtimeNetwork\(\), (?:bvid|id)\)/g),
+    ).toHaveLength(3); // fetchSubtitle already used the canonical acquisition owner.
+  });
+
   it("only removes functions that have a registered canonical owner", () => {
     const baselineNames = functionNames(legacySource);
     const maintainedNames = functionNames(maintainedSource);
