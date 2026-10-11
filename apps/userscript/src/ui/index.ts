@@ -16,3 +16,4 @@ export * as knowledgeWorkspaceStyles from "./workspaces/knowledge-workspace-styl
 export * as readingStyles from "./workspaces/reading-styles";
 export * as folioStyles from "./workspaces/folio-styles";
 export * as workspaceOverrides from "./workspaces/workspace-overrides-styles";
+export * as lateStudioStyles from "./workspaces/late-styles";
