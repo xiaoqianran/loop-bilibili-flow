@@ -4179,9 +4179,61 @@ ${prompt2.userPromptTemplate}`
     setPanelDock,
     setPanelOpen
   }, Symbol.toStringTag, { value: "Module" }));
+  function movePanel(ui2, drag, clientX, clientY) {
+    return { ...ui2, x: clientX - drag.ox, y: clientY - drag.oy };
+  }
+  function resizePanel(ui2, drag, clientX, clientY) {
+    const dx = clientX - drag.sx;
+    const dy = clientY - drag.sy;
+    const d = drag.dir;
+    let { x, y, w, h } = { x: drag.ox, y: drag.oy, w: drag.ow, h: drag.oh };
+    if (d.includes("e")) w = drag.ow + dx;
+    if (d.includes("s")) h = drag.oh + dy;
+    if (d.includes("w")) {
+      w = drag.ow - dx;
+      x = drag.ox + dx;
+    }
+    if (d.includes("n")) {
+      h = drag.oh - dy;
+      y = drag.oy + dy;
+    }
+    if (w < MIN_PANEL_WIDTH) {
+      if (d.includes("w")) x = drag.ox + drag.ow - MIN_PANEL_WIDTH;
+      w = MIN_PANEL_WIDTH;
+    }
+    if (h < MIN_PANEL_HEIGHT) {
+      if (d.includes("n")) y = drag.oy + drag.oh - MIN_PANEL_HEIGHT;
+      h = MIN_PANEL_HEIGHT;
+    }
+    return {
+      ...ui2,
+      x,
+      y,
+      w,
+      h,
+      sizePreset: d.includes("e") || d.includes("w") ? "custom" : ui2.sizePreset,
+      heightMode: d.includes("n") || d.includes("s") ? "custom" : ui2.heightMode
+    };
+  }
+  function snapPanelSide(ui2, viewportWidth, threshold = 36) {
+    if (ui2.x <= threshold) return "left";
+    if (ui2.x + ui2.w >= viewportWidth - threshold) return "right";
+    return null;
+  }
+  function shouldAutoHideDock(dock, expanded, pointerHover) {
+    return Boolean(dock && expanded && !pointerHover);
+  }
+  const interaction = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    movePanel,
+    resizePanel,
+    shouldAutoHideDock,
+    snapPanelSide
+  }, Symbol.toStringTag, { value: "Module" }));
   const ui = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
     panelGeometry: geometry,
+    panelInteraction: interaction,
     panelState: state
   }, Symbol.toStringTag, { value: "Module" }));
   function parseResponseHeaders(raw) {
@@ -7316,6 +7368,14 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
       ? SubBatch?.SubBatchMonorepo?.ui?.panelState?.[name]
       : null;
     if (typeof fn !== "function") throw new Error(`[bili-subbatch] panel state API missing "${name}"`);
+    return fn(...args);
+  }
+
+  function panelInteractionCall(name, ...args) {
+    const fn = typeof SubBatch !== "undefined"
+      ? SubBatch?.SubBatchMonorepo?.ui?.panelInteraction?.[name]
+      : null;
+    if (typeof fn !== "function") throw new Error(`[bili-subbatch] panel interaction API missing "${name}"`);
     return fn(...args);
   }
 
@@ -11094,8 +11154,9 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
           scheduleAutoHide();
           return;
         }
-        state.ui.dockExpanded = false;
-        applyPanelGeometry();
+        if (panelInteractionCall("shouldAutoHideDock", state.ui.dock, state.ui.dockExpanded, false)) {
+          toggleDockExpanded(false);
+        }
       }, 700);
     }
 
@@ -11179,8 +11240,7 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
     });
     head.addEventListener("pointermove", (e) => {
       if (!drag || e.pointerId !== drag.pid) return;
-      state.ui.x = e.clientX - drag.ox;
-      state.ui.y = e.clientY - drag.oy;
+      Object.assign(state.ui, panelInteractionCall("movePanel", state.ui, drag, e.clientX, e.clientY));
       clampUiToViewport(state.ui);
       applyPanelGeometry();
     });
@@ -11189,13 +11249,9 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
       drag = null;
       sidebar.classList.remove("dragging");
       // 贴边吸附
-      if (state.ui.x <= DOCK_SNAP_PX) {
-        setDock("left");
-      } else if (state.ui.x + state.ui.w >= window.innerWidth - DOCK_SNAP_PX) {
-        setDock("right");
-      } else {
-        saveUiGeom();
-      }
+      const snap = panelInteractionCall("snapPanelSide", state.ui, window.innerWidth, DOCK_SNAP_PX);
+      if (snap) setDock(snap);
+      else saveUiGeom();
     }
     head.addEventListener("pointerup", endDrag);
     head.addEventListener("pointercancel", endDrag);
@@ -11223,39 +11279,7 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
       });
       handle.addEventListener("pointermove", (e) => {
         if (!resize || e.pointerId !== resize.pid) return;
-        const dx = e.clientX - resize.sx;
-        const dy = e.clientY - resize.sy;
-        let { x, y, w, h } = {
-          x: resize.ox,
-          y: resize.oy,
-          w: resize.ow,
-          h: resize.oh,
-        };
-        const d = resize.dir;
-        if (d.includes("e")) w = resize.ow + dx;
-        if (d.includes("s")) h = resize.oh + dy;
-        if (d.includes("w")) {
-          w = resize.ow - dx;
-          x = resize.ox + dx;
-        }
-        if (d.includes("n")) {
-          h = resize.oh - dy;
-          y = resize.oy + dy;
-        }
-        if (w < MIN_W) {
-          if (d.includes("w")) x = resize.ox + (resize.ow - MIN_W);
-          w = MIN_W;
-        }
-        if (h < MIN_H) {
-          if (d.includes("n")) y = resize.oy + (resize.oh - MIN_H);
-          h = MIN_H;
-        }
-        if (d.includes("e") || d.includes("w")) state.ui.sizePreset = "custom";
-        if (d.includes("n") || d.includes("s")) state.ui.heightMode = "custom";
-        state.ui.x = x;
-        state.ui.y = y;
-        state.ui.w = w;
-        state.ui.h = h;
+        Object.assign(state.ui, panelInteractionCall("resizePanel", state.ui, resize, e.clientX, e.clientY));
         clampUiToViewport(state.ui);
         applyPanelGeometry();
       });

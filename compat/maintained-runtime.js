@@ -2903,6 +2903,14 @@
     return fn(...args);
   }
 
+  function panelInteractionCall(name, ...args) {
+    const fn = typeof SubBatch !== "undefined"
+      ? SubBatch?.SubBatchMonorepo?.ui?.panelInteraction?.[name]
+      : null;
+    if (typeof fn !== "function") throw new Error(`[bili-subbatch] panel interaction API missing "${name}"`);
+    return fn(...args);
+  }
+
   function highPanelHeight(viewportHeight = window.innerHeight) {
     return panelGeometryCall("highPanelHeight", viewportHeight);
   }
@@ -6678,8 +6686,9 @@
           scheduleAutoHide();
           return;
         }
-        state.ui.dockExpanded = false;
-        applyPanelGeometry();
+        if (panelInteractionCall("shouldAutoHideDock", state.ui.dock, state.ui.dockExpanded, false)) {
+          toggleDockExpanded(false);
+        }
       }, 700);
     }
 
@@ -6763,8 +6772,7 @@
     });
     head.addEventListener("pointermove", (e) => {
       if (!drag || e.pointerId !== drag.pid) return;
-      state.ui.x = e.clientX - drag.ox;
-      state.ui.y = e.clientY - drag.oy;
+      Object.assign(state.ui, panelInteractionCall("movePanel", state.ui, drag, e.clientX, e.clientY));
       clampUiToViewport(state.ui);
       applyPanelGeometry();
     });
@@ -6773,13 +6781,9 @@
       drag = null;
       sidebar.classList.remove("dragging");
       // 贴边吸附
-      if (state.ui.x <= DOCK_SNAP_PX) {
-        setDock("left");
-      } else if (state.ui.x + state.ui.w >= window.innerWidth - DOCK_SNAP_PX) {
-        setDock("right");
-      } else {
-        saveUiGeom();
-      }
+      const snap = panelInteractionCall("snapPanelSide", state.ui, window.innerWidth, DOCK_SNAP_PX);
+      if (snap) setDock(snap);
+      else saveUiGeom();
     }
     head.addEventListener("pointerup", endDrag);
     head.addEventListener("pointercancel", endDrag);
@@ -6807,39 +6811,7 @@
       });
       handle.addEventListener("pointermove", (e) => {
         if (!resize || e.pointerId !== resize.pid) return;
-        const dx = e.clientX - resize.sx;
-        const dy = e.clientY - resize.sy;
-        let { x, y, w, h } = {
-          x: resize.ox,
-          y: resize.oy,
-          w: resize.ow,
-          h: resize.oh,
-        };
-        const d = resize.dir;
-        if (d.includes("e")) w = resize.ow + dx;
-        if (d.includes("s")) h = resize.oh + dy;
-        if (d.includes("w")) {
-          w = resize.ow - dx;
-          x = resize.ox + dx;
-        }
-        if (d.includes("n")) {
-          h = resize.oh - dy;
-          y = resize.oy + dy;
-        }
-        if (w < MIN_W) {
-          if (d.includes("w")) x = resize.ox + (resize.ow - MIN_W);
-          w = MIN_W;
-        }
-        if (h < MIN_H) {
-          if (d.includes("n")) y = resize.oy + (resize.oh - MIN_H);
-          h = MIN_H;
-        }
-        if (d.includes("e") || d.includes("w")) state.ui.sizePreset = "custom";
-        if (d.includes("n") || d.includes("s")) state.ui.heightMode = "custom";
-        state.ui.x = x;
-        state.ui.y = y;
-        state.ui.w = w;
-        state.ui.h = h;
+        Object.assign(state.ui, panelInteractionCall("resizePanel", state.ui, resize, e.clientX, e.clientY));
         clampUiToViewport(state.ui);
         applyPanelGeometry();
       });
