@@ -13,3 +13,4 @@ export * as aiStyles from "./workspaces/ai-styles";
 export * as knowledgeDrilldownStyles from "./workspaces/knowledge-styles";
 export * as settingsStyles from "./workspaces/settings-styles";
 export * as knowledgeWorkspaceStyles from "./workspaces/knowledge-workspace-styles";
+export * as readingStyles from "./workspaces/reading-styles";

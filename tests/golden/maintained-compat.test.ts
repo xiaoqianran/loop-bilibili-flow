@@ -5,6 +5,7 @@ import { renderShellStyles } from "../../apps/userscript/src/ui/shell/styles";
 import { renderAiWorkspace } from "../../apps/userscript/src/ui/workspaces/ai-markup";
 import { renderKnowledgeDrilldownStyles } from "../../apps/userscript/src/ui/workspaces/knowledge-styles";
 import { renderAiStyles } from "../../apps/userscript/src/ui/workspaces/ai-styles";
+import { renderReadingStyles } from "../../apps/userscript/src/ui/workspaces/reading-styles";
 import { renderKnowledgeWorkspaceMarkup } from "../../apps/userscript/src/ui/workspaces/knowledge-markup";
 
 import {
@@ -386,7 +387,7 @@ describe("Maintained full-feature compatibility source", () => {
     expect(maintainedSource).toContain("CORE_LOCAL_FALLBACKS");
     expect(maintainedSource).toContain("NOTE_FONT_DEFAULT = 14");
     expect(renderShellStyles("bili-subbatch-panel", 420, 520, 32)).toContain("--bsb-knowledge-font: 14px");
-    expect(maintainedSource).toContain("font-size:var(--bsb-knowledge-font)");
+    expect(renderReadingStyles("bili-subbatch-panel")).toContain("font-size:var(--bsb-knowledge-font)");
     expect(maintainedSource).toContain("<strong>对话</strong>");
     expect(maintainedSource).toContain("function flowTaskModelsHtml(");
     expect(maintainedSource).toContain("function bindFlowModelDrag(");
