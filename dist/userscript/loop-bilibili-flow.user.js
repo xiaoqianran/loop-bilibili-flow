@@ -7256,29 +7256,29 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
 
   // ─── UI geometry persistence ────────────────────────────────────────────
   function isPanelSizePreset(value) {
-    return Object.prototype.hasOwnProperty.call(PANEL_SIZE_PRESETS, value);
+    return panelGeometryCall("isPanelSizePreset", value);
+  }
+
+  function panelGeometryCall(name, ...args) {
+    const fn = typeof SubBatch !== "undefined"
+      ? SubBatch?.SubBatchMonorepo?.ui?.panelGeometry?.[name]
+      : null;
+    if (typeof fn !== "function") {
+      throw new Error(`[bili-subbatch] panel geometry API missing "${name}"`);
+    }
+    return fn(...args);
   }
 
   function panelPresetWidth(name, viewportWidth = window.innerWidth) {
-    const preset = PANEL_SIZE_PRESETS[name] || PANEL_SIZE_PRESETS[DEFAULT_PANEL_SIZE];
-    const desired = Math.round(Number(viewportWidth || 0) * preset.viewportRatio);
-    const available = Math.max(MIN_W, Number(viewportWidth || 0) - 16);
-    return Math.min(available, Math.max(preset.min, Math.min(preset.max, desired)));
+    return panelGeometryCall("panelPresetWidth", name, viewportWidth);
   }
 
   function highPanelHeight(viewportHeight = window.innerHeight) {
-    const available = Math.max(MIN_H, Number(viewportHeight || 0) - 16);
-    return Math.min(available, Math.max(MIN_H, Math.round(Number(viewportHeight || 0) * 0.9)));
+    return panelGeometryCall("highPanelHeight", viewportHeight);
   }
 
   function panelSizeClassFromWidth(width, viewportWidth = window.innerWidth) {
-    const value = Number(width) || panelPresetWidth(DEFAULT_PANEL_SIZE, viewportWidth);
-    const candidates = Object.keys(PANEL_SIZE_PRESETS).map((name) => ({
-      name,
-      distance: Math.abs(value - panelPresetWidth(name, viewportWidth)),
-    }));
-    candidates.sort((a, b) => a.distance - b.distance);
-    return candidates[0]?.name || DEFAULT_PANEL_SIZE;
+    return panelGeometryCall("panelSizeClassFromWidth", width, viewportWidth);
   }
 
   function defaultUiGeom() {
@@ -7415,22 +7415,7 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
   }
 
   function clampUiToViewport(ui) {
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    if (isPanelSizePreset(ui.sizePreset)) {
-      ui.w = panelPresetWidth(ui.sizePreset, vw);
-    } else {
-      ui.sizePreset = "custom";
-      ui.w = Math.min(Math.max(MIN_W, ui.w), Math.max(MIN_W, vw - 8));
-    }
-    if (ui.heightMode !== "custom") {
-      ui.heightMode = "high";
-      ui.h = highPanelHeight(vh);
-    } else {
-      ui.h = Math.min(Math.max(MIN_H, ui.h), Math.max(MIN_H, vh - 8));
-    }
-    ui.x = Math.min(Math.max(0, ui.x), Math.max(0, vw - ui.w));
-    ui.y = Math.min(Math.max(0, ui.y), Math.max(0, vh - ui.h));
+    Object.assign(ui, panelGeometryCall("clampPanelRect", ui, window.innerWidth, window.innerHeight));
     return ui;
   }
 
