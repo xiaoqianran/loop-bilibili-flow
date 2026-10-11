@@ -44,6 +44,7 @@ describe("Maintained full-feature compatibility source", () => {
       .filter((name) => !maintainedNames.has(name))
       .sort();
     const migrated = [
+      "scheduleAutoHide",
       "aiSubtitleStat",
       "collectTracks",
       "dmViewSubs",

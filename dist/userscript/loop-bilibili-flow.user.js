@@ -4306,8 +4306,77 @@ ${prompt2.userPromptTemplate}`
     __proto__: null,
     bindPanelPointerController
   }, Symbol.toStringTag, { value: "Module" }));
+  function bindPanelChromeControls(options) {
+    const { root } = options;
+    const sidebar = root.querySelector(".bsb-sidebar");
+    const fab = root.querySelector(".bsb-fab");
+    const dockTab = root.querySelector(".bsb-dock-tab");
+    const close = root.querySelector(".bsb-close");
+    const dock = root.querySelector('[data-act="dock"]');
+    const collapse = root.querySelector('[data-act="collapse"]');
+    if (!sidebar || !fab || !dockTab || !close || !dock || !collapse) {
+      throw new Error("Studio shell controls are missing");
+    }
+    let hideTimer = null;
+    const clearHide = () => {
+      if (hideTimer !== null) clearTimeout(hideTimer);
+      hideTimer = null;
+    };
+    const autoHide = () => {
+      const state2 = options.state();
+      if (!state2.dock || !state2.dockExpanded) return;
+      clearHide();
+      hideTimer = setTimeout(() => {
+        hideTimer = null;
+        const hover = Boolean(root.querySelector(".bsb-sidebar:hover, .bsb-dock-tab:hover"));
+        const now = options.state();
+        if (hover) {
+          autoHide();
+        } else if (shouldAutoHideDock(now.dock, now.dockExpanded, false)) {
+          options.expandDock(false);
+        }
+      }, options.autoHideDelay ?? 700);
+    };
+    fab.addEventListener("click", () => {
+      const state2 = options.state();
+      if (state2.dock) options.expandDock(true);
+      else options.setOpen(!state2.open);
+    });
+    close.addEventListener("click", (event) => {
+      event.stopPropagation();
+      options.setOpen(false);
+    });
+    root.querySelectorAll('[data-act="panel-size"]').forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (button.dataset.size) options.selectSize(button.dataset.size);
+      });
+    });
+    dock.addEventListener("click", (event) => {
+      event.stopPropagation();
+      options.setDock(options.state().dock ? null : options.preferredDockSide());
+    });
+    collapse.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (!options.state().dock) options.setDock(options.preferredDockSide());
+      else options.expandDock(false);
+    });
+    dockTab.addEventListener("click", () => options.expandDock(true));
+    dockTab.addEventListener("mouseenter", () => {
+      clearHide();
+      if (options.state().dock && !options.state().dockExpanded) options.expandDock(true);
+    });
+    sidebar.addEventListener("mouseenter", clearHide);
+    sidebar.addEventListener("mouseleave", autoHide);
+    dockTab.addEventListener("mouseleave", autoHide);
+  }
+  const chromeController = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    bindPanelChromeControls
+  }, Symbol.toStringTag, { value: "Module" }));
   const ui = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
+    panelChrome: chromeController,
     panelGeometry: geometry,
     panelInteraction: interaction,
     panelPointer: pointerController,
@@ -11170,10 +11239,6 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
 
   function bindPanelChrome(root) {
     const sidebar = root.querySelector(".bsb-sidebar");
-    const fab = root.querySelector(".bsb-fab");
-    const head = root.querySelector(".bsb-head");
-    const dockTab = root.querySelector(".bsb-dock-tab");
-    let hideTimer = null;
 
     state.ui = loadUiGeom();
     applyCtpFlavor(state.ui.ctpFlavor, { silent: true, persist: false });
@@ -11220,39 +11285,18 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
       if (state.ui.dockExpanded) refreshContextUI();
     }
 
-    function scheduleAutoHide() {
-      if (!state.ui.dock || !state.ui.dockExpanded) return;
-      clearTimeout(hideTimer);
-      hideTimer = setTimeout(() => {
-        if (!state.ui.dock) return;
-        // 指针仍在面板/标签上则不收
-        const hover = root.querySelector(".bsb-sidebar:hover, .bsb-dock-tab:hover");
-        if (hover) {
-          scheduleAutoHide();
-          return;
-        }
-        if (panelInteractionCall("shouldAutoHideDock", state.ui.dock, state.ui.dockExpanded, false)) {
-          toggleDockExpanded(false);
-        }
-      }, 700);
-    }
-
-    fab.addEventListener("click", () => {
-      if (state.ui.dock) {
-        toggleDockExpanded(true);
-      } else {
-        setOpen(!state.open);
-      }
-    });
-
-    root.querySelector(".bsb-close").addEventListener("click", (e) => {
-      e.stopPropagation();
-      setOpen(false);
-    });
-    root.querySelectorAll('[data-act="panel-size"]').forEach((button) => {
-      button.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const next = button.dataset.size;
+    const chromeController = typeof SubBatch !== "undefined"
+      ? SubBatch?.SubBatchMonorepo?.ui?.panelChrome?.bindPanelChromeControls
+      : null;
+    if (typeof chromeController !== "function") throw new Error("[bili-subbatch] missing panel chrome controller");
+    chromeController({
+      root,
+      state: () => ({ open: state.open, dock: state.ui.dock, dockExpanded: state.ui.dockExpanded }),
+      setOpen,
+      setDock,
+      expandDock: toggleDockExpanded,
+      preferredDockSide: () => panelStateCall("preferredDockSide", state.ui, window.innerWidth),
+      selectSize: (next) => {
         if (!isPanelSizePreset(next)) return;
         const oldWidth = state.ui.w;
         const oldRight = state.ui.x + oldWidth;
@@ -11264,37 +11308,8 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
         applyPanelGeometry();
         saveUiGeom();
         setStatus(`面板宽度：${PANEL_SIZE_PRESETS[next].label} · ${Math.round(state.ui.w)}px；高度保持${state.ui.heightMode === "custom" ? "自定义" : "约 90% 视口"}`);
-      });
+      },
     });
-    root.querySelector('[data-act="dock"]').addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (state.ui.dock) {
-        setDock(null);
-      } else {
-        // 靠近哪边就贴哪边，默认右
-        const mid = state.ui.x + state.ui.w / 2;
-        setDock(mid < window.innerWidth / 2 ? "left" : "right");
-      }
-    });
-    root.querySelector('[data-act="collapse"]').addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (!state.ui.dock) {
-        const mid = state.ui.x + state.ui.w / 2;
-        setDock(mid < window.innerWidth / 2 ? "left" : "right");
-      } else {
-        toggleDockExpanded(false);
-      }
-    });
-
-    dockTab.addEventListener("click", () => toggleDockExpanded(true));
-    dockTab.addEventListener("mouseenter", () => {
-      clearTimeout(hideTimer);
-      if (state.ui.dock && !state.ui.dockExpanded) toggleDockExpanded(true);
-    });
-    sidebar.addEventListener("mouseenter", () => clearTimeout(hideTimer));
-    sidebar.addEventListener("mouseleave", () => scheduleAutoHide());
-    dockTab.addEventListener("mouseleave", () => scheduleAutoHide());
-
     const pointerController = typeof SubBatch !== "undefined"
       ? SubBatch?.SubBatchMonorepo?.ui?.panelPointer?.bindPanelPointerController
       : null;

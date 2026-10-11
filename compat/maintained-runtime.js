@@ -6625,10 +6625,6 @@
 
   function bindPanelChrome(root) {
     const sidebar = root.querySelector(".bsb-sidebar");
-    const fab = root.querySelector(".bsb-fab");
-    const head = root.querySelector(".bsb-head");
-    const dockTab = root.querySelector(".bsb-dock-tab");
-    let hideTimer = null;
 
     state.ui = loadUiGeom();
     applyCtpFlavor(state.ui.ctpFlavor, { silent: true, persist: false });
@@ -6675,39 +6671,18 @@
       if (state.ui.dockExpanded) refreshContextUI();
     }
 
-    function scheduleAutoHide() {
-      if (!state.ui.dock || !state.ui.dockExpanded) return;
-      clearTimeout(hideTimer);
-      hideTimer = setTimeout(() => {
-        if (!state.ui.dock) return;
-        // 指针仍在面板/标签上则不收
-        const hover = root.querySelector(".bsb-sidebar:hover, .bsb-dock-tab:hover");
-        if (hover) {
-          scheduleAutoHide();
-          return;
-        }
-        if (panelInteractionCall("shouldAutoHideDock", state.ui.dock, state.ui.dockExpanded, false)) {
-          toggleDockExpanded(false);
-        }
-      }, 700);
-    }
-
-    fab.addEventListener("click", () => {
-      if (state.ui.dock) {
-        toggleDockExpanded(true);
-      } else {
-        setOpen(!state.open);
-      }
-    });
-
-    root.querySelector(".bsb-close").addEventListener("click", (e) => {
-      e.stopPropagation();
-      setOpen(false);
-    });
-    root.querySelectorAll('[data-act="panel-size"]').forEach((button) => {
-      button.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const next = button.dataset.size;
+    const chromeController = typeof SubBatch !== "undefined"
+      ? SubBatch?.SubBatchMonorepo?.ui?.panelChrome?.bindPanelChromeControls
+      : null;
+    if (typeof chromeController !== "function") throw new Error("[bili-subbatch] missing panel chrome controller");
+    chromeController({
+      root,
+      state: () => ({ open: state.open, dock: state.ui.dock, dockExpanded: state.ui.dockExpanded }),
+      setOpen,
+      setDock,
+      expandDock: toggleDockExpanded,
+      preferredDockSide: () => panelStateCall("preferredDockSide", state.ui, window.innerWidth),
+      selectSize: (next) => {
         if (!isPanelSizePreset(next)) return;
         const oldWidth = state.ui.w;
         const oldRight = state.ui.x + oldWidth;
@@ -6719,37 +6694,8 @@
         applyPanelGeometry();
         saveUiGeom();
         setStatus(`面板宽度：${PANEL_SIZE_PRESETS[next].label} · ${Math.round(state.ui.w)}px；高度保持${state.ui.heightMode === "custom" ? "自定义" : "约 90% 视口"}`);
-      });
+      },
     });
-    root.querySelector('[data-act="dock"]').addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (state.ui.dock) {
-        setDock(null);
-      } else {
-        // 靠近哪边就贴哪边，默认右
-        const mid = state.ui.x + state.ui.w / 2;
-        setDock(mid < window.innerWidth / 2 ? "left" : "right");
-      }
-    });
-    root.querySelector('[data-act="collapse"]').addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (!state.ui.dock) {
-        const mid = state.ui.x + state.ui.w / 2;
-        setDock(mid < window.innerWidth / 2 ? "left" : "right");
-      } else {
-        toggleDockExpanded(false);
-      }
-    });
-
-    dockTab.addEventListener("click", () => toggleDockExpanded(true));
-    dockTab.addEventListener("mouseenter", () => {
-      clearTimeout(hideTimer);
-      if (state.ui.dock && !state.ui.dockExpanded) toggleDockExpanded(true);
-    });
-    sidebar.addEventListener("mouseenter", () => clearTimeout(hideTimer));
-    sidebar.addEventListener("mouseleave", () => scheduleAutoHide());
-    dockTab.addEventListener("mouseleave", () => scheduleAutoHide());
-
     const pointerController = typeof SubBatch !== "undefined"
       ? SubBatch?.SubBatchMonorepo?.ui?.panelPointer?.bindPanelPointerController
       : null;
