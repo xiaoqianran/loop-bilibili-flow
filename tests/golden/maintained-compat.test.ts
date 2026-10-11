@@ -3,6 +3,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { renderShellStyles } from "../../apps/userscript/src/ui/shell/styles";
 import { renderAiWorkspace } from "../../apps/userscript/src/ui/workspaces/ai-markup";
+import { renderKnowledgeDrilldownStyles } from "../../apps/userscript/src/ui/workspaces/knowledge-styles";
+import { renderAiStyles } from "../../apps/userscript/src/ui/workspaces/ai-styles";
 import { renderKnowledgeWorkspaceMarkup } from "../../apps/userscript/src/ui/workspaces/knowledge-markup";
 
 import {
@@ -351,7 +353,7 @@ describe("Maintained full-feature compatibility source", () => {
     );
     // Knowledge answers reuse AI 处理字幕 segmented card chrome.
     expect(maintainedSource).toContain("function knowledgeAnswerReadingBlocks(");
-    expect(maintainedSource).toContain("inset:9px 0 9px auto");
+    expect(renderKnowledgeDrilldownStyles("bili-subbatch-panel")).toContain("inset:9px 0 9px auto");
     expect(maintainedSource).toContain("function pinKnowledgeScrollTop(");
     expect(extractFunctionSource(maintainedSource, "renderKnowledgeRail")).not.toContain("stickBottom");
     expect(extractFunctionSource(maintainedSource, "renderKnowledgeWorkspace")).not.toContain("stickBottom");
@@ -368,7 +370,7 @@ describe("Maintained full-feature compatibility source", () => {
     expect(maintainedSource).toContain("function sendStudioChat(");
     expect(maintainedSource).toContain("function paintStudioAnswer(");
     expect(maintainedSource).toContain("data-role=\"studio-answer\"");
-    expect(maintainedSource).toContain("align-self: flex-end");
+    expect(renderAiStyles("bili-subbatch-panel")).toContain("align-self: flex-end");
     expect(maintainedSource).toContain("// @version      6.9.16");
     expect(maintainedSource).toContain("// @match        *://www.bilibili.com/festival/*");
     expect(maintainedSource).toContain("// @match        *://www.bilibili.com/blackboard/*");

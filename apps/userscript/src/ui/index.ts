@@ -9,3 +9,5 @@ export * as workspaceLayoutStyles from "./workspaces/layout-styles";
 export * as workspaceMarkup from "./workspaces/markup";
 export * as workspaceControlsStyles from "./workspaces/controls-styles";
 export * as subsStyles from "./workspaces/subs-styles";
+export * as aiStyles from "./workspaces/ai-styles";
+export * as knowledgeDrilldownStyles from "./workspaces/knowledge-styles";
