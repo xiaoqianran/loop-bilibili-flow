@@ -230,5 +230,7 @@ export async function runPool<T>(
     }
   }
   const count = Math.min(Math.max(1, Math.floor(workerCount) || 1), Math.max(1, jobs.length));
-  await Promise.all(Array.from({ length: count }, (_, i) => worker(i + 1)));
+  const results = await Promise.allSettled(Array.from({ length: count }, (_, i) => worker(i + 1)));
+  const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failure) throw failure.reason;
 }

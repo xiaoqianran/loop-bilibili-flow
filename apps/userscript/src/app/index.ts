@@ -25,6 +25,9 @@ export const transcript = {
 
 export const ai = {
   createCoordinator: batchCoordinator.createCoordinator,
+  planTasks: batchCoordinator.planTasks,
+  partitionRuns: batchCoordinator.partitionRuns,
+  executeTasks: batchCoordinator.executeTasks,
   request: aiController.request,
   runPool: aiController.runPool,
 } as const;
@@ -39,6 +42,10 @@ export const studio = {
 export const knowledge = {
   createController: knowledgeController.createController,
   selectAnchor: knowledgeController.selectAnchor,
+  runAnswer: knowledgeController.runAnswer,
+  completeAnswer: knowledgeController.completeAnswer,
+  failAnswer: knowledgeController.failAnswer,
+  removeAnchor: knowledgeController.removeAnchor,
   createRepository: knowledgeRepository.createRepository,
 } as const;
 

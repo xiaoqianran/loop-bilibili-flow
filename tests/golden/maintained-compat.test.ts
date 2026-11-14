@@ -466,7 +466,7 @@ describe("Maintained full-feature compatibility source", () => {
       "async function doAiAnalyze(options = {})",
     );
     const analyzeSlice = maintainedSource.slice(analyzeStart, analyzeStart + 16000);
-    expect(analyzeSlice).toContain("partitionPlannedAiRuns");
+    expect(analyzeSlice).toContain('appFn("ai.partitionRuns")');
     expect(analyzeSlice).toContain("generateIds");
     expect(analyzeSlice).toContain("restoreAiSessionForRoute");
   });

@@ -6,6 +6,9 @@ export interface StudioInteractionPorts {
   runCommand(command: string): void;
   send(text: string): Promise<unknown>;
   onError(error: unknown): void;
+  clear(): void;
+  copy(): void;
+  exportChat(): void;
 }
 const bindings = new WeakMap<HTMLElement, () => void>();
 export function bind(root: HTMLElement, ports: StudioInteractionPorts): () => void {
@@ -46,9 +49,30 @@ export function bind(root: HTMLElement, ports: StudioInteractionPorts): () => vo
       void ports.send(text).catch(ports.onError);
     }
   };
+  const onClick = (event: MouseEvent) => {
+    const target = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-studio-slash], [data-act]") : null;
+    if (!target || !root.contains(target)) return;
+    const command = target.dataset.studioSlash;
+    const action = target.dataset.act;
+    if (!command && !["studio-send", "studio-clear", "studio-copy", "studio-export"].includes(action || "")) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (command) { input.value = ""; ports.hideMenu(); ports.runCommand(command); }
+    else if (action === "studio-send") {
+      const text = input.value;
+      input.value = "";
+      input.style.height = "40px";
+      ports.hideMenu();
+      void ports.send(text).catch(ports.onError);
+    } else if (action === "studio-clear") ports.clear();
+    else if (action === "studio-copy") ports.copy();
+    else if (action === "studio-export") ports.exportChat();
+  };
+  root.addEventListener("click", onClick, true);
   input.addEventListener("input", onInput);
   input.addEventListener("keydown", onKey);
   const dispose = () => {
+    root.removeEventListener("click", onClick, true);
     input.removeEventListener("input", onInput);
     input.removeEventListener("keydown", onKey);
     if (bindings.get(root) === dispose) bindings.delete(root);

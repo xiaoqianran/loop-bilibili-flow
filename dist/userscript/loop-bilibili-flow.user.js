@@ -3566,12 +3566,83 @@ ${prompt2.userPromptTemplate}`
       }
     };
   }
+  function planTasks(tasks, prompts, profiles) {
+    const profileMap = new Map(profiles.map((profile2) => [profile2.id, profile2]));
+    const plans = tasks.filter((task) => task.enabled !== false).flatMap((task) => {
+      const prompt2 = prompts.find((prompt22) => prompt22.id === task.promptId && prompt22.stage === "postprocess");
+      if (!prompt2 || !(prompt2.systemPrompt.trim() || prompt2.userPromptTemplate.trim())) return [];
+      const models = (task.modelIds || []).flatMap((id) => {
+        const model = profileMap.get(id);
+        return model?.enabled ? [model] : [];
+      });
+      return models.length ? [{ task, prompt: prompt2, models }] : [];
+    });
+    const runs = plans.flatMap((plan) => plan.models.map((profile2) => ({
+      task: plan.task,
+      prompt: plan.prompt,
+      profile: profile2,
+      taskId: plan.task.id,
+      profileId: profile2.id,
+      promptId: plan.prompt.id,
+      promptProfile: plan.prompt,
+      config: profile2
+    })));
+    const invalid = [...new Map(plans.flatMap((plan) => plan.models).map((model) => [model.id, model])).values()].filter((model) => !model.apiKey || !model.baseUrl || !model.model);
+    return { plans, runs, invalid };
+  }
+  const partitionRuns = partitionPlannedAiRuns;
+  async function executeTasks(jobs) {
+    const results = await Promise.allSettled(jobs.map((job) => Promise.resolve().then(job)));
+    const failed = results.some((result) => result.status === "rejected" || result.value.status === "error");
+    const stopped = results.some((result) => result.status === "fulfilled" && result.value.status === "stopped");
+    return { results, status: failed ? "error" : stopped ? "stopped" : "done" };
+  }
   function selectAnchor(anchorId, nodes) {
     const latest = nodes.filter((node) => node.anchorId === anchorId).reduce((best, node) => !best || Number(node.updatedAt || 0) > Number(best.updatedAt || 0) ? node : best, void 0);
     return { anchorId, nodeId: latest?.id || "" };
   }
   function createController() {
     return createCoordinator();
+  }
+  function completeAnswer(node, parsed, text, stopped, now = Date.now()) {
+    return Object.assign(node, {
+      answer: parsed.answer || text.trim(),
+      preview: "",
+      suggestions: parsed.suggestions,
+      status: stopped ? "stopped" : "done",
+      updatedAt: now,
+      error: ""
+    });
+  }
+  function failAnswer(node, partial, error, stopped, now = Date.now()) {
+    return Object.assign(node, {
+      answer: partial,
+      preview: "",
+      status: stopped ? "stopped" : "error",
+      error: stopped ? "" : String(error instanceof Error ? error.message : error || "请求失败"),
+      updatedAt: now
+    });
+  }
+  function removeAnchor(anchors, nodes, anchorId) {
+    return { anchors: anchors.filter((anchor) => anchor.id !== anchorId), nodes: nodes.filter((node) => node.anchorId !== anchorId) };
+  }
+  async function runAnswer(execution) {
+    const { node } = execution;
+    try {
+      const text = await execution.generate();
+      if (!execution.exists()) return;
+      completeAnswer(node, execution.parse(text), text, execution.stopped());
+      await execution.persist(node);
+      await execution.onSuccess(node);
+    } catch (error) {
+      if (!execution.exists()) return;
+      failAnswer(node, execution.visible(execution.partial()), error, execution.stopped());
+      await execution.persist(node).catch(() => {
+      });
+      execution.onFailure(node);
+    } finally {
+      await execution.cleanup();
+    }
   }
   const WBI_TTL_MS = 6e5;
   const wbiCache = /* @__PURE__ */ new WeakMap();
@@ -3897,7 +3968,9 @@ ${prompt2.userPromptTemplate}`
       }
     }
     const count = Math.min(Math.max(1, Math.floor(workerCount) || 1), Math.max(1, jobs.length));
-    await Promise.all(Array.from({ length: count }, (_, i) => worker(i + 1)));
+    const results = await Promise.allSettled(Array.from({ length: count }, (_, i) => worker(i + 1)));
+    const failure = results.find((result) => result.status === "rejected");
+    if (failure) throw failure.reason;
   }
   function parseStore(raw) {
     try {
@@ -4520,6 +4593,9 @@ ${prompt2.userPromptTemplate}`
   };
   const ai = {
     createCoordinator,
+    planTasks,
+    partitionRuns,
+    executeTasks,
     request,
     runPool
   };
@@ -4532,6 +4608,10 @@ ${prompt2.userPromptTemplate}`
   const knowledge = {
     createController,
     selectAnchor,
+    runAnswer,
+    completeAnswer,
+    failAnswer,
+    removeAnchor,
     createRepository
   };
   const acquisition = {
@@ -8891,9 +8971,33 @@ ${prompt2.userPromptTemplate}`
         void ports.send(text).catch(ports.onError);
       }
     };
+    const onClick = (event) => {
+      const target = event.target instanceof Element ? event.target.closest("[data-studio-slash], [data-act]") : null;
+      if (!target || !root.contains(target)) return;
+      const command2 = target.dataset.studioSlash;
+      const action = target.dataset.act;
+      if (!command2 && !["studio-send", "studio-clear", "studio-copy", "studio-export"].includes(action || "")) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (command2) {
+        input.value = "";
+        ports.hideMenu();
+        ports.runCommand(command2);
+      } else if (action === "studio-send") {
+        const text = input.value;
+        input.value = "";
+        input.style.height = "40px";
+        ports.hideMenu();
+        void ports.send(text).catch(ports.onError);
+      } else if (action === "studio-clear") ports.clear();
+      else if (action === "studio-copy") ports.copy();
+      else if (action === "studio-export") ports.exportChat();
+    };
+    root.addEventListener("click", onClick, true);
     input.addEventListener("input", onInput);
     input.addEventListener("keydown", onKey);
     const dispose = () => {
+      root.removeEventListener("click", onClick, true);
       input.removeEventListener("input", onInput);
       input.removeEventListener("keydown", onKey);
       if (bindings.get(root) === dispose) bindings.delete(root);
@@ -12579,6 +12683,9 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
       hideMenu: hideStudioSlashMenu,
       runCommand: runStudioSlash,
       send: sendStudioChat,
+      clear: studioClearChat,
+      copy: studioCopyLast,
+      exportChat: studioExportChat,
       onError: (error) => setStatus(`对话失败：${error?.message || error}`, "err"),
     });
     root.querySelector('[data-role="knowledge-search"]')?.addEventListener("input", debounce((e) => {
@@ -12932,15 +13039,6 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
       if (inputView) { e.preventDefault(); state.aiInputView = String(inputView.dataset.inputView || "raw"); renderAiInputDrawer(); return; }
       const aiStageTab = e.target.closest?.("[data-ai-stage]");
       if (aiStageTab) { e.preventDefault(); setAiWorkbenchStage(aiStageTab.dataset.aiStage).catch((error) => setStatus(`切换 AI 阶段失败: ${error?.message || error}`, "err")); return; }
-      const studioSlash = e.target.closest?.("[data-studio-slash]");
-      if (studioSlash) {
-        e.preventDefault();
-        const input = root.querySelector('[data-role="studio-input"]');
-        if (input) input.value = "";
-        hideStudioSlashMenu();
-        runStudioSlash(studioSlash.dataset.studioSlash);
-        return;
-      }
       const preprocessView = e.target.closest?.("[data-ai-preprocess-view]");
       if (preprocessView) { e.preventDefault(); state.aiInputView = String(preprocessView.dataset.aiPreprocessView || "raw"); renderPreprocessCanvas().catch((error) => setStatus(`打开字幕失败: ${error?.message || error}`, "err")); return; }
       const outputTask = e.target.closest?.("[data-ai-output-task]");
@@ -14326,17 +14424,6 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
       setStatus("正在停止 AI Pipeline（预处理 + 后处理）…");
       return;
     }
-    if (act === "studio-send") {
-      const input = ensurePanel().querySelector('[data-role="studio-input"]');
-      const text = String(input?.value || "");
-      if (input) input.value = "";
-      hideStudioSlashMenu();
-      await sendStudioChat(text);
-      return;
-    }
-    if (act === "studio-clear") { studioClearChat(); return; }
-    if (act === "studio-copy") { studioCopyLast(); return; }
-    if (act === "studio-export") { studioExportChat(); return; }
     if (act === "ai-toggle") {
       toggleAiPanel();
       return;
@@ -15172,11 +15259,13 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
   }
 
   async function knowledgeDeleteAnchor(anchorId) {
+    if (state.knowledgeRuntime && state.knowledgeActiveAnchorId === anchorId) abortKnowledgeRequest();
     const repo = currentKnowledgeRepository();
     if (repo) {
       await repo.deleteAnchor(anchorId);
-      state.knowledgeAnchors = state.knowledgeAnchors.filter((a) => a.id !== anchorId);
-      state.knowledgeNodes = state.knowledgeNodes.filter((n) => n.anchorId !== anchorId);
+      const remaining = appCall("knowledge.removeAnchor", state.knowledgeAnchors, state.knowledgeNodes, anchorId);
+      state.knowledgeAnchors = remaining.anchors;
+      state.knowledgeNodes = remaining.nodes;
       if (state.knowledgeActiveAnchorId === anchorId) {
         state.knowledgeActiveAnchorId = "";
         state.knowledgeActiveNodeId = "";
@@ -15947,7 +16036,9 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
     const request = knowledgeController.begin(node.id);
     let latest = "";
     let lastPreviewPersistAt = 0;
-    await request.stage(() => new Promise((resolve, reject) => {
+    await appCall("knowledge.runAnswer", {
+      node,
+      generate: () => request.stage(() => new Promise((resolve, reject) => {
       requestChatCompletion({
         runtime,
         baseUrl: model.baseUrl,
@@ -15959,6 +16050,7 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
         stream: model.stream !== false,
         onStatus() {},
         onDelta(_delta, full) {
+          if (!knowledgeAnchorById(anchor.id)) return;
           latest = String(full || "");
           node.preview = latest;
           node.updatedAt = Date.now();
@@ -15974,34 +16066,33 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
         },
         onError(error) { reject(error instanceof Error ? error : new Error(String(error || "Knowledge 请求失败"))); },
       });
-    })).then(async () => {
-      const parsed = parseKnowledgeOutput(latest);
-      node.answer = parsed.answer || latest.trim();
-      node.preview = "";
-      node.suggestions = parsed.suggestions;
-      node.status = runtime.abort || !request.current() ? "stopped" : "done";
-      request.finish(node.status);
-      node.updatedAt = Date.now();
-      anchor.updatedAt = node.updatedAt;
-      await Promise.all([knowledgePutNode(node), knowledgePutAnchor(anchor)]);
-      await ensureKnowledgeRenderLibs(node.answer).catch(() => {});
-      setStatus(`Knowledge · 已回答：${q.slice(0, 28)}${q.length > 28 ? "…" : ""}`, "ok");
-    }).catch(async (error) => {
-      const stopped = !!runtime.abort || !request.current();
-      request.finish(stopped ? "stopped" : "error");
-      node.answer = knowledgeVisibleAnswer(latest);
-      node.preview = "";
-      node.status = stopped ? "stopped" : "error";
-      node.error = stopped ? "" : String(error?.message || error || "请求失败");
-      node.updatedAt = Date.now();
-      await knowledgePutNode(node).catch(() => {});
-      setStatus(stopped ? "Knowledge 已停止" : `Knowledge 失败：${node.error}`, stopped ? "" : "err");
-    }).finally(async () => {
+
+      })).then(() => latest),
+      parse: parseKnowledgeOutput,
+      visible: knowledgeVisibleAnswer,
+      partial: () => latest,
+      stopped: () => runtime.abort || !request.current(),
+      exists: () => !!knowledgeAnchorById(anchor.id),
+      persist: (answer) => knowledgePutNode(answer),
+      onSuccess: async () => {
+        request.finish(node.status);
+        anchor.updatedAt = node.updatedAt;
+        await knowledgePutAnchor(anchor);
+        await ensureKnowledgeRenderLibs(node.answer).catch(() => {});
+        setStatus(node.status === "stopped" ? "Knowledge 已停止" : `Knowledge · 已回答：${q.slice(0, 28)}${q.length > 28 ? "…" : ""}`, node.status === "stopped" ? "" : "ok");
+      },
+      onFailure: () => {
+        request.finish(node.status);
+        setStatus(node.status === "stopped" ? "Knowledge 已停止" : `Knowledge 失败：${node.error}`, node.status === "stopped" ? "" : "err");
+      },
+      cleanup: async () => {
       if (state.knowledgeRuntime !== runtime) return;
       state.knowledgeBusy = false;
       state.knowledgeRuntime = null;
       await renderKnowledgeRail();
       await renderKnowledgeWorkspace().catch(() => {});
+
+      },
     });
   }
 
@@ -21134,28 +21225,15 @@ body{padding:48px 20px 80px}
     }
     if (!automatic) toggleAiPanel(true);
     const configuredTasks = (automatic ? currentPostTasks() : savePostTasks(currentPostTasks())).filter((t) => t.enabled !== false);
-    const profileMap = new Map(profiles.map((p) => [p.id, p]));
-    const taskPlans = configuredTasks.map((task) => {
-      const prompt = promptLibrary.prompts.find((p) => p.id === task.promptId && p.stage === "postprocess") || null;
-      const models = (task.modelIds || []).map((id) => profileMap.get(id)).filter((p) => p?.enabled);
-      return { task, prompt, models };
-    }).filter((plan) => plan.prompt && (plan.prompt.systemPrompt.trim() || plan.prompt.userPromptTemplate.trim()) && plan.models.length);
+    const planned = appCall("ai.planTasks", configuredTasks, promptLibrary.prompts, profiles);
+    const taskPlans = planned.plans;
     if (!taskPlans.length) {
       setStatus("当前处理方案没有可运行的产物：请为至少一个 POST Prompt 选择已启用的 LLM", "err");
       if (!automatic) setAiDrawer("flow");
       return;
     }
-    const plannedRuns = taskPlans.flatMap((plan) => plan.models.map((profile) => ({
-      task: plan.task,
-      prompt: plan.prompt,
-      profile,
-      taskId: plan.task.id,
-      profileId: profile.id,
-      promptId: plan.prompt.id,
-      promptProfile: plan.prompt,
-      config: profile,
-    })));
-    const partitionFn = coreFn("partitionPlannedAiRuns");
+    const plannedRuns = planned.runs;
+    const partitionFn = appFn("ai.partitionRuns");
     const skipPrepareFn = coreFn("shouldSkipPrepareForCachedSession");
     if (!forceAll && cachedPayload && typeof partitionFn === "function") {
       const preview = partitionFn(plannedRuns, cachedPayload.runs, "");
@@ -21172,8 +21250,7 @@ body{padding:48px 20px 80px}
         } catch (_) { /* fall through */ }
       }
     }
-    const usedProfiles = Array.from(new Map(taskPlans.flatMap((p) => p.models).map((m) => [m.id, m])).values());
-    const invalid = usedProfiles.filter((x) => !x.apiKey || !x.baseUrl || !x.model);
+    const invalid = planned.invalid;
     if (invalid.length) {
       setStatus(`以下产物引用的 LLM 配置不完整：${invalid.map((x) => x.name || x.model).join("、")}`, "err");
       if (!automatic) {
@@ -21326,11 +21403,11 @@ body{padding:48px 20px 80px}
       }
 
       setStatus(`复用缓存 ${reused} · 新生成 ${generateIds.length} · ${ready.length} 条字幕${cut.truncated ? " · 输入已截断" : ""}`);
-      await batch.stage(() => Promise.allSettled(generateIds.map((id) => {
+      const outcome = await batch.stage(() => appCall("ai.executeTasks", generateIds.map((id) => async () => {
         const run = state.aiRuns.get(id);
         return runAiProfile(run, vars, run.promptProfile, commonMeta);
       })));
-      batch.finish(state.aiAbort ? "stopped" : "done");
+      batch.finish(state.aiAbort ? "stopped" : outcome.status);
       if (sessionId === state.aiSessionSeq) summarizeAiRuns(reused ? "部分模型复用缓存后生成结束" : "全部产物生成结束");
     } catch (error) {
       const message = String(error?.message || error);

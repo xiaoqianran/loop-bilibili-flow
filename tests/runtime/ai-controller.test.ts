@@ -103,3 +103,20 @@ describe("application AI controller", () => {
       .rejects.toThrow("用户停止");
   });
 });
+
+it("waits for in-flight workers before exposing pool failure", async () => {
+  let release!: () => void;
+  let finished = false;
+  let settled = false;
+  const pending = runPool([1, 2, 3], 2, async job => {
+    if (job === 1) throw new Error("failed");
+    await new Promise<void>(resolve => { release = resolve; });
+    finished = true;
+  });
+  void pending.catch(() => { settled = true; });
+  await Promise.resolve();
+  expect(settled).toBe(false);
+  release();
+  await expect(pending).rejects.toThrow("failed");
+  expect(finished).toBe(true);
+});
