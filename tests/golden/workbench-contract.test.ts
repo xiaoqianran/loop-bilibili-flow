@@ -270,6 +270,16 @@ describe("Bundled full-feature workbench source", () => {
     }
   });
 
+  it("delegates Knowledge reader markup and saved-node actions to UI", () => {
+    for (const method of ["readerHtml", "dispatchReaderClick"]) {
+      expect(maintainedSource).toContain("SubBatch.SubBatchMonorepo.ui.knowledgeReader." + method + "(");
+    }
+    expect(maintainedSource).toContain("const updated = { ...anchor, starred: !anchor.starred");
+    expect(maintainedSource).toContain("const updated = { ...node, starred: !node.starred");
+    expect(maintainedSource).not.toContain("anchor.starred = !anchor.starred");
+    expect(maintainedSource).not.toContain("node.starred = !node.starred");
+  });
+
   it("delegates migrated acquisition rules to grouped Bilibili APIs", () => {
     expect(maintainedSource).toContain("function bilibiliCall(");
     expect(maintainedSource).toContain('bilibiliCall("video.runtimeView"');

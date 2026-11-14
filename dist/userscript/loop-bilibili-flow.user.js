@@ -10105,12 +10105,64 @@ ${prompt2.userPromptTemplate}`
     suggestionsHtml,
     treeHtml
   }, Symbol.toStringTag, { value: "Module" }));
+  function readerHtml(anchor, options) {
+    const { isSmall = false, escapeAttr, escapeHtml, formatClock: formatClock2, contextHtml, breadcrumbHtml: breadcrumbHtml2, answerHtml, composerHtml } = options;
+    const meta = [
+      anchor.title || "",
+      anchor.bvid ? `${anchor.bvid}${(anchor.page || 1) > 1 ? ` P${anchor.page}` : ""}` : "",
+      anchor.timeStart != null ? formatClock2(anchor.timeStart) : ""
+    ].filter(Boolean).join(" · ");
+    return `<header class="bsb-knowledge-reader-head">
+        <div class="bsb-knowledge-reader-head-main">
+          ${isSmall ? '<button type="button" class="bsb-btn ghost bsb-knowledge-mobile-back" data-knowledge-back-list style="margin-bottom:4px">← 返回列表</button>' : ""}
+          <h2 class="bsb-knowledge-reader-title" title="${escapeAttr(anchor.selectedText || "")}">${escapeHtml(anchor.selectedText || "")}</h2>
+          <p class="bsb-knowledge-reader-meta" title="${escapeAttr(meta)}">${escapeHtml(meta || "局部字幕锚点")}</p>
+        </div>
+        <div class="bsb-knowledge-reader-actions">
+          <button type="button" class="bsb-icon-btn${anchor.starred ? " active" : ""}" data-knowledge-star-anchor title="${anchor.starred ? "取消收藏" : "收藏"}">${anchor.starred ? "★" : "☆"}</button>
+          <button type="button" class="bsb-icon-btn" data-knowledge-seek title="回到字幕">⏱</button>
+          <div class="bsb-knowledge-more">
+            <button type="button" class="bsb-icon-btn" data-knowledge-more-toggle title="更多" aria-haspopup="menu">···</button>
+            <div class="bsb-knowledge-more-menu" data-role="knowledge-more-menu" hidden>
+              <button type="button" class="danger" data-knowledge-delete-anchor>删除锚点</button>
+            </div>
+          </div>
+        </div>
+      </header>
+      ${contextHtml}
+      <div class="bsb-knowledge-crumbs">${breadcrumbHtml2}</div>
+      <div class="bsb-knowledge-reader-scroll" data-role="knowledge-reader-scroll">
+        <div class="bsb-knowledge-reader-scroll-inner">${answerHtml}</div>
+      </div>
+      ${composerHtml}`;
+  }
+  function dispatchReaderClick(target, actions) {
+    if (!target) return false;
+    for (const [selector, action] of [
+      ["[data-knowledge-star-anchor]", "starAnchor"],
+      ["[data-knowledge-star-node]", "starNode"],
+      ["[data-knowledge-delete-anchor]", "deleteAnchor"],
+      ["[data-knowledge-more-toggle]", "toggleMore"]
+    ]) {
+      if (target.closest?.(selector)) {
+        actions[action]();
+        return true;
+      }
+    }
+    return false;
+  }
+  const knowledgeReaderController = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    dispatchReaderClick,
+    readerHtml
+  }, Symbol.toStringTag, { value: "Module" }));
   const ui = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
     aiStyles,
     folioStyles,
     knowledgeDrilldownStyles: knowledgeStyles,
     knowledgeNavigation: knowledgeNavigationController,
+    knowledgeReader: knowledgeReaderController,
     knowledgeTreeRenderer,
     knowledgeWorkspaceStyles,
     lateStudioStyles: lateStyles,
@@ -13441,30 +13493,37 @@ ${prompt2.userPromptTemplate}`
           abortKnowledgeRequest();
           return;
         }
-        if (e.target.closest?.("[data-knowledge-star-anchor]")) {
-          e.preventDefault();
-          const anchor = knowledgeAnchorById(state2.knowledgeActiveAnchorId);
-          if (anchor) {
-            anchor.starred = !anchor.starred;
-            anchor.updatedAt = Date.now();
-            knowledgePutAnchor(anchor).then(() => {
+        const handledKnowledgeReader = SubBatch2.SubBatchMonorepo.ui.knowledgeReader.dispatchReaderClick(e.target, {
+          starAnchor: () => {
+            const anchor = knowledgeAnchorById(state2.knowledgeActiveAnchorId);
+            if (!anchor) return;
+            const updated = { ...anchor, starred: !anchor.starred, updatedAt: Date.now() };
+            knowledgePutAnchor(updated).then(() => {
               if (state2.ui?.view === "knowledge") return renderKnowledgeWorkspace();
               return Promise.all([renderKnowledgeRail(), decorateKnowledgeAnchors()]);
-            }).catch((error) => setStatus(`收藏失败：${error?.message || error}`, "err"));
-          }
-          return;
-        }
-        if (e.target.closest?.("[data-knowledge-star-node]")) {
-          e.preventDefault();
-          const node = knowledgeNodeById(state2.knowledgeActiveNodeId);
-          if (node) {
-            node.starred = !node.starred;
-            node.updatedAt = Date.now();
-            knowledgePutNode(node).then(() => {
+            }).catch((error) => setStatus("收藏失败：" + (error?.message || error), "err"));
+          },
+          starNode: () => {
+            const node = knowledgeNodeById(state2.knowledgeActiveNodeId);
+            if (!node) return;
+            const updated = { ...node, starred: !node.starred, updatedAt: Date.now() };
+            knowledgePutNode(updated).then(() => {
               if (state2.ui?.view === "knowledge") return renderKnowledgeWorkspace();
               return renderKnowledgeRail();
-            }).catch((error) => setStatus(`收藏失败：${error?.message || error}`, "err"));
+            }).catch((error) => setStatus("收藏失败：" + (error?.message || error), "err"));
+          },
+          deleteAnchor: () => {
+            const anchor = knowledgeAnchorById(state2.knowledgeActiveAnchorId);
+            if (!anchor || !confirm("删除知识锚点「" + anchor.selectedText + "」及其全部追问？")) return;
+            knowledgeDeleteAnchor(anchor.id).then(() => renderKnowledgeWorkspace()).then(() => decorateKnowledgeAnchors()).catch((error) => setStatus("删除失败：" + (error?.message || error), "err"));
+          },
+          toggleMore: () => {
+            const menu = e.target.closest(".bsb-knowledge-more")?.querySelector('[data-role="knowledge-more-menu"]');
+            if (menu) menu.hidden = !menu.hidden;
           }
+        });
+        if (handledKnowledgeReader) {
+          e.preventDefault();
           return;
         }
         const handledKnowledgeNavigation = SubBatch2.SubBatchMonorepo.ui.knowledgeTreeRenderer.dispatchNavigationClick(e.target, {
@@ -13522,12 +13581,6 @@ ${prompt2.userPromptTemplate}`
           });
           return;
         }
-        if (e.target.closest?.("[data-knowledge-more-toggle]")) {
-          e.preventDefault();
-          const menu = e.target.closest(".bsb-knowledge-more")?.querySelector('[data-role="knowledge-more-menu"]');
-          if (menu) menu.hidden = !menu.hidden;
-          return;
-        }
         if (!e.target.closest?.(".bsb-knowledge-more")) {
           root.querySelectorAll?.('[data-role="knowledge-more-menu"]').forEach((menu) => {
             menu.hidden = true;
@@ -13564,14 +13617,6 @@ ${prompt2.userPromptTemplate}`
               openKnowledgeAnchor(anchor.id).catch(() => {
               });
             });
-          }
-          return;
-        }
-        if (e.target.closest?.("[data-knowledge-delete-anchor]")) {
-          e.preventDefault();
-          const anchor = knowledgeAnchorById(state2.knowledgeActiveAnchorId);
-          if (anchor && confirm(`删除知识锚点「${anchor.selectedText}」及其全部追问？`)) {
-            knowledgeDeleteAnchor(anchor.id).then(() => renderKnowledgeWorkspace()).then(() => decorateKnowledgeAnchors()).catch((error) => setStatus(`删除失败：${error?.message || error}`, "err"));
           }
           return;
         }
@@ -15892,34 +15937,21 @@ ${addition}`.trim() };
       }).join("");
     }
     function knowledgeReaderHtml(anchor, activeNode, { isSmall = false } = {}) {
-      const meta = [
-        anchor.title || "",
-        anchor.bvid ? `${anchor.bvid}${anchor.page > 1 ? ` P${anchor.page}` : ""}` : "",
-        anchor.timeStart != null ? coreCall("formatClock", anchor.timeStart) : ""
-      ].filter(Boolean).join(" · ");
-      return `<header class="bsb-knowledge-reader-head">
-        <div class="bsb-knowledge-reader-head-main">
-          ${isSmall ? '<button type="button" class="bsb-btn ghost bsb-knowledge-mobile-back" data-knowledge-back-list style="margin-bottom:4px">← 返回列表</button>' : ""}
-          <h2 class="bsb-knowledge-reader-title" title="${escapeAttr(anchor.selectedText)}">${escapeHtml(anchor.selectedText)}</h2>
-          <p class="bsb-knowledge-reader-meta" title="${escapeAttr(meta)}">${escapeHtml(meta || "局部字幕锚点")}</p>
-        </div>
-        <div class="bsb-knowledge-reader-actions">
-          <button type="button" class="bsb-icon-btn${anchor.starred ? " active" : ""}" data-knowledge-star-anchor title="${anchor.starred ? "取消收藏" : "收藏"}">${anchor.starred ? "★" : "☆"}</button>
-          <button type="button" class="bsb-icon-btn" data-knowledge-seek title="回到字幕">⏱</button>
-          <div class="bsb-knowledge-more">
-            <button type="button" class="bsb-icon-btn" data-knowledge-more-toggle title="更多" aria-haspopup="menu">···</button>
-            <div class="bsb-knowledge-more-menu" data-role="knowledge-more-menu" hidden>
-              <button type="button" class="danger" data-knowledge-delete-anchor>删除锚点</button>
-            </div>
-          </div>
-        </div>
-      </header>
-      ${knowledgeContextHtml(anchor)}
-      <div class="bsb-knowledge-crumbs">${SubBatch2.SubBatchMonorepo.ui.knowledgeTreeRenderer.breadcrumbHtml(activeNode, activeNode ? appCall("knowledge.ancestorNodes", activeNode, state2.knowledgeNodes || []) : [], escapeHtml, escapeAttr)}</div>
-      <div class="bsb-knowledge-reader-scroll" data-role="knowledge-reader-scroll">
-        <div class="bsb-knowledge-reader-scroll-inner">${knowledgeAnswerBodyHtml(activeNode)}</div>
-      </div>
-      ${knowledgeComposerHtml()}`;
+      return SubBatch2.SubBatchMonorepo.ui.knowledgeReader.readerHtml(anchor, {
+        isSmall,
+        escapeAttr,
+        escapeHtml,
+        formatClock: (time) => coreCall("formatClock", time),
+        contextHtml: knowledgeContextHtml(anchor),
+        breadcrumbHtml: SubBatch2.SubBatchMonorepo.ui.knowledgeTreeRenderer.breadcrumbHtml(
+          activeNode,
+          activeNode ? appCall("knowledge.ancestorNodes", activeNode, state2.knowledgeNodes || []) : [],
+          escapeHtml,
+          escapeAttr
+        ),
+        answerHtml: knowledgeAnswerBodyHtml(activeNode),
+        composerHtml: knowledgeComposerHtml()
+      });
     }
     function pinKnowledgeScrollTop(top = 0) {
       const root = document.getElementById(PANEL_ID);
