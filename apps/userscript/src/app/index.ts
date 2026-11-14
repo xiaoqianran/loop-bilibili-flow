@@ -95,6 +95,7 @@ export const knowledge = {
   ancestorNodes: knowledgeController.ancestorNodes,
   branchContext: knowledgeController.branchContext,
   reconcileNodes: knowledgeController.reconcileNodes,
+  updateStreamPreview: knowledgeController.updateStreamPreview,
   sortAnchors: knowledgeController.sortAnchors,
   cacheAnchor: knowledgeController.cacheAnchor,
   cacheNode: knowledgeController.cacheNode,

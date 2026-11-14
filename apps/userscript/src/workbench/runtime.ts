@@ -5697,25 +5697,13 @@ export function mountWorkbench(SubBatch) {
    * Full-document prepareMarkdownMath first so multi-line $$ / code fences stay intact.
    */
   function renderKnowledgeAnswerCards(text, { streaming = false } = {}) {
-    const source = String(text || "").trim();
-    if (!source) return "";
-    const { md, maths } = prepareMarkdownMath(source);
-    const blocks = knowledgeAnswerReadingBlocks(md);
-    if (!blocks.length) {
-      return `<div class="bsb-preprocess-reading bsb-knowledge-answer-reading"><article class="bsb-preprocess-block bsb-knowledge-answer-card"><div class="bsb-preprocess-block-head"><span class="bsb-preprocess-block-index">01</span></div><div class="bsb-preprocess-block-body bsb-knowledge-card-body">${knowledgeChunkToHtml(md, maths)}</div></article></div>`;
-    }
-    let paragraphIndex = 0;
-    const html = blocks
-      .map((block) => {
-        if (block.type === "heading") {
-          return `<div class="bsb-preprocess-section-title">${escapeHtml(block.text)}</div>`;
-        }
-        paragraphIndex += 1;
-        const bodyHtml = knowledgeChunkToHtml(block.text, maths);
-        return `<article class="bsb-preprocess-block bsb-knowledge-answer-card"><div class="bsb-preprocess-block-head"><span class="bsb-preprocess-block-index">${String(paragraphIndex).padStart(2, "0")}</span>${block.topic ? `<span class="bsb-preprocess-block-topic">${escapeHtml(block.topic)}</span>` : ""}</div><div class="bsb-preprocess-block-body bsb-knowledge-card-body">${bodyHtml}</div></article>`;
-      })
-      .join("");
-    return `<div class="bsb-preprocess-reading bsb-knowledge-answer-reading${streaming ? " is-streaming" : ""}">${html}</div>`;
+    return SubBatch.SubBatchMonorepo.ui.knowledgeAnswerView.answerCardsHtml(text, {
+      streaming,
+      prepare: prepareMarkdownMath,
+      blocks: knowledgeAnswerReadingBlocks,
+      chunkHtml: knowledgeChunkToHtml,
+      escapeHtml,
+    });
   }
 
   async function hydrateKnowledgeAnswerDom(scope, epoch = state.renderEpoch) {
@@ -5752,60 +5740,24 @@ export function mountWorkbench(SubBatch) {
   }
 
   function knowledgeContextHtml(anchor) {
-    const selected = String(anchor?.selectedText || "").trim();
-    const context = String(anchor?.contextText || "").trim();
-    if (!selected && !context) return "";
-    const open = state.ui?.knowledgeContextOpen === true;
-    const showContext = context && context !== selected;
-    const preview = selected.replace(/\s+/g, " ");
-    const short = preview.length > 28 ? `${preview.slice(0, 28)}…` : preview;
-    return `<div class="bsb-knowledge-evidence" data-role="knowledge-context">
-      <button type="button" class="bsb-knowledge-evidence-chip" data-knowledge-evidence-toggle aria-expanded="${open ? "true" : "false"}">
-        <strong>字幕依据</strong><em>${escapeHtml(short)}</em><span class="action">${open ? "收起" : "查看上下文"}</span>
-      </button>
-      <div class="bsb-knowledge-evidence-panel" data-role="knowledge-evidence-panel" ${open ? "" : "hidden"}>
-        <div><strong>选区</strong><pre>${escapeHtml(selected)}</pre></div>
-        ${showContext ? `<div><strong>前后文</strong><pre>${escapeHtml(context)}</pre></div>` : ""}
-      </div>
-    </div>`;
+    return SubBatch.SubBatchMonorepo.ui.knowledgeAnswerView.evidenceHtml(
+      anchor, state.ui?.knowledgeContextOpen === true, escapeHtml,
+    );
   }
 
   function knowledgeAnswerBodyHtml(activeNode) {
-    if (!activeNode) {
-      return `<div class="bsb-knowledge-welcome"><div class="bsb-knowledge-orb">✦</div><strong>从这里向下钻</strong><span>这个锚点还没有问题。可以直接提问，或者先让 AI 解释它。</span><button type="button" data-knowledge-quick="explain">解释这个概念</button></div>`;
-    }
-    const answer = knowledgeVisibleAnswer(activeNode.answer || activeNode.preview || "");
-    const streaming = activeNode.status === "running";
-    const statusLabel = streaming
-      ? "正在回答"
-      : activeNode.status === "stopped"
-        ? "已停止"
-        : activeNode.status === "error"
-          ? "回答失败"
-          : "当前问题";
-    const answerFallback = activeNode.status === "error"
-      ? `<div class="bsb-knowledge-thinking">回答失败${activeNode.error ? `：${escapeHtml(activeNode.error)}` : ""}</div>`
-      : activeNode.status === "stopped"
-        ? '<div class="bsb-knowledge-thinking">回答已停止。可以从这个节点继续提出新的问题。</div>'
-        : '<div class="bsb-knowledge-thinking">正在组织回答…</div>';
-    const answerHtml = answer
-      ? renderKnowledgeAnswerCards(answer, { streaming })
-      : answerFallback;
-    return `<article class="bsb-knowledge-question-card"><div class="bsb-knowledge-question"><div class="bsb-knowledge-question-meta"><span>${statusLabel}</span><button type="button" class="bsb-knowledge-node-star${activeNode.starred ? " active" : ""}" data-knowledge-star-node title="${activeNode.starred ? "取消收藏这个回答" : "收藏这个回答"}">${activeNode.starred ? "★" : "☆"}</button></div><h3>${escapeHtml(activeNode.question)}</h3></div></article>
-      <div class="bsb-knowledge-answer${streaming ? " streaming" : ""}">${answerHtml}</div>
-      ${SubBatch.SubBatchMonorepo.ui.knowledgeTreeRenderer.suggestionsHtml(activeNode, escapeAttr, escapeHtml)}`;
+    return SubBatch.SubBatchMonorepo.ui.knowledgeAnswerView.answerBodyHtml(activeNode, {
+      escapeHtml,
+      visibleAnswer: knowledgeVisibleAnswer,
+      renderCards: renderKnowledgeAnswerCards,
+      suggestionsHtml: (node) => SubBatch.SubBatchMonorepo.ui.knowledgeTreeRenderer.suggestionsHtml(node, escapeAttr, escapeHtml),
+    });
   }
 
   function knowledgeComposerHtml() {
-    return `<div class="bsb-knowledge-composer">
-      <div class="bsb-knowledge-composer-box">
-        <textarea data-role="knowledge-question" rows="2" placeholder="继续追问… Enter 发送 · Shift+Enter 换行" ${state.knowledgeBusy ? "disabled" : ""}></textarea>
-        <div class="bsb-knowledge-composer-tools">
-          <select class="bsb-knowledge-model-select" data-role="knowledge-model" title="回答模型" ${state.knowledgeBusy ? "disabled" : ""}>${knowledgeModelOptionsHtml()}</select>
-          <button type="button" class="bsb-btn accent" data-knowledge-send ${state.knowledgeBusy ? "disabled" : ""}>${state.knowledgeBusy ? "生成中" : "发送"}</button>
-        </div>
-      </div>
-    </div>`;
+    return SubBatch.SubBatchMonorepo.ui.knowledgeAnswerView.composerHtml(
+      !!state.knowledgeBusy, knowledgeModelOptionsHtml(),
+    );
   }
 
   function knowledgeRailBodyHtml(anchor, activeNode, { showTree = state.knowledgeTreeOpen } = {}) {
@@ -6177,11 +6129,10 @@ export function mountWorkbench(SubBatch) {
         onStatus() {},
         onDelta(_delta, full) {
           if (!knowledgeAnchorById(anchor.id)) return;
-          latest = String(full || "");
-          node.preview = latest;
-          node.updatedAt = Date.now();
-          if (node.updatedAt - lastPreviewPersistAt > 1800) {
-            lastPreviewPersistAt = node.updatedAt;
+          const preview = appCall("knowledge.updateStreamPreview", node, full, lastPreviewPersistAt, Date.now());
+          latest = preview.latest;
+          if (preview.shouldPersist) {
+            lastPreviewPersistAt = preview.persistAt;
             knowledgeStoreRequest(KNOWLEDGE_NODE_STORE, "readwrite", (s) => s.put(node)).catch(() => {});
           }
           scheduleKnowledgeRender();

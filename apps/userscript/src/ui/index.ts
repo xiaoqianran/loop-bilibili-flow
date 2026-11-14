@@ -26,3 +26,4 @@ export * as libraryController from "./workspaces/library-controller";
 export * as knowledgeNavigation from "./workspaces/knowledge-navigation-controller";
 export * as knowledgeTreeRenderer from "./workspaces/knowledge-tree-renderer";
 export * as knowledgeReader from "./workspaces/knowledge-reader-controller";
+export * as knowledgeAnswerView from "./workspaces/knowledge-answer-view";

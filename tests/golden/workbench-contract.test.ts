@@ -280,6 +280,14 @@ describe("Bundled full-feature workbench source", () => {
     expect(maintainedSource).not.toContain("node.starred = !node.starred");
   });
 
+  it("delegates Knowledge answer, evidence and streaming policies to UI/Application", () => {
+    for (const method of ["evidenceHtml", "answerBodyHtml", "composerHtml", "answerCardsHtml"]) {
+      expect(maintainedSource).toContain("SubBatch.SubBatchMonorepo.ui.knowledgeAnswerView." + method + "(");
+    }
+    expect(maintainedSource).toContain('appCall("knowledge.updateStreamPreview"');
+    expect(maintainedSource).not.toContain("node.updatedAt - lastPreviewPersistAt > 1800");
+  });
+
   it("delegates migrated acquisition rules to grouped Bilibili APIs", () => {
     expect(maintainedSource).toContain("function bilibiliCall(");
     expect(maintainedSource).toContain('bilibiliCall("video.runtimeView"');
@@ -507,13 +515,13 @@ describe("Bundled full-feature workbench source", () => {
     expect(renderKnowledgeWorkspaceMarkup()).toContain('data-role="knowledge-nav"');
     expect(renderKnowledgeWorkspaceMarkup()).toContain('data-role="knowledge-nav-split"');
     expect(maintainedSource).toContain("bsb-knowledge-reader");
-    expect(maintainedSource).toContain("bsb-knowledge-evidence-chip");
+    expect(maintainedSource).toContain("knowledgeAnswerView.evidenceHtml(");
     expect(maintainedSource).toContain("knowledgeNavW");
     expect(maintainedSource).toContain("--bsb-knowledge-nav-w");
     expect(maintainedSource).not.toContain('data-role="knowledge-tree-split"');
     expect(maintainedSource).not.toContain('data-role="knowledge-list-split"');
     expect(maintainedSource).not.toContain("data-knowledge-workspace-tree-toggle");
-    expect(maintainedSource).toContain("Enter 发送");
+    expect(maintainedSource).toContain("knowledgeAnswerView.composerHtml(");
     // Knowledge 页不得无条件 display:flex，否则会叠在 AI/字幕上。
     expect(maintainedSource).not.toMatch(
       /\[data-view-panel="knowledge"\]\s*\{\s*min-height:0;\s*height:100%;\s*display:flex/,
@@ -529,8 +537,8 @@ describe("Bundled full-feature workbench source", () => {
     expect(extractFunctionSource(maintainedSource, "renderKnowledgeWorkspace")).not.toContain("stickBottom");
     expect(extractFunctionSource(maintainedSource, "paintStudioAnswer")).not.toContain("scrollHeight");
     expect(maintainedSource).toContain("function renderKnowledgeAnswerCards(");
-    expect(maintainedSource).toContain("bsb-knowledge-answer-card");
-    expect(maintainedSource).toContain("bsb-preprocess-block bsb-knowledge-answer-card");
+    expect(maintainedSource).toContain("knowledgeAnswerView.answerCardsHtml(");
+    expect(maintainedSource).toContain("knowledgeAnswerView.answerCardsHtml(");
     // Markdown semantic highlight layer: ==phrase== → highlighter marks.
     expect(maintainedSource).toContain("function decorateMarkdownHighlights(");
     expect(maintainedSource).toContain("bsb-md-highlight");

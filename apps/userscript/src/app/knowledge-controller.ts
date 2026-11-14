@@ -162,3 +162,15 @@ export async function deleteAnchorCommitted<A extends { id: string }, N extends 
   await commit(anchorId);
   return removeAnchor(anchors, nodes, anchorId);
 }
+
+/** Apply a streamed preview and report whether the durable snapshot is due. */
+export function updateStreamPreview<T extends { preview?: string; updatedAt?: number }>(
+  node: T, full: unknown, lastPersistAt: number, now: number,
+  intervalMs = 1800,
+): { latest: string; persistAt: number; shouldPersist: boolean } {
+  const latest = String(full || "");
+  node.preview = latest;
+  node.updatedAt = now;
+  const shouldPersist = now - lastPersistAt > intervalMs;
+  return { latest, persistAt: shouldPersist ? now : lastPersistAt, shouldPersist };
+}

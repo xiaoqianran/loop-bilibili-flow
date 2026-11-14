@@ -4313,6 +4313,13 @@ ${prompt2.userPromptTemplate}`
     await commit(anchorId);
     return removeAnchor(anchors, nodes, anchorId);
   }
+  function updateStreamPreview(node, full, lastPersistAt, now, intervalMs = 1800) {
+    const latest = String(full || "");
+    node.preview = latest;
+    node.updatedAt = now;
+    const shouldPersist = now - lastPersistAt > intervalMs;
+    return { latest, persistAt: shouldPersist ? now : lastPersistAt, shouldPersist };
+  }
   const WBI_TTL_MS = 6e5;
   const wbiCache = /* @__PURE__ */ new WeakMap();
   const JSON_REQUEST = {
@@ -5464,6 +5471,7 @@ ${prompt2.userPromptTemplate}`
     ancestorNodes,
     branchContext,
     reconcileNodes,
+    updateStreamPreview,
     sortAnchors,
     cacheAnchor,
     cacheNode,
@@ -10106,7 +10114,7 @@ ${prompt2.userPromptTemplate}`
     treeHtml
   }, Symbol.toStringTag, { value: "Module" }));
   function readerHtml(anchor, options) {
-    const { isSmall = false, escapeAttr, escapeHtml, formatClock: formatClock2, contextHtml, breadcrumbHtml: breadcrumbHtml2, answerHtml, composerHtml } = options;
+    const { isSmall = false, escapeAttr, escapeHtml, formatClock: formatClock2, contextHtml, breadcrumbHtml: breadcrumbHtml2, answerHtml, composerHtml: composerHtml2 } = options;
     const meta = [
       anchor.title || "",
       anchor.bvid ? `${anchor.bvid}${(anchor.page || 1) > 1 ? ` P${anchor.page}` : ""}` : "",
@@ -10134,7 +10142,7 @@ ${prompt2.userPromptTemplate}`
       <div class="bsb-knowledge-reader-scroll" data-role="knowledge-reader-scroll">
         <div class="bsb-knowledge-reader-scroll-inner">${answerHtml}</div>
       </div>
-      ${composerHtml}`;
+      ${composerHtml2}`;
   }
   function dispatchReaderClick(target, actions) {
     if (!target) return false;
@@ -10156,10 +10164,80 @@ ${prompt2.userPromptTemplate}`
     dispatchReaderClick,
     readerHtml
   }, Symbol.toStringTag, { value: "Module" }));
+  function evidenceHtml(anchor, open, escapeHtml) {
+    const selected = String(anchor?.selectedText || "").trim();
+    const context = String(anchor?.contextText || "").trim();
+    if (!selected && !context) return "";
+    const showContext = context && context !== selected;
+    const preview = selected.replace(/\s+/g, " ");
+    const short = preview.length > 28 ? `${preview.slice(0, 28)}…` : preview;
+    return `<div class="bsb-knowledge-evidence" data-role="knowledge-context">
+      <button type="button" class="bsb-knowledge-evidence-chip" data-knowledge-evidence-toggle aria-expanded="${open ? "true" : "false"}">
+        <strong>字幕依据</strong><em>${escapeHtml(short)}</em><span class="action">${open ? "收起" : "查看上下文"}</span>
+      </button>
+      <div class="bsb-knowledge-evidence-panel" data-role="knowledge-evidence-panel" ${open ? "" : "hidden"}>
+        <div><strong>选区</strong><pre>${escapeHtml(selected)}</pre></div>
+        ${showContext ? `<div><strong>前后文</strong><pre>${escapeHtml(context)}</pre></div>` : ""}
+      </div>
+    </div>`;
+  }
+  function answerBodyHtml(activeNode, options) {
+    const { escapeHtml, visibleAnswer, renderCards, suggestionsHtml: suggestionsHtml2 } = options;
+    if (!activeNode) {
+      return `<div class="bsb-knowledge-welcome"><div class="bsb-knowledge-orb">✦</div><strong>从这里向下钻</strong><span>这个锚点还没有问题。可以直接提问，或者先让 AI 解释它。</span><button type="button" data-knowledge-quick="explain">解释这个概念</button></div>`;
+    }
+    const answer = visibleAnswer(activeNode.answer || activeNode.preview || "");
+    const streaming = activeNode.status === "running";
+    const statusLabel2 = streaming ? "正在回答" : activeNode.status === "stopped" ? "已停止" : activeNode.status === "error" ? "回答失败" : "当前问题";
+    const answerFallback = activeNode.status === "error" ? `<div class="bsb-knowledge-thinking">回答失败${activeNode.error ? `：${escapeHtml(activeNode.error)}` : ""}</div>` : activeNode.status === "stopped" ? '<div class="bsb-knowledge-thinking">回答已停止。可以从这个节点继续提出新的问题。</div>' : '<div class="bsb-knowledge-thinking">正在组织回答…</div>';
+    const answerHtml = answer ? renderCards(answer, { streaming }) : answerFallback;
+    return `<article class="bsb-knowledge-question-card"><div class="bsb-knowledge-question"><div class="bsb-knowledge-question-meta"><span>${statusLabel2}</span><button type="button" class="bsb-knowledge-node-star${activeNode.starred ? " active" : ""}" data-knowledge-star-node title="${activeNode.starred ? "取消收藏这个回答" : "收藏这个回答"}">${activeNode.starred ? "★" : "☆"}</button></div><h3>${escapeHtml(activeNode.question)}</h3></div></article>
+      <div class="bsb-knowledge-answer${streaming ? " streaming" : ""}">${answerHtml}</div>
+      ${suggestionsHtml2(activeNode)}`;
+  }
+  function composerHtml(busy, modelOptionsHtml) {
+    return `<div class="bsb-knowledge-composer">
+      <div class="bsb-knowledge-composer-box">
+        <textarea data-role="knowledge-question" rows="2" placeholder="继续追问… Enter 发送 · Shift+Enter 换行" ${busy ? "disabled" : ""}></textarea>
+        <div class="bsb-knowledge-composer-tools">
+          <select class="bsb-knowledge-model-select" data-role="knowledge-model" title="回答模型" ${busy ? "disabled" : ""}>${modelOptionsHtml}</select>
+          <button type="button" class="bsb-btn accent" data-knowledge-send ${busy ? "disabled" : ""}>${busy ? "生成中" : "发送"}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  function answerCardsHtml(text, options) {
+    const { streaming = false, prepare, blocks: splitBlocks, chunkHtml, escapeHtml } = options;
+    const source = String(text || "").trim();
+    if (!source) return "";
+    const { md, maths } = prepare(source);
+    const blocks = splitBlocks(md);
+    if (!blocks.length) {
+      return `<div class="bsb-preprocess-reading bsb-knowledge-answer-reading"><article class="bsb-preprocess-block bsb-knowledge-answer-card"><div class="bsb-preprocess-block-head"><span class="bsb-preprocess-block-index">01</span></div><div class="bsb-preprocess-block-body bsb-knowledge-card-body">${chunkHtml(md, maths)}</div></article></div>`;
+    }
+    let paragraphIndex = 0;
+    const html = blocks.map((block) => {
+      if (block.type === "heading") {
+        return `<div class="bsb-preprocess-section-title">${escapeHtml(block.text)}</div>`;
+      }
+      paragraphIndex += 1;
+      const bodyHtml = chunkHtml(block.text, maths);
+      return `<article class="bsb-preprocess-block bsb-knowledge-answer-card"><div class="bsb-preprocess-block-head"><span class="bsb-preprocess-block-index">${String(paragraphIndex).padStart(2, "0")}</span>${block.topic ? `<span class="bsb-preprocess-block-topic">${escapeHtml(block.topic)}</span>` : ""}</div><div class="bsb-preprocess-block-body bsb-knowledge-card-body">${bodyHtml}</div></article>`;
+    }).join("");
+    return `<div class="bsb-preprocess-reading bsb-knowledge-answer-reading${streaming ? " is-streaming" : ""}">${html}</div>`;
+  }
+  const knowledgeAnswerView = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    answerBodyHtml,
+    answerCardsHtml,
+    composerHtml,
+    evidenceHtml
+  }, Symbol.toStringTag, { value: "Module" }));
   const ui = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
     aiStyles,
     folioStyles,
+    knowledgeAnswerView,
     knowledgeDrilldownStyles: knowledgeStyles,
     knowledgeNavigation: knowledgeNavigationController,
     knowledgeReader: knowledgeReaderController,
@@ -15813,23 +15891,13 @@ ${addition}`.trim() };
       return decorateMarkdownHighlights(sanitizeRenderedHtml(html));
     }
     function renderKnowledgeAnswerCards(text, { streaming = false } = {}) {
-      const source = String(text || "").trim();
-      if (!source) return "";
-      const { md, maths } = prepareMarkdownMath(source);
-      const blocks = knowledgeAnswerReadingBlocks(md);
-      if (!blocks.length) {
-        return `<div class="bsb-preprocess-reading bsb-knowledge-answer-reading"><article class="bsb-preprocess-block bsb-knowledge-answer-card"><div class="bsb-preprocess-block-head"><span class="bsb-preprocess-block-index">01</span></div><div class="bsb-preprocess-block-body bsb-knowledge-card-body">${knowledgeChunkToHtml(md, maths)}</div></article></div>`;
-      }
-      let paragraphIndex = 0;
-      const html = blocks.map((block) => {
-        if (block.type === "heading") {
-          return `<div class="bsb-preprocess-section-title">${escapeHtml(block.text)}</div>`;
-        }
-        paragraphIndex += 1;
-        const bodyHtml = knowledgeChunkToHtml(block.text, maths);
-        return `<article class="bsb-preprocess-block bsb-knowledge-answer-card"><div class="bsb-preprocess-block-head"><span class="bsb-preprocess-block-index">${String(paragraphIndex).padStart(2, "0")}</span>${block.topic ? `<span class="bsb-preprocess-block-topic">${escapeHtml(block.topic)}</span>` : ""}</div><div class="bsb-preprocess-block-body bsb-knowledge-card-body">${bodyHtml}</div></article>`;
-      }).join("");
-      return `<div class="bsb-preprocess-reading bsb-knowledge-answer-reading${streaming ? " is-streaming" : ""}">${html}</div>`;
+      return SubBatch2.SubBatchMonorepo.ui.knowledgeAnswerView.answerCardsHtml(text, {
+        streaming,
+        prepare: prepareMarkdownMath,
+        blocks: knowledgeAnswerReadingBlocks,
+        chunkHtml: knowledgeChunkToHtml,
+        escapeHtml
+      });
     }
     async function hydrateKnowledgeAnswerDom(scope, epoch = state2.renderEpoch) {
       if (!scope) return;
@@ -15861,46 +15929,25 @@ ${addition}`.trim() };
       return ready.map((p) => `<option value="${escapeAttr(p.id)}"${selected?.id === p.id ? " selected" : ""}>${escapeHtml(p.name || p.model)}</option>`).join("");
     }
     function knowledgeContextHtml(anchor) {
-      const selected = String(anchor?.selectedText || "").trim();
-      const context = String(anchor?.contextText || "").trim();
-      if (!selected && !context) return "";
-      const open = state2.ui?.knowledgeContextOpen === true;
-      const showContext = context && context !== selected;
-      const preview = selected.replace(/\s+/g, " ");
-      const short = preview.length > 28 ? `${preview.slice(0, 28)}…` : preview;
-      return `<div class="bsb-knowledge-evidence" data-role="knowledge-context">
-      <button type="button" class="bsb-knowledge-evidence-chip" data-knowledge-evidence-toggle aria-expanded="${open ? "true" : "false"}">
-        <strong>字幕依据</strong><em>${escapeHtml(short)}</em><span class="action">${open ? "收起" : "查看上下文"}</span>
-      </button>
-      <div class="bsb-knowledge-evidence-panel" data-role="knowledge-evidence-panel" ${open ? "" : "hidden"}>
-        <div><strong>选区</strong><pre>${escapeHtml(selected)}</pre></div>
-        ${showContext ? `<div><strong>前后文</strong><pre>${escapeHtml(context)}</pre></div>` : ""}
-      </div>
-    </div>`;
+      return SubBatch2.SubBatchMonorepo.ui.knowledgeAnswerView.evidenceHtml(
+        anchor,
+        state2.ui?.knowledgeContextOpen === true,
+        escapeHtml
+      );
     }
     function knowledgeAnswerBodyHtml(activeNode) {
-      if (!activeNode) {
-        return `<div class="bsb-knowledge-welcome"><div class="bsb-knowledge-orb">✦</div><strong>从这里向下钻</strong><span>这个锚点还没有问题。可以直接提问，或者先让 AI 解释它。</span><button type="button" data-knowledge-quick="explain">解释这个概念</button></div>`;
-      }
-      const answer = knowledgeVisibleAnswer(activeNode.answer || activeNode.preview || "");
-      const streaming = activeNode.status === "running";
-      const statusLabel2 = streaming ? "正在回答" : activeNode.status === "stopped" ? "已停止" : activeNode.status === "error" ? "回答失败" : "当前问题";
-      const answerFallback = activeNode.status === "error" ? `<div class="bsb-knowledge-thinking">回答失败${activeNode.error ? `：${escapeHtml(activeNode.error)}` : ""}</div>` : activeNode.status === "stopped" ? '<div class="bsb-knowledge-thinking">回答已停止。可以从这个节点继续提出新的问题。</div>' : '<div class="bsb-knowledge-thinking">正在组织回答…</div>';
-      const answerHtml = answer ? renderKnowledgeAnswerCards(answer, { streaming }) : answerFallback;
-      return `<article class="bsb-knowledge-question-card"><div class="bsb-knowledge-question"><div class="bsb-knowledge-question-meta"><span>${statusLabel2}</span><button type="button" class="bsb-knowledge-node-star${activeNode.starred ? " active" : ""}" data-knowledge-star-node title="${activeNode.starred ? "取消收藏这个回答" : "收藏这个回答"}">${activeNode.starred ? "★" : "☆"}</button></div><h3>${escapeHtml(activeNode.question)}</h3></div></article>
-      <div class="bsb-knowledge-answer${streaming ? " streaming" : ""}">${answerHtml}</div>
-      ${SubBatch2.SubBatchMonorepo.ui.knowledgeTreeRenderer.suggestionsHtml(activeNode, escapeAttr, escapeHtml)}`;
+      return SubBatch2.SubBatchMonorepo.ui.knowledgeAnswerView.answerBodyHtml(activeNode, {
+        escapeHtml,
+        visibleAnswer: knowledgeVisibleAnswer,
+        renderCards: renderKnowledgeAnswerCards,
+        suggestionsHtml: (node) => SubBatch2.SubBatchMonorepo.ui.knowledgeTreeRenderer.suggestionsHtml(node, escapeAttr, escapeHtml)
+      });
     }
     function knowledgeComposerHtml() {
-      return `<div class="bsb-knowledge-composer">
-      <div class="bsb-knowledge-composer-box">
-        <textarea data-role="knowledge-question" rows="2" placeholder="继续追问… Enter 发送 · Shift+Enter 换行" ${state2.knowledgeBusy ? "disabled" : ""}></textarea>
-        <div class="bsb-knowledge-composer-tools">
-          <select class="bsb-knowledge-model-select" data-role="knowledge-model" title="回答模型" ${state2.knowledgeBusy ? "disabled" : ""}>${knowledgeModelOptionsHtml()}</select>
-          <button type="button" class="bsb-btn accent" data-knowledge-send ${state2.knowledgeBusy ? "disabled" : ""}>${state2.knowledgeBusy ? "生成中" : "发送"}</button>
-        </div>
-      </div>
-    </div>`;
+      return SubBatch2.SubBatchMonorepo.ui.knowledgeAnswerView.composerHtml(
+        !!state2.knowledgeBusy,
+        knowledgeModelOptionsHtml()
+      );
     }
     function knowledgeRailBodyHtml(anchor, activeNode, { showTree = state2.knowledgeTreeOpen } = {}) {
       const treeOpen = !!showTree;
@@ -16261,11 +16308,10 @@ ${addition}`.trim() };
             },
             onDelta(_delta, full) {
               if (!knowledgeAnchorById(anchor.id)) return;
-              latest = String(full || "");
-              node.preview = latest;
-              node.updatedAt = Date.now();
-              if (node.updatedAt - lastPreviewPersistAt > 1800) {
-                lastPreviewPersistAt = node.updatedAt;
+              const preview = appCall("knowledge.updateStreamPreview", node, full, lastPreviewPersistAt, Date.now());
+              latest = preview.latest;
+              if (preview.shouldPersist) {
+                lastPreviewPersistAt = preview.persistAt;
                 knowledgeStoreRequest(KNOWLEDGE_NODE_STORE, "readwrite", (s) => s.put(node)).catch(() => {
                 });
               }
