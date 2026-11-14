@@ -108,6 +108,3 @@ export function observe(options: NavigationLifecycleOptions): () => void {
     spaHandle.dispose();
   };
 }
-
-/** @deprecated Use `navigation.observe` from the app namespace. */
-export const installNavigationLifecycle = observe;

@@ -80,7 +80,9 @@ describe("grouped public API", () => {
     expect(app.acquisition.collectSubtitleTracks).toBe(app.collectSubtitleTracks);
     expect(app.acquisition.resolveSubtitleUrl).toBe(app.resolveSubtitleUrl);
     expect(app.acquisition.fetchSubtitleBody).toBe(app.fetchSubtitleBody);
-    expect(app.navigation.observe).toBe(app.installNavigationLifecycle);
-    expect(app.activation.start).toBe(app.startUserscriptLifecycle);
+    expect(typeof app.navigation.observe).toBe("function");
+    expect(typeof app.activation.start).toBe("function");
+    expect("installNavigationLifecycle" in app).toBe(false);
+    expect("startUserscriptLifecycle" in app).toBe(false);
   });
 });

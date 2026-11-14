@@ -195,6 +195,31 @@ describe("userscript app boundary", () => {
     expect(boots).toBe(1);
   });
 
+  it("boots deferred carrier exactly once after repeated player and navigation events", () => {
+    const pageWindow = new FakeWindow();
+    const eventWindow = new FakeWindow();
+    const document = new FakeDocument();
+    pageWindow.location.href = "https://www.bilibili.com/festival/special";
+    let boots = 0;
+    const cleanup = activation.start({
+      pageWindow: pageWindow as unknown as Window,
+      eventWindow: eventWindow as unknown as Window,
+      document: document as unknown as Document,
+      href: () => pageWindow.location.href,
+      boot: () => { boots += 1; },
+    });
+    expect(boots).toBe(0);
+    pageWindow.player = { getManifest: () => ({ bvid: "BV1PLAYER001", cid: 22 }) };
+    document.emit("loadstart", { target: { tagName: "VIDEO" } } as unknown as Event);
+    pageWindow.emit("hashchange");
+    eventWindow.emit("pageshow");
+    eventWindow.interval?.();
+    expect(boots).toBe(1);
+    cleanup();
+    pageWindow.emit("popstate");
+    expect(boots).toBe(1);
+  });
+
   it("owns SPA history and browser navigation wiring", () => {
     const pageWindow = new FakeWindow();
     const eventWindow = new FakeWindow();

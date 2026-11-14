@@ -79,6 +79,3 @@ export function start(
   tryActivate();
   return cleanup;
 }
-
-/** @deprecated Use `activation.start` from the app namespace. */
-export const startUserscriptLifecycle = start;

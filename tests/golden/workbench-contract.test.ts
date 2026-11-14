@@ -142,6 +142,16 @@ describe("Bundled full-feature workbench source", () => {
     expect(maintainedSource).toContain("scheduleAutoCapture(\"initial\", 180)");
   });
 
+  it("has exactly one lifecycle owner for startup and SPA navigation", () => {
+    const boot = extractFunctionSource(maintainedSource, "boot");
+    const start = extractFunctionSource(maintainedSource, "startUserscript");
+    expect(boot).toContain('appCall("navigation.observe"');
+    expect(start).toContain('appCall("activation.start"');
+    expect(boot).not.toContain("history.pushState =");
+    expect(start).not.toContain('addEventListener("loadstart"');
+    expect(maintainedSource).not.toContain("function isDeferredVideoCarrierPage(");
+  });
+
   it("routes subtitle reading policies through the bundled UI namespace", () => {
     const controller = "SubBatch.SubBatchMonorepo.ui.transcriptController.";
     for (const method of ["formatTime", "filterIndexes", "cueIndexAt", "copySubtitleState"]) {
@@ -430,8 +440,8 @@ describe("Bundled full-feature workbench source", () => {
       'bilibiliFn("extractPlayingVideoHint")',
     );
     const bootSource = extractFunctionSource(maintainedSource, "boot");
-    expect(bootSource).toContain('appFn("installNavigationLifecycle")');
-    expect(bootSource).toContain("HTMLMediaElement");
+    expect(bootSource).toContain('appCall("navigation.observe"');
+    expect(bootSource).not.toContain("HTMLMediaElement");
     expect(bootSource).toContain("800");
   });
 
@@ -553,11 +563,11 @@ describe("Bundled full-feature workbench source", () => {
     expect(userscriptMetadata.match).toContain("*://www.bilibili.com/festival/*");
     expect(userscriptMetadata.match).toContain("*://www.bilibili.com/blackboard/*");
     expect(maintainedSource).toContain('|| "6.10.1"');
-    expect(maintainedSource).toContain("function isDeferredVideoCarrierPage(");
+    expect(maintainedSource).not.toContain("function isDeferredVideoCarrierPage(");
     expect(maintainedSource).toContain("function startUserscript(");
     const startSource = extractFunctionSource(maintainedSource, "startUserscript");
-    expect(startSource).toContain('appFn("startUserscriptLifecycle")');
-    expect(startSource).toContain("isDeferredVideoCarrierPage(location.href)");
+    expect(startSource).toContain('appCall("activation.start"');
+    expect(startSource).not.toContain("isDeferredVideoCarrierPage(location.href)");
     expect(maintainedSource).toContain('bilibiliFn("extractPlayingVideoHint")');
     expect(renderShellStyles("bili-subbatch-panel", 420, 520, 32)).toContain("--bsb-ui-font: 14px");
     expect(renderWorkspaceOverrides("bili-subbatch-panel")).toContain("font-size: 14px !important");

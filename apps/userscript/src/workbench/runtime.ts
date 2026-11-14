@@ -11962,18 +11962,6 @@ body{padding:48px 20px 80px}
     refreshContextUI();
   }
 
-  function isDeferredVideoCarrierPage(href = location.href) {
-    const detect = bilibiliFn("isVideoCarrierShell");
-    if (typeof detect === "function") return !!detect(href);
-    try {
-      const url = new URL(href);
-      return /^(www\.)?bilibili\.com$/i.test(url.hostname)
-        && /^\/(?:festival|blackboard)(?:\/|$)/i.test(url.pathname);
-    } catch (_) {
-      return false;
-    }
-  }
-
   let booted = false;
   function boot() {
     if (booted) return;
@@ -11983,51 +11971,15 @@ body{padding:48px 20px 80px}
     bindGlobalShortcuts();
     refreshContextUI();
     bindTranscriptVideoEvents();
-    const installNavigation = appFn("installNavigationLifecycle");
-    if (typeof installNavigation === "function") {
-      installNavigation({
-        pageWindow,
-        eventWindow: window,
-        document,
-        onNavigate: onMaybeNavigate,
-        onPageShow: () => scheduleAutoCapture("pageshow", 120),
-        onVisible: () => scheduleAutoCapture("visible", 120),
-        pollMs: 800,
-      });
-    } else {
-      const _push = pageWindow.history.pushState;
-      const _replace = pageWindow.history.replaceState;
-      pageWindow.history.pushState = function () {
-        const result = _push.apply(this, arguments);
-        setTimeout(onMaybeNavigate, 0);
-        return result;
-      };
-      pageWindow.history.replaceState = function () {
-        const result = _replace.apply(this, arguments);
-        setTimeout(onMaybeNavigate, 0);
-        return result;
-      };
-      pageWindow.addEventListener("popstate", onMaybeNavigate);
-      pageWindow.addEventListener("hashchange", onMaybeNavigate);
-      window.addEventListener("pageshow", () => {
-        onMaybeNavigate();
-        scheduleAutoCapture("pageshow", 120);
-      });
-      document.addEventListener("visibilitychange", () => {
-        // 回到前台时补一次路由对齐；真正的抓取不应依赖可见性（见 scheduleAutoCapture）。
-        if (document.visibilityState === "visible") {
-          onMaybeNavigate();
-          scheduleAutoCapture("visible", 120);
-        }
-      });
-      // History hook 是主路径；播放器连播常先换 cid/BV、后改 URL，所以还要听 media 换源并更勤地对齐身份。
-      document.addEventListener("loadstart", (event) => {
-        if (event.target instanceof HTMLMediaElement) onMaybeNavigate();
-      }, true);
-      setInterval(() => {
-        onMaybeNavigate();
-      }, 800);
-    }
+    appCall("navigation.observe", {
+      pageWindow,
+      eventWindow: window,
+      document,
+      onNavigate: onMaybeNavigate,
+      onPageShow: () => scheduleAutoCapture("pageshow", 120),
+      onVisible: () => scheduleAutoCapture("visible", 120),
+      pollMs: 800,
+    });
 
     // 初次打开页面也默认抓取：不要求打开面板、不要求标签页在前台、不要求点击“扫描”。
     const routeKey = currentRouteVideoKey();
@@ -12039,66 +11991,13 @@ body{padding:48px 20px 80px}
   }
 
   function startUserscript() {
-    const start = appFn("startUserscriptLifecycle");
-    if (typeof start === "function") {
-      start({
-        pageWindow,
-        eventWindow: window,
-        document,
-        href: () => location.href,
-        boot,
-      });
-      return;
-    }
-    if (!isDeferredVideoCarrierPage(location.href)) {
-      boot();
-      return;
-    }
-
-    let timer = 0;
-    const cleanup = () => {
-      if (timer) window.clearInterval(timer);
-      timer = 0;
-      pageWindow.removeEventListener("popstate", onCandidate);
-      pageWindow.removeEventListener("hashchange", onCandidate);
-      window.removeEventListener("pageshow", onCandidate);
-      document.removeEventListener("loadstart", onMediaCandidate, true);
-    };
-    const tryActivate = () => {
-      if (booted) {
-        cleanup();
-        return;
-      }
-      // A carrier shell may SPA-navigate into a normal supported route.
-      if (!isDeferredVideoCarrierPage(location.href)) {
-        cleanup();
-        boot();
-        return;
-      }
-      const ref = currentRouteVideoRef();
-      const hasIdentity = bilibiliFn("hasVideoCarrierIdentity");
-      const canActivate = typeof hasIdentity === "function"
-        ? !!hasIdentity(location.href, ref?.bvid || "")
-        : !!(ref?.bvid || extractBvid(location.href));
-      if (!canActivate) return;
-      cleanup();
-      boot();
-    };
-    const onCandidate = () => window.setTimeout(tryActivate, 0);
-    const onMediaCandidate = (event) => {
-      if (event.target instanceof HTMLMediaElement) onCandidate();
-    };
-
-    pageWindow.addEventListener("popstate", onCandidate);
-    pageWindow.addEventListener("hashchange", onCandidate);
-    window.addEventListener("pageshow", onCandidate);
-    document.addEventListener("loadstart", onMediaCandidate, true);
-    // Low-cost fallback for activity shells whose player appears asynchronously
-    // without changing history or emitting a media load event we can observe.
-    timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") tryActivate();
-    }, 1500);
-    tryActivate();
+    appCall("activation.start", {
+      pageWindow,
+      eventWindow: window,
+      document,
+      href: () => location.href,
+      boot,
+    });
   }
 
   if (document.readyState === "loading") {
