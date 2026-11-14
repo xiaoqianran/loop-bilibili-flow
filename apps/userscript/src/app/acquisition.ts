@@ -1,5 +1,5 @@
 /**
  * @deprecated Bilibili acquisition lives behind the provider boundary.
- * Kept as a compatibility surface until compat/maintained-runtime.js is gone.
+ * Retained only for callers of the former flat acquisition exports.
  */
 export * from "../providers/bilibili-acquisition";

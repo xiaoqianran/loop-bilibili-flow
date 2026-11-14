@@ -5,8 +5,6 @@ import { Script } from "node:vm";
 
 import {
   COMPAT_BODY_MARKER,
-  guardCompatRuntimeForBilibili,
-  stripUserscriptMetadata,
 } from "./userscript-build-utils";
 
 const projectRoot = process.cwd();
@@ -14,9 +12,9 @@ const outputPath = resolve(
   projectRoot,
   "dist/userscript/loop-bilibili-flow.user.js",
 );
-const maintainedSourcePath = resolve(
+const workbenchSourcePath = resolve(
   projectRoot,
-  "compat/maintained-runtime.js",
+  "apps/userscript/src/workbench/runtime.ts",
 );
 
 const requiredMetadata = [
@@ -79,9 +77,9 @@ async function verify(): Promise<void> {
     );
   }
 
-  const [output, maintainedSource, outputStats] = await Promise.all([
+  const [output, workbenchSource, outputStats] = await Promise.all([
     readFile(outputPath, "utf8"),
-    readFile(maintainedSourcePath, "utf8"),
+    readFile(workbenchSourcePath, "utf8"),
     stat(outputPath),
   ]);
 
@@ -99,21 +97,15 @@ async function verify(): Promise<void> {
   }
   new Script(output, { filename: "loop-bilibili-flow.user.js" });
 
-  const marker = `${COMPAT_BODY_MARKER}\n`;
-  const markerIndex = output.indexOf(marker);
-  if (markerIndex < 0) throw new Error("Temporary maintained runtime marker not found");
-  const outputBehaviorBody = output.slice(markerIndex + marker.length);
-  const expectedBehaviorBody = guardCompatRuntimeForBilibili(
-    stripUserscriptMetadata(maintainedSource),
-  );
-  if (outputBehaviorBody !== expectedBehaviorBody) {
-    throw new Error(
-      `Maintained behavior body mismatch: expected ${hash(expectedBehaviorBody)}, received ${hash(outputBehaviorBody)}`,
-    );
+  if (output.includes(COMPAT_BODY_MARKER)) {
+    throw new Error("Production userscript must not embed compatibility body marker");
+  }
+  if (!output.includes("mountWorkbench({ SubBatchMonorepo })")) {
+    throw new Error("Bundled workbench was not mounted by the composition root");
   }
   for (const capability of requiredCapabilities) {
-    if (!outputBehaviorBody.includes(capability)) {
-      throw new Error(`Production userscript lost capability marker: ${capability}`);
+    if (!workbenchSource.includes(capability) || !output.includes(capability)) {
+      throw new Error("Production userscript lost workbench capability: " + capability);
     }
   }
   for (const capability of requiredCanonicalCapabilities) {
@@ -123,12 +115,12 @@ async function verify(): Promise<void> {
       );
     }
   }
-  if (outputStats.size <= Buffer.byteLength(maintainedSource)) {
-    throw new Error("Production output is unexpectedly smaller than its maintained source");
+  if (outputStats.size < 500_000) {
+    throw new Error("Production workbench bundle is unexpectedly small (" + outputStats.size + " bytes)");
   }
 
   console.log(
-    `Verified ${outputPath}: single official userscript with full current behavior (sha256 ${hash(output)})`,
+    `Verified ${outputPath}: single bundled userscript with workbench capabilities and no compatibility append (sha256 ${hash(output)})`,
   );
 }
 

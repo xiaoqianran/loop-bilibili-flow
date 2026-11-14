@@ -74,7 +74,7 @@ app.activation.start(options);
 
 旧 flat API 暂时保留，只用于：
 
-- `compat/maintained-runtime.js` 临时兼容主体；
+- `apps/userscript/src/workbench/runtime.ts`：剩余待模块化的工作台主体；
 - Golden / differential tests；
 - 尚未迁移的旧调用方。
 

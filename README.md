@@ -27,7 +27,7 @@ schemas     core     bilibili     runtime
 - `packages/bilibili`：Bilibili route / player identity 规则。
 - `packages/runtime`：浏览器运行时端口与 Userscript adapter。
 - `apps/userscript`：唯一应用组合层。
-- `compat/maintained-runtime.js`：**临时迁移债务**，仅用于尚未迁入模块的完整产品行为；最终必须删除。
+- `apps/userscript/src/workbench/runtime.ts`：完整工作台由此统一打包；其剩余单体代码仍待拆分成强类型 UI / Controllers。
 - `legacy/Bili-SubBatch-v6.0.2.user.js`：只读 Golden Reference，不参与日常开发。
 
 ## 开发
@@ -60,6 +60,6 @@ pnpm build:pure-userscript
 2. 只有 `apps/userscript` 负责组合模块与浏览器环境。
 3. `core / schemas` 禁止 DOM、GM API、浏览器存储。
 4. 新功能按真实压力加入；不提前创建空 package / stub port。
-5. 每迁移一个 compat 能力，先用 Golden / differential test 锁行为，再删除 compat 中对应实现。
+5. 迁移剩余工作台模块时，先用 Golden / differential test 锁行为，再移走单体中的相应职责。
 
 详见 `docs/architecture.md`。

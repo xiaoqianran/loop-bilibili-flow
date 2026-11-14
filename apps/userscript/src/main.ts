@@ -1,12 +1,8 @@
+/// <reference types="vite/client" />
 /**
- * Monorepo userscript composition root (P4.5 Real Takeover).
- *
- * Production path is owned by apps/userscript + packages/*.
- * Full Studio UI still lives only in the compat build (maintained body);
- * pure build must never append the frozen v6.0.2 body.
- *
- * Vite IIFE global exposes one composition entry: `SubBatch.SubBatchMonorepo`.
- * The maintained body bridges pure cores via `SubBatch.SubBatchMonorepo.core`.
+ * Main userscript composition root.
+ * Full workbench is included as an application module.
+ * Pure laboratory mode exports only the API composition surface.
  */
 import * as bilibili from "@subbatch/bilibili";
 import * as core from "@subbatch/core";
@@ -16,6 +12,8 @@ import * as youtube from "@subbatch/youtube";
 import * as app from "./app";
 import * as ui from "./ui";
 import { createUserscriptHost } from "./userscript-host";
+import { mountWorkbench } from "./workbench/runtime";
+import { isWorkbenchHost } from "./workbench/host";
 
 const host = createUserscriptHost();
 const runtime = runtimeUserscript.create(host);
@@ -35,5 +33,10 @@ const SubBatchMonorepo = {
   app,
   ui,
 };
+
+if (import.meta.env.MODE !== "pure" && typeof location !== "undefined"
+  && isWorkbenchHost(location.hostname)) {
+  mountWorkbench({ SubBatchMonorepo });
+}
 
 export { SubBatchMonorepo };

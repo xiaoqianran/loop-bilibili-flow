@@ -1,39 +1,5 @@
-// ==UserScript==
-// @name         Bili SubBatch (loop-bilibili)
-// @namespace    https://github.com/loop-bilibili/bili-subbatch
-// @version      6.10.1
-// @description  B站知识阅读工作台：字幕预处理、多产物后处理、Anchor 局部追问树与持久 Knowledge Workspace
-// @author       loop-bilibili
-// @match        *://www.bilibili.com/video/*
-// @match        *://www.bilibili.com/festival/*
-// @match        *://www.bilibili.com/blackboard/*
-// @match        *://www.bilibili.com/list/*
-// @match        *://www.bilibili.com/bangumi/play/*
-// @match        *://www.bilibili.com/medialist/*
-// @match        *://www.bilibili.com/favlist*
-// @match        *://space.bilibili.com/*
-// @match        *://search.bilibili.com/*
-// @connect      api.bilibili.com
-// @connect      aisubtitle.hdslb.com
-// @connect      *.hdslb.com
-// @connect      bilibili.com
-// @connect      *
-// @connect      cdn.jsdelivr.net
-// @grant        unsafeWindow
-// @grant        GM_xmlhttpRequest
-// @grant        GM_setClipboard
-// @grant        GM_addStyle
-// @grant        GM_info
-// @grant        GM_setValue
-// @grant        GM_getValue
-// @grant        GM_deleteValue
-// @grant        GM_download
-// @run-at       document-idle
-// @license      MIT
-// @downloadURL https://update.greasyfork.org/scripts/589638/Bili%20SubBatch%20%28loop-bilibili%29.user.js
-// @updateURL https://update.greasyfork.org/scripts/589638/Bili%20SubBatch%20%28loop-bilibili%29.meta.js
-// ==/UserScript==
-
+// @ts-nocheck
+// Full-feature workbench. Bundled by the composition root; no standalone compatibility script.
 /**
  * v6.10.1 — Video Carrier 抽象：festival/blackboard 仅在检测到真实 BV / active player 后启动完整工作台；修正 live-player helper bridge。
  * v6.9.15 — 支持 B 站 /festival/* 专题页：复用 BV 路由与现有字幕链路，不引入专题页专用抓取分支。
@@ -106,7 +72,7 @@
  * See PEER_AI_PRACTICES.md.
  */
 
-(function () {
+export function mountWorkbench(SubBatch) {
   "use strict";
 
   /**
@@ -12960,4 +12926,4 @@ body{padding:48px 20px 80px}
   } else {
     startUserscript();
   }
-})();
+}

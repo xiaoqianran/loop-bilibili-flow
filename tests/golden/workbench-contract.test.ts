@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { userscriptMetadata } from "../../apps/userscript/metadata";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { renderShellStyles } from "../../apps/userscript/src/ui/shell/styles";
@@ -19,7 +20,7 @@ import {
 type UnknownFunction = (...args: any[]) => any;
 
 const maintainedSource = readFileSync(
-  fileURLToPath(new URL("../../compat/maintained-runtime.js", import.meta.url)),
+  fileURLToPath(new URL("../../apps/userscript/src/workbench/runtime.ts", import.meta.url)),
   "utf8",
 );
 
@@ -31,7 +32,7 @@ function functionNames(source: string): Set<string> {
   );
 }
 
-describe("Maintained full-feature compatibility source", () => {
+describe("Bundled full-feature workbench source", () => {
   it("delegates foundational shell CSS without removing workspace styles", () => {
     expect(maintainedSource).toContain("ui.panelStyles.renderShellStyles(PANEL_ID, MIN_W, MIN_H, DOCK_EDGE_PX)");
     expect(maintainedSource).toContain("ui.workspaceLayoutStyles.renderWorkspaceLayoutStyles(PANEL_ID)");
@@ -382,9 +383,9 @@ describe("Maintained full-feature compatibility source", () => {
     expect(maintainedSource).toContain("function paintStudioAnswer(");
     expect(maintainedSource).toContain("data-role=\"studio-answer\"");
     expect(renderAiStyles("bili-subbatch-panel")).toContain("align-self: flex-end");
-    expect(maintainedSource).toContain("// @version      6.10.1");
-    expect(maintainedSource).toContain("// @match        *://www.bilibili.com/festival/*");
-    expect(maintainedSource).toContain("// @match        *://www.bilibili.com/blackboard/*");
+    expect(userscriptMetadata.version).toBe("6.10.1");
+    expect(userscriptMetadata.match).toContain("*://www.bilibili.com/festival/*");
+    expect(userscriptMetadata.match).toContain("*://www.bilibili.com/blackboard/*");
     expect(maintainedSource).toContain('|| "6.10.1"');
     expect(maintainedSource).toContain("function isDeferredVideoCarrierPage(");
     expect(maintainedSource).toContain("function startUserscript(");

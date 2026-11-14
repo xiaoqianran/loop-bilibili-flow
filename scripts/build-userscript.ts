@@ -8,17 +8,12 @@ import {
   renderUserscriptMetadata,
   userscriptMetadata,
 } from "../apps/userscript/metadata";
-import {
-  COMPAT_BODY_MARKER,
-  guardCompatRuntimeForBilibili,
-  stripUserscriptMetadata,
-} from "./userscript-build-utils";
+import { COMPAT_BODY_MARKER } from "./userscript-build-utils";
 
 export type UserscriptBuildMode = "pure" | "full";
 
 const projectRoot = process.cwd();
 const legacyPath = resolve(projectRoot, "legacy/Bili-SubBatch-v6.0.2.user.js");
-const maintainedSourcePath = resolve(projectRoot, "compat/maintained-runtime.js");
 const outputDirectory = resolve(projectRoot, "dist/userscript");
 const buildDirectory = resolve(outputDirectory, ".build");
 const bundlePath = resolve(buildDirectory, "subbatch.bundle.js");
@@ -55,19 +50,20 @@ async function assertLegacyHash(): Promise<void> {
   }
 }
 
-async function buildBundle(): Promise<string> {
+async function buildBundle(mode: UserscriptBuildMode): Promise<string> {
   await rm(buildDirectory, { recursive: true, force: true });
   await mkdir(outputDirectory, { recursive: true });
   await build({
     configFile: resolve(projectRoot, "apps/userscript/vite.config.ts"),
     root: projectRoot,
     logLevel: "warn",
+    mode: mode === "pure" ? "pure" : "production",
   });
   return readFile(bundlePath, "utf8");
 }
 
 async function buildPureUserscript(): Promise<void> {
-  const bootstrap = await buildBundle();
+  const bootstrap = await buildBundle("pure");
   if (bootstrap.includes(COMPAT_BODY_MARKER)) {
     throw new Error("Pure bundle must not embed the maintained compatibility body");
   }
@@ -101,28 +97,22 @@ async function cleanOfficialOutput(): Promise<void> {
 async function buildFullUserscript(): Promise<void> {
   await assertLegacyHash();
   await cleanOfficialOutput();
-  const [bootstrap, maintainedSource] = await Promise.all([
-    buildBundle(),
-    readFile(maintainedSourcePath, "utf8"),
-  ]);
-  const maintainedBody = guardCompatRuntimeForBilibili(
-    stripUserscriptMetadata(maintainedSource),
-  );
+  const bootstrap = await buildBundle("full");
+  if (bootstrap.includes(COMPAT_BODY_MARKER)) {
+    throw new Error("Production bundle must not embed the temporary compatibility marker");
+  }
   const output = [
     renderUserscriptMetadata(userscriptMetadata),
     "",
-    `// SubBatch runtime (${userscriptMetadata.version})`,
+    "// SubBatch bundled application (" + userscriptMetadata.version + ")",
     bootstrap.trim(),
     "",
-    COMPAT_BODY_MARKER,
-    maintainedBody,
   ].join("\n");
 
   await writeFile(productionOutputPath, output, "utf8");
   await rm(buildDirectory, { recursive: true, force: true });
-  console.log(
-    `Built ${productionOutputPath} (${Buffer.byteLength(output)} bytes, sha256 ${sha256(output)})`,
-  );
+  console.log("Built " + productionOutputPath + " (" + Buffer.byteLength(output)
+    + " bytes, sha256 " + sha256(output) + ")");
 }
 
 async function main(): Promise<void> {

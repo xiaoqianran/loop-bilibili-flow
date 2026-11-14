@@ -14,7 +14,7 @@ pnpm build
 dist/userscript/loop-bilibili-flow.user.js
 ```
 
-`compat/maintained-runtime.js` 只是迁移期间暂存的旧产品主体，不属于目标架构。
+正式构建已不再拼接 `compat/maintained-runtime.js`。剩余工作台已纳入 `apps/userscript/src/workbench/runtime.ts` 统一打包，后续仍需拆分 UI / Controllers / Runtime。
 
 ## 分层
 
@@ -507,41 +507,20 @@ INTERNAL
   Host 实现细节
 
 TEMPORARY
-  compat/maintained-runtime.js
+  apps/userscript/src/workbench/runtime.ts（待拆分的大型工作台主体）
   flat compatibility aliases
   dist/lab/subbatch.pure.user.js
 ```
 
 规则：新代码只能依赖 FROZEN / INTERNAL canonical API，不得新增对 TEMPORARY 层的依赖。
 
-## Compat 退出路径
+## 完整工作台的模块化收尾
 
-```text
-现在
-apps/packages  ███████████
-compat         ███████████████████████
+正式构建已从 `apps/userscript/src/main.ts` 统一打包，不再读取或拼接兼容主体。
 
-迁移
-apps/packages  █████████████████████
-compat         ███████████
+- `apps/userscript/src/workbench/runtime.ts` 保留了功能完整的旧工作台，确保行为不因构建切换而缺失。
+- 该文件仍是大型单体，使用 `@ts-nocheck` 和独立 ESLint 排除；**不代表业务职责已彻底分层**。
+- 后续按 `UI → Controllers → Application → Providers/Runtime` 边界继续拆分，先添加浏览器端到端回归，再移除单体与临时豁免。
+- 浏览器侧需覆盖 Bilibili 字幕、AI PRE/POST、Studio、Knowledge、缓存、SPA 切换和 YouTube 隔离；单文件构建校验不能代替这些检查。
 
-最终
-apps/packages  ███████████████████████████████
-compat         0
-```
-
-迁移一个能力的标准流程：
-
-```text
-Golden test
-   ↓
-抽 pure/domain API
-   ↓
-App 接管真实调用
-   ↓
-产品测试
-   ↓
-删除 compat 对应实现
-```
-
-只有完成最后一步才算真正迁移。
+详见 `docs/migration/P9-workbench-bundle.md`。
