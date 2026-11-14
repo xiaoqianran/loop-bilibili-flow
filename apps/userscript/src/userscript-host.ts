@@ -201,8 +201,8 @@ function privilegedRequest(
   });
 }
 
-function mayRetryHttpFailure(request: NetworkRequest): boolean {
-  if (request.fallback !== "network-or-http") return false;
+function mayReplayAcrossTransports(request: NetworkRequest): boolean {
+  if (request.transport === "page" || request.transport === "privileged") return false;
   const method = String(request.method || "GET").toUpperCase();
   return method === "GET" || method === "HEAD" || method === "OPTIONS";
 }
@@ -261,14 +261,19 @@ export function createUserscriptHost(): UserscriptHost {
       if (typeof GM_deleteValue === "function") GM_deleteValue(key);
     },
     request: async (url, request) => {
+      if (request?.transport === "privileged") {
+        return privilegedRequest(url, request);
+      }
       // This CDN responds with ACAO:*; credentialed page fetch is blocked.
       // Avoid the noisy failed request and use the privileged transport.
-      if (new URL(url, pageHrefOf(pageWindow)).hostname === "aisubtitle.hdslb.com") {
+      if (request?.transport !== "page" &&
+          new URL(url, pageHrefOf(pageWindow)).hostname === "aisubtitle.hdslb.com") {
         return privilegedRequest(url, request);
       }
       try {
         const response = await fetchRequest(pageWindow, url, request);
-        if (!response.ok && mayRetryHttpFailure(request ?? {})) {
+        if (!response.ok && request?.fallback === "network-or-http" &&
+            mayReplayAcrossTransports(request)) {
           return privilegedRequest(url, request);
         }
         return response;
@@ -276,7 +281,8 @@ export function createUserscriptHost(): UserscriptHost {
         if (request?.signal?.aborted) throw error;
         if (
           error instanceof FetchNetworkError &&
-          request?.fallback !== "never"
+          request?.fallback !== "never" &&
+          mayReplayAcrossTransports(request ?? {})
         ) {
           return privilegedRequest(url, request);
         }

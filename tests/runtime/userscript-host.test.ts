@@ -113,4 +113,75 @@ describe("Userscript host network policy", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(gmRequest).not.toHaveBeenCalled();
   });
+
+  it("does not replay a POST when fetch fails without a response", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    installBrowserGlobals(fetchMock);
+    const gmRequest = vi.fn();
+    vi.stubGlobal("GM_xmlhttpRequest", gmRequest);
+
+    await expect(
+      createUserscriptHost().request("https://llm.example/chat/completions", {
+        method: "POST",
+        body: "{}",
+        fallback: "network-or-http",
+      }),
+    ).rejects.toThrow("Failed to fetch");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(gmRequest).not.toHaveBeenCalled();
+  });
+
+  it("falls back for a GET if page fetch fails before returning a response", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    installBrowserGlobals(fetchMock);
+    const gmRequest = vi.fn((details: GmTestRequestDetails) => {
+      queueMicrotask(() => details.onload({ status: 200, responseText: "ok" }));
+      return { abort: vi.fn() };
+    });
+    vi.stubGlobal("GM_xmlhttpRequest", gmRequest);
+
+    const result = await createUserscriptHost().request("https://api.bilibili.com/x/nav", {
+      fallback: "network-error",
+    });
+    expect(result.ok).toBe(true);
+    expect(gmRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends an explicitly privileged POST once, without page fetch", async () => {
+    const fetchMock = vi.fn();
+    installBrowserGlobals(fetchMock);
+    const gmRequest = vi.fn((details: GmTestRequestDetails) => {
+      queueMicrotask(() => details.onload({ status: 200, responseText: "ok" }));
+      return { abort: vi.fn() };
+    });
+    vi.stubGlobal("GM_xmlhttpRequest", gmRequest);
+
+    const result = await createUserscriptHost().request("https://llm.example/chat/completions", {
+      method: "POST",
+      body: "{}",
+      transport: "privileged",
+    });
+    expect(result.ok).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(gmRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("honors page-only requests on the subtitle CDN", async () => {
+    const fetchMock = vi.fn(async () => new Response("ok", { status: 200 }));
+    installBrowserGlobals(fetchMock);
+    const gmRequest = vi.fn();
+    vi.stubGlobal("GM_xmlhttpRequest", gmRequest);
+
+    const result = await createUserscriptHost().request(
+      "https://aisubtitle.hdslb.com/bfs/example",
+      { transport: "page", fallback: "network-or-http" },
+    );
+    expect(result.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(gmRequest).not.toHaveBeenCalled();
+  });
 });

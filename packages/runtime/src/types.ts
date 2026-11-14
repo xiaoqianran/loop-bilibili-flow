@@ -12,10 +12,18 @@ export interface NetworkRequest {
   credentials?: RequestCredentials;
   cache?: RequestCache;
   /**
-   * `network-error` retries through the privileged transport only when fetch
-   * never produced a response. `network-or-http` additionally retries failed
-   * idempotent requests. Unsafe POST requests are never retried after a
-   * response has started.
+   * Choose the transport before sending a request.
+   * "privileged" is appropriate for a cross-origin POST that cannot use page
+   * fetch: do not send it through fetch first and then replay through GM.
+   * "page" disables automatic fallback, including for known CDN endpoints.
+   */
+  transport?: "auto" | "page" | "privileged";
+  /**
+   * Only GET / HEAD / OPTIONS can be automatically retried on another
+   * transport. `network-error` retries if fetch rejects before returning a
+   * response; `network-or-http` also retries non-2xx responses.
+   * Non-idempotent methods must choose `transport: "privileged"` up front if
+   * needed (their outcome is ambiguous when a network error occurs).
    */
   fallback?: "never" | "network-error" | "network-or-http";
   /** When true, prefer streaming body and invoke onChunk as data arrives. */

@@ -3924,64 +3924,81 @@ ${prompt2.userPromptTemplate}`
   }
   const resolveCurrentVideoRef = resolve;
   function observe(options) {
-    const originalPush = options.pageWindow.history.pushState;
-    const originalReplace = options.pageWindow.history.replaceState;
-    const pushState = (...args) => {
-      const result = originalPush.apply(options.pageWindow.history, args);
-      options.eventWindow.setTimeout(options.onNavigate, 0);
-      return result;
+    const getHref = () => String(options.pageWindow.location?.href || options.eventWindow.location?.href || "");
+    const contentIdentity = () => {
+      const resolved = providerRegistry.resolveCurrent({
+        href: getHref(),
+        pageRuntime: options.pageWindow
+      });
+      if (!resolved) return "";
+      const native = resolved.native;
+      return `${resolved.key}:${Number(native?.cid) || 0}`;
     };
-    const replaceState = (...args) => {
-      const result = originalReplace.apply(options.pageWindow.history, args);
-      options.eventWindow.setTimeout(options.onNavigate, 0);
-      return result;
-    };
-    options.pageWindow.history.pushState = pushState;
-    options.pageWindow.history.replaceState = replaceState;
-    const onPageShow = () => {
+    let lastHref = getHref();
+    let lastIdentity = contentIdentity();
+    let disposed = false;
+    const notify = (force = false) => {
+      if (disposed) return;
+      const href = getHref();
+      const identity = contentIdentity();
+      if (!force && href === lastHref && identity === lastIdentity) return;
+      lastHref = href;
+      lastIdentity = identity;
       options.onNavigate();
-      options.onPageShow?.();
     };
+    const spaHandle = spa.observe(
+      {
+        historyWindow: options.pageWindow,
+        eventWindow: options.eventWindow,
+        documentRef: options.document,
+        getHref,
+        pollIntervalMs: 0,
+        setTimeoutFn: options.eventWindow.setTimeout.bind(options.eventWindow)
+      },
+      () => notify()
+    );
+    const onHistoryEvent = () => {
+      spaHandle.check();
+      notify();
+    };
+    const onPageShow = () => options.onPageShow?.();
     const onVisibilityChange = () => {
-      if (options.document.visibilityState !== "visible") return;
-      options.onNavigate();
-      options.onVisible?.();
+      if (options.document.visibilityState === "visible") options.onVisible?.();
     };
     const onMediaLoad = (event) => {
-      const target = event.target;
-      if (target?.tagName === "VIDEO" || target?.tagName === "AUDIO") {
-        options.onNavigate();
-      }
+      const tag = event.target?.tagName;
+      if (tag === "VIDEO" || tag === "AUDIO") notify(true);
     };
-    options.pageWindow.addEventListener("popstate", options.onNavigate);
-    options.pageWindow.addEventListener("hashchange", options.onNavigate);
+    const onProviderNavigate = () => {
+      spaHandle.check();
+      notify(true);
+    };
+    options.pageWindow.addEventListener("popstate", onHistoryEvent);
+    options.pageWindow.addEventListener("hashchange", onHistoryEvent);
     const providerNavigationEvents = providerRegistry.navigationEvents();
     for (const eventName of providerNavigationEvents) {
-      options.pageWindow.addEventListener(eventName, options.onNavigate);
+      options.pageWindow.addEventListener(eventName, onProviderNavigate);
     }
     options.eventWindow.addEventListener("pageshow", onPageShow);
     options.document.addEventListener("visibilitychange", onVisibilityChange);
     options.document.addEventListener("loadstart", onMediaLoad, true);
-    const timer = options.eventWindow.setInterval(
-      options.onNavigate,
-      options.pollMs ?? 800
-    );
+    const timer = options.eventWindow.setInterval(() => {
+      spaHandle.check();
+      notify();
+    }, options.pollMs ?? 800);
     return () => {
+      if (disposed) return;
+      disposed = true;
       options.eventWindow.clearInterval(timer);
-      options.pageWindow.removeEventListener("popstate", options.onNavigate);
-      options.pageWindow.removeEventListener("hashchange", options.onNavigate);
+      options.pageWindow.removeEventListener("popstate", onHistoryEvent);
+      options.pageWindow.removeEventListener("hashchange", onHistoryEvent);
       for (const eventName of providerNavigationEvents) {
-        options.pageWindow.removeEventListener(eventName, options.onNavigate);
+        options.pageWindow.removeEventListener(eventName, onProviderNavigate);
       }
       options.eventWindow.removeEventListener("pageshow", onPageShow);
       options.document.removeEventListener("visibilitychange", onVisibilityChange);
       options.document.removeEventListener("loadstart", onMediaLoad, true);
-      if (options.pageWindow.history.pushState === pushState) {
-        options.pageWindow.history.pushState = originalPush;
-      }
-      if (options.pageWindow.history.replaceState === replaceState) {
-        options.pageWindow.history.replaceState = originalReplace;
-      }
+      spaHandle.dispose();
     };
   }
   const installNavigationLifecycle = observe;
@@ -8502,8 +8519,8 @@ ${prompt2.userPromptTemplate}`
       if (settled) cleanup();
     });
   }
-  function mayRetryHttpFailure(request2) {
-    if (request2.fallback !== "network-or-http") return false;
+  function mayReplayAcrossTransports(request2) {
+    if (request2.transport === "page" || request2.transport === "privileged") return false;
     const method = String(request2.method || "GET").toUpperCase();
     return method === "GET" || method === "HEAD" || method === "OPTIONS";
   }
@@ -8551,18 +8568,21 @@ ${prompt2.userPromptTemplate}`
         if (typeof GM_deleteValue === "function") GM_deleteValue(key);
       },
       request: async (url, request2) => {
-        if (new URL(url, pageHrefOf(pageWindow)).hostname === "aisubtitle.hdslb.com") {
+        if (request2?.transport === "privileged") {
+          return privilegedRequest(url, request2);
+        }
+        if (request2?.transport !== "page" && new URL(url, pageHrefOf(pageWindow)).hostname === "aisubtitle.hdslb.com") {
           return privilegedRequest(url, request2);
         }
         try {
           const response = await fetchRequest(pageWindow, url, request2);
-          if (!response.ok && mayRetryHttpFailure(request2 ?? {})) {
+          if (!response.ok && request2?.fallback === "network-or-http" && mayReplayAcrossTransports(request2)) {
             return privilegedRequest(url, request2);
           }
           return response;
         } catch (error) {
           if (request2?.signal?.aborted) throw error;
-          if (error instanceof FetchNetworkError && request2?.fallback !== "never") {
+          if (error instanceof FetchNetworkError && request2?.fallback !== "never" && mayReplayAcrossTransports(request2 ?? {})) {
             return privilegedRequest(url, request2);
           }
           throw error;

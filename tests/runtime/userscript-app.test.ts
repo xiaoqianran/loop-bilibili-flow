@@ -33,9 +33,14 @@ class FakeTarget {
 class FakeWindow extends FakeTarget {
   player?: unknown;
   interval: (() => void) | null = null;
+  location = { href: "https://www.bilibili.com/video/BV1NORMAL0001" };
   history = {
-    pushState: () => {},
-    replaceState: () => {},
+    pushState: (_state: unknown, _title: string, url?: string | URL | null) => {
+      if (url != null) this.location.href = new URL(String(url), this.location.href).href;
+    },
+    replaceState: (_state: unknown, _title: string, url?: string | URL | null) => {
+      if (url != null) this.location.href = new URL(String(url), this.location.href).href;
+    },
   } as unknown as History;
 
   setTimeout(handler: TimerHandler): number {
@@ -218,30 +223,88 @@ describe("userscript app boundary", () => {
     expect(navigations).toBe(1);
 
     eventWindow.emit("pageshow");
-    expect(navigations).toBe(2);
+    expect(navigations).toBe(1);
     expect(pageShows).toBe(1);
 
     document.emit("visibilitychange");
-    expect(navigations).toBe(3);
+    expect(navigations).toBe(1);
     expect(visible).toBe(1);
 
     document.emit(
       "loadstart",
       { target: { tagName: "VIDEO" } } as unknown as Event,
     );
-    expect(navigations).toBe(4);
+    expect(navigations).toBe(2);
 
     document.visibilityState = "hidden";
     document.emit("visibilitychange");
-    expect(navigations).toBe(4);
+    expect(navigations).toBe(2);
 
     pageWindow.emit("yt-navigate-finish");
-    expect(navigations).toBe(5);
+    expect(navigations).toBe(3);
+    eventWindow.interval?.();
+    expect(navigations).toBe(3);
 
     cleanup();
     expect(pageWindow.history.pushState).toBe(originalPush);
     pageWindow.emit("popstate");
     pageWindow.emit("yt-navigate-finish");
-    expect(navigations).toBe(5);
+    expect(navigations).toBe(3);
+  });
+
+  it("detects a same-URL player change without calling on unchanged polls", () => {
+    const pageWindow = new FakeWindow();
+    const eventWindow = new FakeWindow();
+    const document = new FakeDocument();
+    pageWindow.location.href = "https://www.bilibili.com/festival/special";
+    let navigations = 0;
+    const cleanup = navigation.observe({
+      pageWindow: pageWindow as unknown as Window,
+      eventWindow: eventWindow as unknown as Window,
+      document: document as unknown as Document,
+      onNavigate: () => { navigations += 1; },
+    });
+
+    eventWindow.interval?.();
+    expect(navigations).toBe(0);
+    pageWindow.player = { getManifest: () => ({ bvid: "BV1PLAYER001", cid: 11 }) };
+    eventWindow.interval?.();
+    expect(navigations).toBe(1);
+    eventWindow.interval?.();
+    expect(navigations).toBe(1);
+    pageWindow.player = { getManifest: () => ({ bvid: "BV1PLAYER001", cid: 22 }) };
+    document.visibilityState = "hidden";
+    eventWindow.interval?.();
+    expect(navigations).toBe(2);
+
+    cleanup();
+    eventWindow.interval?.();
+    expect(navigations).toBe(2);
+  });
+
+  it("keeps multiple navigation subscribers isolated and restores History once", () => {
+    const pageWindow = new FakeWindow();
+    const eventWindow = new FakeWindow();
+    const document = new FakeDocument();
+    const originalPush = pageWindow.history.pushState;
+    let first = 0;
+    let second = 0;
+    const options = {
+      pageWindow: pageWindow as unknown as Window,
+      eventWindow: eventWindow as unknown as Window,
+      document: document as unknown as Document,
+    };
+    const stopFirst = navigation.observe({ ...options, onNavigate: () => { first += 1; } });
+    const stopSecond = navigation.observe({ ...options, onNavigate: () => { second += 1; } });
+
+    pageWindow.history.pushState({}, "", "/first");
+    expect([first, second]).toEqual([1, 1]);
+
+    stopFirst();
+    pageWindow.history.pushState({}, "", "/second");
+    expect([first, second]).toEqual([1, 2]);
+
+    stopSecond();
+    expect(pageWindow.history.pushState).toBe(originalPush);
   });
 });
