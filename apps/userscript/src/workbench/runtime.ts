@@ -198,8 +198,6 @@ export function mountWorkbench(SubBatch) {
     Object.freeze({ id: "open-postprocess", label: "后处理结果", hint: "直接打开 AI 工作台 → 后处理，并恢复当前/上次产物与模型。", defaultChord: "Ctrl+Alt+Digit2" }),
     Object.freeze({ id: "toggle-dock", label: "悬浮 / 靠边", hint: "在悬浮模式和你偏好的贴边方向之间切换。", defaultChord: "Ctrl+Alt+KeyD" }),
   ]);
-  const KNOWLEDGE_DB_NAME = "bili-subbatch-knowledge-v1";
-  const KNOWLEDGE_DB_VERSION = 1;
   const KNOWLEDGE_ANCHOR_STORE = "anchors";
   const KNOWLEDGE_NODE_STORE = "nodes";
   const KNOWLEDGE_SELECTION_MIN = 2;
@@ -2553,7 +2551,6 @@ export function mountWorkbench(SubBatch) {
     libraryQuery: "",
     libraryFilter: "all", // all | ok | wait | error | empty
     captureDrawerOpen: false,
-    knowledgeDbPromise: null,
     knowledgeAnchors: [],
     knowledgeNodes: [],
     knowledgeSearch: "",
@@ -5441,66 +5438,10 @@ export function mountWorkbench(SubBatch) {
     return knowledgeRepository;
   }
 
-  function openKnowledgeDb() {
-    const repo = currentKnowledgeRepository();
-    if (repo) return repo.open();
-    if (state.knowledgeDbPromise) return state.knowledgeDbPromise;
-    state.knowledgeDbPromise = new Promise((resolve, reject) => {
-      if (!globalThis.indexedDB) return reject(new Error("IndexedDB unavailable"));
-      const req = indexedDB.open(KNOWLEDGE_DB_NAME, KNOWLEDGE_DB_VERSION);
-      req.onupgradeneeded = () => {
-        const db = req.result;
-        if (!db.objectStoreNames.contains(KNOWLEDGE_ANCHOR_STORE)) {
-          const store = db.createObjectStore(KNOWLEDGE_ANCHOR_STORE, { keyPath: "id" });
-          store.createIndex("sourceKey", "sourceKey", { unique: false });
-          store.createIndex("updatedAt", "updatedAt", { unique: false });
-        }
-        if (!db.objectStoreNames.contains(KNOWLEDGE_NODE_STORE)) {
-          const store = db.createObjectStore(KNOWLEDGE_NODE_STORE, { keyPath: "id" });
-          store.createIndex("anchorId", "anchorId", { unique: false });
-          store.createIndex("parentId", "parentId", { unique: false });
-          store.createIndex("updatedAt", "updatedAt", { unique: false });
-        }
-      };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error || new Error("Knowledge DB open failed"));
-    }).catch((error) => {
-      state.knowledgeDbPromise = null;
-      throw error;
-    });
-    return state.knowledgeDbPromise;
-  }
-
-  async function knowledgeStoreRequest(storeName, mode, handler) {
-    const repo = currentKnowledgeRepository();
-    if (repo) return repo.request(storeName, mode, handler);
-    const db = await openKnowledgeDb();
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, mode);
-      const store = tx.objectStore(storeName);
-      let req;
-      let result;
-      let settled = false;
-      const fail = (error) => {
-        if (settled) return;
-        settled = true;
-        reject(error || tx.error || new Error("Knowledge DB transaction failed"));
-      };
-      try { req = handler(store); } catch (error) { fail(error); return; }
-      if (req && typeof req === "object" && "onsuccess" in req) {
-        req.onsuccess = () => { result = req.result; };
-        req.onerror = () => fail(req.error || new Error("Knowledge DB request failed"));
-      } else {
-        result = req;
-      }
-      tx.oncomplete = () => {
-        if (settled) return;
-        settled = true;
-        resolve(result);
-      };
-      tx.onerror = () => fail(tx.error);
-      tx.onabort = () => fail(tx.error || new Error("Knowledge DB transaction aborted"));
-    });
+  function knowledgeStoreRequest(storeName, mode, handler) {
+    const repository = currentKnowledgeRepository();
+    if (!repository) return Promise.reject(new Error("IndexedDB unavailable"));
+    return repository.request(storeName, mode, handler);
   }
 
   async function knowledgeRefreshCache() {
@@ -5524,39 +5465,24 @@ export function mountWorkbench(SubBatch) {
   }
 
   async function knowledgePutAnchor(anchor) {
-    await knowledgeStoreRequest(KNOWLEDGE_ANCHOR_STORE, "readwrite", (s) => s.put(anchor));
-    const i = state.knowledgeAnchors.findIndex((x) => x.id === anchor.id);
-    if (i >= 0) state.knowledgeAnchors[i] = anchor; else state.knowledgeAnchors.unshift(anchor);
-    state.knowledgeAnchors.sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
-    return anchor;
+    return appCall("knowledge.saveAnchor", state.knowledgeAnchors, anchor,
+      (value) => knowledgeStoreRequest(KNOWLEDGE_ANCHOR_STORE, "readwrite", (store) => store.put(value)));
   }
 
   async function knowledgePutNode(node) {
-    await knowledgeStoreRequest(KNOWLEDGE_NODE_STORE, "readwrite", (s) => s.put(node));
-    const i = state.knowledgeNodes.findIndex((x) => x.id === node.id);
-    if (i >= 0) state.knowledgeNodes[i] = node; else state.knowledgeNodes.push(node);
-    return node;
+    return appCall("knowledge.saveNode", state.knowledgeNodes, node,
+      (value) => knowledgeStoreRequest(KNOWLEDGE_NODE_STORE, "readwrite", (store) => store.put(value)));
   }
 
   async function knowledgeDeleteAnchor(anchorId) {
     if (state.knowledgeRuntime && state.knowledgeActiveAnchorId === anchorId) abortKnowledgeRequest();
-    const repo = currentKnowledgeRepository();
-    if (repo) {
-      await repo.deleteAnchor(anchorId);
-      const remaining = appCall("knowledge.removeAnchor", state.knowledgeAnchors, state.knowledgeNodes, anchorId);
-      state.knowledgeAnchors = remaining.anchors;
-      state.knowledgeNodes = remaining.nodes;
-      if (state.knowledgeActiveAnchorId === anchorId) {
-        state.knowledgeActiveAnchorId = "";
-        state.knowledgeActiveNodeId = "";
-      }
-      return;
-    }
-    const nodeIds = state.knowledgeNodes.filter((n) => n.anchorId === anchorId).map((n) => n.id);
-    await Promise.all(nodeIds.map((id) => knowledgeStoreRequest(KNOWLEDGE_NODE_STORE, "readwrite", (s) => s.delete(id))));
-    await knowledgeStoreRequest(KNOWLEDGE_ANCHOR_STORE, "readwrite", (s) => s.delete(anchorId));
-    state.knowledgeAnchors = state.knowledgeAnchors.filter((a) => a.id !== anchorId);
-    state.knowledgeNodes = state.knowledgeNodes.filter((n) => n.anchorId !== anchorId);
+    const repository = currentKnowledgeRepository();
+    if (!repository) throw new Error("IndexedDB unavailable");
+    const remaining = await appCall("knowledge.deleteAnchorCommitted",
+      state.knowledgeAnchors, state.knowledgeNodes, anchorId,
+      (id) => repository.deleteAnchor(id));
+    state.knowledgeAnchors = remaining.anchors;
+    state.knowledgeNodes = remaining.nodes;
     if (state.knowledgeActiveAnchorId === anchorId) {
       state.knowledgeActiveAnchorId = "";
       state.knowledgeActiveNodeId = "";

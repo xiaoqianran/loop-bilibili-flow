@@ -47,7 +47,6 @@ const requiredCapabilities = [
   "function bindGlobalShortcuts(",
   "function downloadSubtitleExportBatch(",
   "loop-bilibili-subbatch",
-  "bili-subbatch-knowledge-v1",
 ] as const;
 
 const requiredCanonicalCapabilities = [
@@ -107,6 +106,12 @@ async function verify(): Promise<void> {
     if (!workbenchSource.includes(capability) || !output.includes(capability)) {
       throw new Error("Production userscript lost workbench capability: " + capability);
     }
+  }
+  // Knowledge DB identity now belongs to the schema/repository, not the workbench.
+  const schemaSource = await readFile(resolve(projectRoot, "packages/schemas/src/persistence.ts"), "utf8");
+  const knowledgeDbName = "bili-subbatch-knowledge-v1";
+  if (!schemaSource.includes(knowledgeDbName) || !output.includes(knowledgeDbName)) {
+    throw new Error("Knowledge database identity must remain in schema and bundled output");
   }
   for (const capability of requiredCanonicalCapabilities) {
     if (!output.includes(capability)) {

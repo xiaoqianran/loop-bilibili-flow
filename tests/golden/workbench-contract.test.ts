@@ -64,6 +64,7 @@ describe("Bundled full-feature workbench source", () => {
       "knowledgeAncestorNodes",
       "knowledgeBranchContext",
       "openCacheDatabase",
+      "openKnowledgeDb",
       "persistentCacheRead",
       "persistentCacheWrite",
       "persistentCacheDelete",
@@ -234,6 +235,16 @@ describe("Bundled full-feature workbench source", () => {
     }
     expect(maintainedSource).not.toContain('const liveRunning = state.knowledgeBusy');
     expect(maintainedSource).not.toContain('botMsg.status = runtime.abort ?');
+  });
+
+  it("uses the Knowledge repository as the sole database writer and delete owner", () => {
+    expect(maintainedSource).not.toContain("function openKnowledgeDb(");
+    expect(maintainedSource).not.toContain("state.knowledgeDbPromise");
+    for (const name of ["saveAnchor", "saveNode", "deleteAnchorCommitted"]) {
+      expect(maintainedSource).toContain('appCall("knowledge.' + name + '"');
+    }
+    expect(maintainedSource).toContain("repository.deleteAnchor(id)");
+    expect(maintainedSource).not.toContain("const nodeIds = state.knowledgeNodes.filter(");
   });
 
   it("delegates migrated acquisition rules to grouped Bilibili APIs", () => {

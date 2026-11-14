@@ -124,3 +124,41 @@ export function sortAnchors<T extends { updatedAt?: number }>(
 ): T[] {
   return [...(anchors || [])].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
 }
+
+/** Apply successful repository commits without replacing unrelated live objects. */
+export function cacheAnchor<T extends { id: string; updatedAt?: number }>(
+  anchors: T[], anchor: T,
+): T {
+  const index = anchors.findIndex(item => item.id === anchor.id);
+  if (index >= 0) anchors[index] = anchor;
+  else anchors.unshift(anchor);
+  anchors.sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+  return anchor;
+}
+export function cacheNode<T extends { id: string }>(nodes: T[], node: T): T {
+  const index = nodes.findIndex(item => item.id === node.id);
+  if (index >= 0) nodes[index] = node;
+  else nodes.push(node);
+  return node;
+}
+
+/** Keep in-memory collections unchanged until the storage transaction commits. */
+export async function saveAnchor<T extends { id: string; updatedAt?: number }>(
+  anchors: T[], anchor: T, commit: (value: T) => Promise<unknown>,
+): Promise<T> {
+  await commit(anchor);
+  return cacheAnchor(anchors, anchor);
+}
+export async function saveNode<T extends { id: string }>(
+  nodes: T[], node: T, commit: (value: T) => Promise<unknown>,
+): Promise<T> {
+  await commit(node);
+  return cacheNode(nodes, node);
+}
+export async function deleteAnchorCommitted<A extends { id: string }, N extends { anchorId: string }>(
+  anchors: readonly A[], nodes: readonly N[], anchorId: string,
+  commit: (id: string) => Promise<unknown>,
+) {
+  await commit(anchorId);
+  return removeAnchor(anchors, nodes, anchorId);
+}
