@@ -3522,6 +3522,48 @@ ${prompt2.userPromptTemplate}`
     videoDetails,
     videoWatchUrl
   }, Symbol.toStringTag, { value: "Module" }));
+  function reorderIds(ids, fromId, toId) {
+    const list = Array.isArray(ids) ? ids.map(String) : [];
+    const from = list.indexOf(String(fromId || ""));
+    const to = list.indexOf(String(toId || ""));
+    if (from < 0 || to < 0 || from === to) return list;
+    const next = list.slice();
+    const [item] = next.splice(from, 1);
+    if (item === void 0) return list;
+    next.splice(to, 0, item);
+    return next;
+  }
+  function applyConfigIdOrder(items, orderedIds) {
+    const list = Array.isArray(items) ? [...items] : [];
+    const byId = new Map(list.map((item) => [String(item.id), item]));
+    const seen = /* @__PURE__ */ new Set();
+    const next = [];
+    for (const id of orderedIds || []) {
+      const hit = byId.get(String(id));
+      if (!hit || seen.has(hit.id)) continue;
+      seen.add(hit.id);
+      next.push(hit);
+    }
+    for (const item of list) if (!seen.has(item.id)) next.push(item);
+    return next;
+  }
+  function applyPromptStageOrder(prompts, stage, orderedIds) {
+    const list = Array.isArray(prompts) ? [...prompts] : [];
+    const byId = new Map(list.map((item) => [String(item.id), item]));
+    const ordered = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const id of orderedIds || []) {
+      const hit = byId.get(String(id));
+      if (!hit || hit.stage !== stage || seen.has(hit.id)) continue;
+      seen.add(hit.id);
+      ordered.push(hit);
+    }
+    for (const item of list) {
+      if (item.stage === stage && !seen.has(item.id)) ordered.push(item);
+    }
+    let index = 0;
+    return list.map((item) => item.stage === stage ? ordered[index++] || item : item);
+  }
   function assertScanActive(cancelled) {
     if (!cancelled()) return;
     const error = new Error("扫描已取消");
@@ -5132,22 +5174,22 @@ ${prompt2.userPromptTemplate}`
     }
     return parts[0];
   }
-  function textOf(element) {
-    return String(element?.textContent || "").replace(/\s+/g, " ").trim();
+  function textOf(element2) {
+    return String(element2?.textContent || "").replace(/\s+/g, " ").trim();
   }
   function parseDomTranscript(document2) {
     const first = document2.querySelector(SEGMENT_SELECTOR);
     const scope = first?.closest("ytd-engagement-panel-section-list-renderer") ?? document2;
     const nodes = [...scope.querySelectorAll(SEGMENT_SELECTOR)];
-    const draft = nodes.flatMap((element, index) => {
-      const classic = element.matches("ytd-transcript-segment-renderer");
+    const draft = nodes.flatMap((element2, index) => {
+      const classic = element2.matches("ytd-transcript-segment-renderer");
       const timestamp = textOf(
-        element.querySelector(
+        element2.querySelector(
           classic ? ".segment-timestamp" : '[class*="Timestamp"]'
         )
       );
       const text = textOf(
-        element.querySelector(
+        element2.querySelector(
           classic ? ".segment-text" : '.ytAttributedStringHost, [class*="AttributedString"]'
         )
       );
@@ -5395,6 +5437,11 @@ ${prompt2.userPromptTemplate}`
     tryActivate();
     return cleanup;
   }
+  const ordering = {
+    reorderIds,
+    applyConfigIdOrder,
+    applyPromptStageOrder
+  };
   const libraryScan = {
     collectPages,
     expandCollectionParts,
@@ -5514,6 +5561,7 @@ ${prompt2.userPromptTemplate}`
     libraryScan,
     navigation,
     observe,
+    ordering,
     preprocess,
     resolve,
     resolveCurrentContent,
@@ -9800,9 +9848,9 @@ ${prompt2.userPromptTemplate}`
     applyWorkbenchStageUi,
     stageOf
   }, Symbol.toStringTag, { value: "Module" }));
-  const bindings = /* @__PURE__ */ new WeakMap();
-  function bind(root, ports) {
-    bindings.get(root)?.();
+  const bindings$2 = /* @__PURE__ */ new WeakMap();
+  function bind$2(root, ports) {
+    bindings$2.get(root)?.();
     const input = root.querySelector('[data-role="studio-input"]');
     if (!input) return () => {
     };
@@ -9869,14 +9917,14 @@ ${prompt2.userPromptTemplate}`
       root.removeEventListener("click", onClick, true);
       input.removeEventListener("input", onInput);
       input.removeEventListener("keydown", onKey);
-      if (bindings.get(root) === dispose) bindings.delete(root);
+      if (bindings$2.get(root) === dispose) bindings$2.delete(root);
     };
-    bindings.set(root, dispose);
+    bindings$2.set(root, dispose);
     return dispose;
   }
   const studioInteractionController = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
-    bind
+    bind: bind$2
   }, Symbol.toStringTag, { value: "Module" }));
   function formatTime(seconds, withHours = false) {
     const total = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -10229,6 +10277,232 @@ ${prompt2.userPromptTemplate}`
     composerHtml,
     evidenceHtml
   }, Symbol.toStringTag, { value: "Module" }));
+  const CONFIG_ITEM = ".bsb-config-list-item[draggable='true']";
+  const FLOW_ITEM = ".bsb-model-rank[draggable='true']";
+  const CONFIG_LIST = '[data-role="prompt-list"], [data-role="ai-list"]';
+  const FLOW_CARD = "[data-flow-task-id]";
+  const ACTIVE = ".bsb-config-list-item.dragging, .bsb-config-list-item.drag-over, .bsb-model-rank.dragging, .bsb-model-rank.drag-over";
+  const bindings$1 = /* @__PURE__ */ new WeakMap();
+  function element(event) {
+    const target = event.target;
+    return target && typeof target.closest === "function" ? target : null;
+  }
+  function attr(el, key) {
+    return el.dataset[key] || "";
+  }
+  function bind$1(root, ports) {
+    bindings$1.get(root)?.();
+    let dragging = null;
+    const clear = () => {
+      root.querySelectorAll(ACTIVE).forEach((item) => item.classList.remove("dragging", "drag-over"));
+    };
+    const onStart = (event) => {
+      const target = element(event);
+      if (!target) return;
+      clear();
+      dragging = null;
+      const config = target.closest(CONFIG_ITEM);
+      if (config && root.contains(config)) {
+        const list = config.closest(CONFIG_LIST);
+        if (!list || list.dataset.reorderLocked === "1") {
+          event.preventDefault();
+          return;
+        }
+        const id = attr(config, "promptListId") || attr(config, "aiListId");
+        if (!id) {
+          event.preventDefault();
+          return;
+        }
+        dragging = { type: "config", kind: list.dataset.role === "prompt-list" ? "prompt" : "llm", id, list };
+        config.classList.add("dragging");
+      } else {
+        const model = target.closest(FLOW_ITEM);
+        if (!model || !root.contains(model)) return;
+        const card = model.closest(FLOW_CARD);
+        const id = attr(model, "flowModelId");
+        if (!card || !id) return;
+        if (target.closest("[data-flow-task-model-remove]")) {
+          event.preventDefault();
+          return;
+        }
+        dragging = { type: "flow", id, taskId: attr(card, "flowTaskId"), card };
+        model.classList.add("dragging");
+      }
+      try {
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", dragging.id);
+        }
+      } catch {
+      }
+    };
+    const targetFor = (target, drag) => {
+      if (drag.type === "config") {
+        const item2 = target.closest(CONFIG_ITEM);
+        return item2?.closest(CONFIG_LIST) === drag.list ? item2 : null;
+      }
+      const item = target.closest(FLOW_ITEM);
+      const card = item?.closest(FLOW_CARD);
+      return card && attr(card, "flowTaskId") === drag.taskId ? item || null : null;
+    };
+    const onOver = (event) => {
+      const target = element(event);
+      if (!target || !dragging) return;
+      const item = targetFor(target, dragging);
+      if (!item) return;
+      event.preventDefault();
+      try {
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+      } catch {
+      }
+      const scope = dragging.type === "config" ? dragging.list : dragging.card;
+      const selector = dragging.type === "config" ? ".bsb-config-list-item.drag-over" : ".bsb-model-rank.drag-over";
+      scope.querySelectorAll(selector).forEach((el) => {
+        if (el !== item) el.classList.remove("drag-over");
+      });
+      const id = dragging.type === "config" ? attr(item, "promptListId") || attr(item, "aiListId") : attr(item, "flowModelId");
+      if (id !== dragging.id) item.classList.add("drag-over");
+    };
+    const onLeave = (event) => {
+      const target = element(event);
+      const item = target?.closest(".bsb-config-list-item, .bsb-model-rank");
+      if (!item) return;
+      const related = event.relatedTarget;
+      if (related && item.contains(related)) return;
+      item.classList.remove("drag-over");
+    };
+    const onEnd = () => {
+      clear();
+      dragging = null;
+    };
+    const onDrop = (event) => {
+      const target = element(event);
+      if (!target || !dragging) return;
+      const item = targetFor(target, dragging);
+      if (!item) return;
+      event.preventDefault();
+      const drag = dragging;
+      const toId = drag.type === "config" ? attr(item, "promptListId") || attr(item, "aiListId") : attr(item, "flowModelId");
+      onEnd();
+      if (!toId || toId === drag.id) return;
+      if (drag.type === "config") ports.reorderConfig(drag.kind, drag.id, toId);
+      else ports.reorderFlow(drag.taskId, drag.id, toId);
+    };
+    root.addEventListener("dragstart", onStart);
+    root.addEventListener("dragover", onOver);
+    root.addEventListener("dragleave", onLeave);
+    root.addEventListener("drop", onDrop);
+    root.addEventListener("dragend", onEnd);
+    const dispose = () => {
+      root.removeEventListener("dragstart", onStart);
+      root.removeEventListener("dragover", onOver);
+      root.removeEventListener("dragleave", onLeave);
+      root.removeEventListener("drop", onDrop);
+      root.removeEventListener("dragend", onEnd);
+      onEnd();
+      if (bindings$1.get(root) === dispose) bindings$1.delete(root);
+    };
+    bindings$1.set(root, dispose);
+    return dispose;
+  }
+  const reorderInteraction = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    bind: bind$1
+  }, Symbol.toStringTag, { value: "Module" }));
+  const bindings = /* @__PURE__ */ new WeakMap();
+  function closest(event, selector) {
+    const target = event.target;
+    return typeof target?.closest === "function" ? target.closest(selector) : null;
+  }
+  function debounceInput(target, delay, onValue) {
+    if (!target) return () => {
+    };
+    let timer = null;
+    const handler = (event) => {
+      const input = event.target;
+      const value = String(input?.value || "");
+      if (timer !== null) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        onValue(value);
+      }, delay);
+    };
+    target.addEventListener("input", handler);
+    return () => {
+      target.removeEventListener("input", handler);
+      if (timer !== null) clearTimeout(timer);
+    };
+  }
+  function bind(root, ports) {
+    bindings.get(root)?.();
+    const disposers = [];
+    const listen = (target, name, fn, passive = false) => {
+      if (!target) return;
+      target.addEventListener(name, fn, passive ? { passive: true } : void 0);
+      disposers.push(() => target.removeEventListener(name, fn));
+    };
+    const list = root.querySelector('[data-role="list"]');
+    listen(list, "change", (event) => {
+      const group = closest(event, 'input[type="checkbox"][data-group-check]');
+      if (group) {
+        ports.selectGroup(group.getAttribute("data-group-check") || "", !!group.checked);
+        return;
+      }
+      const item = closest(event, 'input[type="checkbox"][data-i]');
+      if (item) ports.selectItem(Number(item.getAttribute("data-i")), !!item.checked);
+    });
+    listen(list, "click", (event) => {
+      const folder = closest(event, "[data-folder-toggle]");
+      if (folder) {
+        event.preventDefault();
+        event.stopPropagation();
+        ports.toggleFolder(folder.getAttribute("data-folder-toggle") || "");
+        return;
+      }
+      if (closest(event, 'input[type="checkbox"]') || closest(event, ".bsb-resource-folder")) return;
+      const item = closest(event, "[data-transcript-i]");
+      if (item) ports.openItem(Number(item.dataset.transcriptI));
+    });
+    disposers.push(debounceInput(
+      root.querySelector('[data-role="library-search"]'),
+      70,
+      (value) => ports.searchLibrary(value.trim())
+    ));
+    listen(root.querySelector('[data-role="library-filters"]'), "click", (event) => {
+      const button = closest(event, "[data-library-filter]");
+      if (button) ports.filterLibrary(button.dataset.libraryFilter || "all");
+    });
+    disposers.push(debounceInput(
+      root.querySelector('[data-role="transcript-search"]'),
+      80,
+      (value) => ports.searchTranscript(value.trim())
+    ));
+    listen(root.querySelector('[data-role="transcript-track"]'), "change", (event) => {
+      ports.switchTrack(Number(event.target?.value));
+    });
+    const follow = root.querySelector('[data-role="transcript-follow"]');
+    if (follow) follow.checked = ports.followEnabled();
+    listen(follow, "change", (event) => {
+      ports.setFollow(!!event.target?.checked);
+    });
+    const transcript2 = root.querySelector('[data-role="transcript-list"]');
+    listen(transcript2, "click", (event) => {
+      const time = closest(event, "[data-transcript-time]");
+      if (time) ports.seekTranscript(Number(time.dataset.transcriptTime));
+    });
+    listen(transcript2, "wheel", () => ports.recordUserScroll(), true);
+    listen(transcript2, "touchmove", () => ports.recordUserScroll(), true);
+    const dispose = () => {
+      disposers.splice(0).forEach((fn) => fn());
+      if (bindings.get(root) === dispose) bindings.delete(root);
+    };
+    bindings.set(root, dispose);
+    return dispose;
+  }
+  const resourceInteraction = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    bind
+  }, Symbol.toStringTag, { value: "Module" }));
   const ui = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
     aiStyles,
@@ -10249,6 +10523,8 @@ ${prompt2.userPromptTemplate}`
     panelState: state,
     panelStyles: styles,
     readingStyles,
+    reorderInteraction,
+    resourceInteraction,
     settingsStyles,
     studioController,
     studioInteractionController,
@@ -13338,8 +13614,10 @@ ${prompt2.userPromptTemplate}`
         state2.aiSearch = String(e.target.value || "");
         renderAiList(root);
       }, 60));
-      bindConfigListDrag(root);
-      bindFlowModelDrag(root);
+      SubBatch2.SubBatchMonorepo.ui.reorderInteraction.bind(root, {
+        reorderConfig: commitConfigListReorder,
+        reorderFlow: commitFlowModelReorder
+      });
       SubBatch2.SubBatchMonorepo.ui.studioInteractionController.bind(root, {
         getIndex: () => state2.studioSlashIndex,
         setIndex: (index) => {
@@ -13363,83 +13641,52 @@ ${prompt2.userPromptTemplate}`
         if (e.target.closest?.('[data-role="knowledge-selection-toolbar"], [data-role="knowledge-rail"]')) return;
         setTimeout(captureKnowledgeSelection, 0);
       });
-      const listBox = root.querySelector('[data-role="list"]');
-      if (listBox) {
-        listBox.addEventListener("change", (e) => {
-          const groupCb = e.target.closest?.('input[type="checkbox"][data-group-check]');
-          if (groupCb) {
-            const key = String(groupCb.getAttribute("data-group-check") || "");
-            const selected = !!groupCb.checked;
-            setGroupSelection2(state2.items, key, selected);
-            renderList({ renderTranscript: false });
-            return;
-          }
-          const cb = e.target.closest?.('input[type="checkbox"][data-i]');
-          if (!cb) return;
-          const i = Number(cb.getAttribute("data-i"));
-          if (state2.items[i]) state2.items[i].selected = cb.checked;
+      SubBatch2.SubBatchMonorepo.ui.resourceInteraction.bind(root, {
+        followEnabled: () => !!state2.transcriptAutoFollow,
+        selectGroup: (key, checked) => {
+          setGroupSelection2(state2.items, key, checked);
           renderList({ renderTranscript: false });
-        });
-        listBox.addEventListener("click", (e) => {
-          const toggle = e.target.closest?.("[data-folder-toggle]");
-          if (toggle) {
-            e.preventDefault();
-            e.stopPropagation();
-            const key = String(toggle.getAttribute("data-folder-toggle") || "");
-            if (!state2.libraryFolderCollapsed) state2.libraryFolderCollapsed = {};
-            state2.libraryFolderCollapsed[key] = !state2.libraryFolderCollapsed[key];
-            renderList({ renderTranscript: false });
-            return;
-          }
-          if (e.target.closest?.('input[type="checkbox"]')) return;
-          if (e.target.closest?.(".bsb-resource-folder")) return;
-          const open = e.target.closest?.("[data-transcript-i]");
-          if (!open) return;
-          const item = state2.items[Number(open.dataset.transcriptI)];
+        },
+        selectItem: (index, checked) => {
+          if (state2.items[index]) state2.items[index].selected = checked;
+          renderList({ renderTranscript: false });
+        },
+        toggleFolder: (key) => {
+          if (!state2.libraryFolderCollapsed) state2.libraryFolderCollapsed = {};
+          state2.libraryFolderCollapsed[key] = !state2.libraryFolderCollapsed[key];
+          renderList({ renderTranscript: false });
+        },
+        openItem: (index) => {
+          const item = state2.items[index];
           if (item) selectTranscriptItem(item);
-        });
-      }
-      root.querySelector('[data-role="library-search"]')?.addEventListener("input", debounce((e) => {
-        state2.libraryQuery = String(e.target.value || "").trim();
-        renderList({ renderTranscript: false });
-      }, 70));
-      root.querySelector('[data-role="library-filters"]')?.addEventListener("click", (e) => {
-        const button = e.target.closest?.("[data-library-filter]");
-        if (!button) return;
-        state2.libraryFilter = String(button.dataset.libraryFilter || "all");
-        renderList({ renderTranscript: false });
+        },
+        searchLibrary: (query) => {
+          state2.libraryQuery = query;
+          renderList({ renderTranscript: false });
+        },
+        filterLibrary: (filter) => {
+          state2.libraryFilter = filter;
+          renderList({ renderTranscript: false });
+        },
+        searchTranscript: (query) => {
+          state2.transcriptQuery = query;
+          renderTranscriptPanel();
+        },
+        switchTrack: (index) => {
+          switchTranscriptTrack(index).catch((error) => {
+            if (error?.name !== "AbortError") setStatus("切换字幕失败: " + (error.message || error), "err");
+          });
+        },
+        setFollow: (enabled) => {
+          state2.transcriptAutoFollow = enabled;
+          storageSet(TRANSCRIPT_FOLLOW_STORE_KEY, enabled ? "true" : "false");
+          if (enabled) updateTranscriptActiveCue(currentVideoTime(), true);
+        },
+        seekTranscript: seekTranscriptTime,
+        recordUserScroll: () => {
+          state2.transcriptUserScrollUntil = Date.now() + 3500;
+        }
       });
-      const transcriptSearch = root.querySelector('[data-role="transcript-search"]');
-      transcriptSearch?.addEventListener("input", debounce((e) => {
-        state2.transcriptQuery = String(e.target.value || "").trim();
-        renderTranscriptPanel();
-      }, 80));
-      root.querySelector('[data-role="transcript-track"]')?.addEventListener("change", (e) => {
-        switchTranscriptTrack(Number(e.target.value)).catch((error) => {
-          if (error?.name !== "AbortError") setStatus(`切换字幕失败: ${error.message || error}`, "err");
-        });
-      });
-      const followInput = root.querySelector('[data-role="transcript-follow"]');
-      if (followInput) {
-        followInput.checked = state2.transcriptAutoFollow;
-        followInput.addEventListener("change", (e) => {
-          state2.transcriptAutoFollow = !!e.target.checked;
-          storageSet(TRANSCRIPT_FOLLOW_STORE_KEY, state2.transcriptAutoFollow ? "true" : "false");
-          if (state2.transcriptAutoFollow) updateTranscriptActiveCue(currentVideoTime(), true);
-        });
-      }
-      const transcriptList = root.querySelector('[data-role="transcript-list"]');
-      transcriptList?.addEventListener("click", (e) => {
-        const timeButton = e.target.closest?.("[data-transcript-time]");
-        if (!timeButton) return;
-        seekTranscriptTime(Number(timeButton.dataset.transcriptTime));
-      });
-      transcriptList?.addEventListener("wheel", () => {
-        state2.transcriptUserScrollUntil = Date.now() + 3500;
-      }, { passive: true });
-      transcriptList?.addEventListener("touchmove", () => {
-        state2.transcriptUserScrollUntil = Date.now() + 3500;
-      }, { passive: true });
       root.addEventListener("change", (e) => {
         const shortcutPref = e.target.closest?.("[data-shortcut-pref]");
         if (shortcutPref) {
@@ -14629,11 +14876,11 @@ ${prompt2.userPromptTemplate}`
         const existing = document.querySelector(selector);
         if (existing) return resolve2(existing);
         const observer = new MutationObserver(() => {
-          const element = document.querySelector(selector);
-          if (!element) return;
+          const element2 = document.querySelector(selector);
+          if (!element2) return;
           observer.disconnect();
           clearTimeout(timer);
-          resolve2(element);
+          resolve2(element2);
         });
         const timer = window.setTimeout(() => {
           observer.disconnect();
@@ -16694,49 +16941,6 @@ ${addition}`.trim() };
       if (toggle) toggle.checked = !!state2.preprocessEnabled;
       updatePromptUi(root, getActivePromptProfile());
     }
-    function reorderIds(ids, fromId, toId) {
-      const list = Array.isArray(ids) ? ids.map(String) : [];
-      const from = list.indexOf(String(fromId || ""));
-      const to = list.indexOf(String(toId || ""));
-      if (from < 0 || to < 0 || from === to) return list;
-      const next = list.slice();
-      const [item] = next.splice(from, 1);
-      next.splice(to, 0, item);
-      return next;
-    }
-    function applyConfigIdOrder(items, orderedIds) {
-      const list = Array.isArray(items) ? items.slice() : [];
-      const byId = new Map(list.map((item) => [String(item.id), item]));
-      const seen = /* @__PURE__ */ new Set();
-      const next = [];
-      for (const id of orderedIds || []) {
-        const hit = byId.get(String(id));
-        if (!hit || seen.has(hit.id)) continue;
-        seen.add(hit.id);
-        next.push(hit);
-      }
-      for (const item of list) {
-        if (!seen.has(item.id)) next.push(item);
-      }
-      return next;
-    }
-    function applyPromptStageOrder(prompts, stage, orderedIds) {
-      const list = Array.isArray(prompts) ? prompts.slice() : [];
-      const byId = new Map(list.map((p) => [String(p.id), p]));
-      const ordered = [];
-      const seen = /* @__PURE__ */ new Set();
-      for (const id of orderedIds || []) {
-        const hit = byId.get(String(id));
-        if (!hit || hit.stage !== stage || seen.has(hit.id)) continue;
-        seen.add(hit.id);
-        ordered.push(hit);
-      }
-      for (const p of list) {
-        if (p.stage === stage && !seen.has(p.id)) ordered.push(p);
-      }
-      let i = 0;
-      return list.map((p) => p.stage === stage ? ordered[i++] || p : p);
-    }
     function commitConfigListReorder(kind, fromId, toId) {
       if (!fromId || !toId || fromId === toId) return false;
       const root = ensurePanel();
@@ -16747,9 +16951,9 @@ ${addition}`.trim() };
         }
         const profiles = state2.aiProfiles?.length ? state2.aiProfiles.slice() : loadAiProfiles();
         const ids = profiles.map((p) => p.id);
-        const nextIds = reorderIds(ids, fromId, toId);
+        const nextIds = appCall("ordering.reorderIds", ids, fromId, toId);
         if (nextIds.join("\0") === ids.join("\0")) return false;
-        const next = applyConfigIdOrder(profiles, nextIds);
+        const next = appCall("ordering.applyConfigIdOrder", profiles, nextIds);
         saveAiProfiles(next);
         state2.aiEditorId = fromId;
         fillAiConfigForm(root);
@@ -16770,9 +16974,9 @@ ${addition}`.trim() };
         } : loadPromptProfiles();
         const stage = state2.ui?.promptStage === "postprocess" ? "postprocess" : state2.ui?.promptStage === "knowledge" ? "knowledge" : "preprocess";
         const stageIds = library2.prompts.filter((p) => p.stage === stage).map((p) => p.id);
-        const nextStageIds = reorderIds(stageIds, fromId, toId);
+        const nextStageIds = appCall("ordering.reorderIds", stageIds, fromId, toId);
         if (nextStageIds.join("\0") === stageIds.join("\0")) return false;
-        const prompts = applyPromptStageOrder(library2.prompts, stage, nextStageIds);
+        const prompts = appCall("ordering.applyPromptStageOrder", library2.prompts, stage, nextStageIds);
         savePromptProfiles(prompts, library2.activeId, library2.activePreprocessId, library2.activeKnowledgeId);
         state2.promptEditorId = fromId;
         fillPromptConfigForm(root);
@@ -16782,145 +16986,16 @@ ${addition}`.trim() };
       }
       return false;
     }
-    function bindConfigListDrag(root) {
-      if (!root || root._bsbConfigDragBound) return;
-      root._bsbConfigDragBound = true;
-      let drag = null;
-      const clearDragUi = () => {
-        root.querySelectorAll(".bsb-config-list-item.dragging, .bsb-config-list-item.drag-over").forEach((el) => {
-          el.classList.remove("dragging", "drag-over");
-        });
-      };
-      root.addEventListener("dragstart", (e) => {
-        const item = e.target.closest?.(".bsb-config-list-item[draggable='true']");
-        if (!item || !root.contains(item)) return;
-        const list = item.closest?.('[data-role="prompt-list"], [data-role="ai-list"]');
-        if (!list || list.dataset.reorderLocked === "1") {
-          e.preventDefault();
-          return;
-        }
-        const kind = list.getAttribute("data-role") === "prompt-list" ? "prompt" : "llm";
-        const id = String(item.dataset.promptListId || item.dataset.aiListId || "");
-        if (!id) {
-          e.preventDefault();
-          return;
-        }
-        drag = { kind, id, list };
-        item.classList.add("dragging");
-        try {
-          e.dataTransfer.effectAllowed = "move";
-          e.dataTransfer.setData("text/plain", id);
-        } catch (_) {
-        }
-      });
-      root.addEventListener("dragend", () => {
-        clearDragUi();
-        drag = null;
-      });
-      root.addEventListener("dragover", (e) => {
-        if (!drag) return;
-        const item = e.target.closest?.(".bsb-config-list-item[draggable='true']");
-        if (!item) return;
-        const list = item.closest?.('[data-role="prompt-list"], [data-role="ai-list"]');
-        if (!list || list !== drag.list) return;
-        e.preventDefault();
-        try {
-          e.dataTransfer.dropEffect = "move";
-        } catch (_) {
-        }
-        list.querySelectorAll(".bsb-config-list-item.drag-over").forEach((el) => {
-          if (el !== item) el.classList.remove("drag-over");
-        });
-        if (String(item.dataset.promptListId || item.dataset.aiListId || "") !== drag.id) {
-          item.classList.add("drag-over");
-        }
-      });
-      root.addEventListener("dragleave", (e) => {
-        const item = e.target.closest?.(".bsb-config-list-item");
-        if (!item) return;
-        const related = e.relatedTarget;
-        if (related && item.contains(related)) return;
-        item.classList.remove("drag-over");
-      });
-      root.addEventListener("drop", (e) => {
-        if (!drag) return;
-        const item = e.target.closest?.(".bsb-config-list-item[draggable='true']");
-        if (!item) return;
-        const list = item.closest?.('[data-role="prompt-list"], [data-role="ai-list"]');
-        if (!list || list !== drag.list) return;
-        e.preventDefault();
-        const toId = String(item.dataset.promptListId || item.dataset.aiListId || "");
-        const fromId = drag.id;
-        const kind = drag.kind;
-        clearDragUi();
-        drag = null;
-        commitConfigListReorder(kind, fromId, toId);
-      });
-    }
-    function bindFlowModelDrag(root) {
-      if (!root || root._bsbFlowModelDragBound) return;
-      root._bsbFlowModelDragBound = true;
-      let drag = null;
-      const clearDragUi = () => {
-        root.querySelectorAll(".bsb-model-rank.dragging, .bsb-model-rank.drag-over").forEach((el) => {
-          el.classList.remove("dragging", "drag-over");
-        });
-      };
-      root.addEventListener("dragstart", (e) => {
-        const item = e.target.closest?.(".bsb-model-rank[draggable='true']");
-        if (!item || !root.contains(item)) return;
-        const card = item.closest?.("[data-flow-task-id]");
-        const id = String(item.dataset.flowModelId || "");
-        if (!card || !id) return;
-        if (e.target.closest?.("[data-flow-task-model-remove]")) {
-          e.preventDefault();
-          return;
-        }
-        drag = { id, taskId: String(card.dataset.flowTaskId || ""), card };
-        item.classList.add("dragging");
-        try {
-          e.dataTransfer.effectAllowed = "move";
-          e.dataTransfer.setData("text/plain", id);
-        } catch (_) {
-        }
-      });
-      root.addEventListener("dragend", () => {
-        clearDragUi();
-        drag = null;
-      });
-      root.addEventListener("dragover", (e) => {
-        if (!drag) return;
-        const item = e.target.closest?.(".bsb-model-rank[draggable='true']");
-        const card = item?.closest?.("[data-flow-task-id]");
-        if (!item || !card || String(card.dataset.flowTaskId || "") !== drag.taskId) return;
-        e.preventDefault();
-        try {
-          e.dataTransfer.dropEffect = "move";
-        } catch (_) {
-        }
-        card.querySelectorAll(".bsb-model-rank.drag-over").forEach((el) => {
-          if (el !== item) el.classList.remove("drag-over");
-        });
-        if (String(item.dataset.flowModelId || "") !== drag.id) item.classList.add("drag-over");
-      });
-      root.addEventListener("drop", (e) => {
-        if (!drag) return;
-        const item = e.target.closest?.(".bsb-model-rank[draggable='true']");
-        const card = item?.closest?.("[data-flow-task-id]");
-        if (!item || !card || String(card.dataset.flowTaskId || "") !== drag.taskId) return;
-        e.preventDefault();
-        const fromId = drag.id;
-        const toId = String(item.dataset.flowModelId || "");
-        const taskId = drag.taskId;
-        clearDragUi();
-        drag = null;
-        if (!fromId || !toId || fromId === toId) return;
-        const tasks = currentPostTasks().map((t) => ({ ...t, modelIds: [...t.modelIds || []] }));
-        const task = tasks.find((t) => t.id === taskId);
-        if (!task) return;
-        task.modelIds = reorderIds(task.modelIds, fromId, toId);
-        savePostTasks(tasks);
-      });
+    function commitFlowModelReorder(taskId, fromId, toId) {
+      if (!fromId || !toId || fromId === toId) return;
+      const tasks = currentPostTasks().map((task2) => ({
+        ...task2,
+        modelIds: [...task2.modelIds || []]
+      }));
+      const task = tasks.find((task2) => task2.id === taskId);
+      if (!task) return;
+      task.modelIds = appCall("ordering.reorderIds", task.modelIds, fromId, toId);
+      savePostTasks(tasks);
     }
     function renderPromptList(root) {
       const host2 = root?.querySelector('[data-role="prompt-list"]');

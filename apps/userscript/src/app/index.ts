@@ -1,3 +1,4 @@
+import * as configOrder from "./config-order";
 import * as libraryScanController from "./library-scan-controller";
 import * as libraryJobController from "./library-job-controller";
 import * as batchCoordinator from "./ai-batch-coordinator";
@@ -12,6 +13,12 @@ import { acquire as acquireTranscript, acquireDetailed as acquireTranscriptDetai
 import { resolve as resolveVideo } from "./current-video";
 import { observe } from "./navigation";
 import { start } from "./video-carrier";
+
+export const ordering = {
+  reorderIds: configOrder.reorderIds,
+  applyConfigIdOrder: configOrder.applyConfigIdOrder,
+  applyPromptStageOrder: configOrder.applyPromptStageOrder,
+} as const;
 
 export const libraryScan = {
   collectPages: libraryScanController.collectPages,

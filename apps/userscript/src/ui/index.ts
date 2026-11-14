@@ -27,3 +27,5 @@ export * as knowledgeNavigation from "./workspaces/knowledge-navigation-controll
 export * as knowledgeTreeRenderer from "./workspaces/knowledge-tree-renderer";
 export * as knowledgeReader from "./workspaces/knowledge-reader-controller";
 export * as knowledgeAnswerView from "./workspaces/knowledge-answer-view";
+export * as reorderInteraction from "./workspaces/reorder-interaction";
+export * as resourceInteraction from "./workspaces/resource-interaction";

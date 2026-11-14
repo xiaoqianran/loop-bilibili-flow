@@ -3098,8 +3098,10 @@ export function mountWorkbench(SubBatch) {
       state.aiSearch = String(e.target.value || "");
       renderAiList(root);
     }, 60));
-    bindConfigListDrag(root);
-    bindFlowModelDrag(root);
+    SubBatch.SubBatchMonorepo.ui.reorderInteraction.bind(root, {
+      reorderConfig: commitConfigListReorder,
+      reorderFlow: commitFlowModelReorder,
+    });
     SubBatch.SubBatchMonorepo.ui.studioInteractionController.bind(root, {
       getIndex: () => state.studioSlashIndex,
       setIndex: (index) => { state.studioSlashIndex = index; },
@@ -3121,85 +3123,50 @@ export function mountWorkbench(SubBatch) {
       setTimeout(captureKnowledgeSelection, 0);
     });
 
-    const listBox = root.querySelector('[data-role="list"]');
-    if (listBox) {
-      listBox.addEventListener("change", (e) => {
-        const groupCb = e.target.closest?.('input[type="checkbox"][data-group-check]');
-        if (groupCb) {
-          const key = String(groupCb.getAttribute("data-group-check") || "");
-          const selected = !!groupCb.checked;
-          setGroupSelection(state.items, key, selected);
-          renderList({ renderTranscript: false });
-          return;
-        }
-        const cb = e.target.closest?.('input[type="checkbox"][data-i]');
-        if (!cb) return;
-        const i = Number(cb.getAttribute("data-i"));
-        if (state.items[i]) state.items[i].selected = cb.checked;
-        // 子项变化后重绘，刷新父级勾选状态。
+    SubBatch.SubBatchMonorepo.ui.resourceInteraction.bind(root, {
+      followEnabled: () => !!state.transcriptAutoFollow,
+      selectGroup: (key, checked) => {
+        setGroupSelection(state.items, key, checked);
         renderList({ renderTranscript: false });
-      });
-      listBox.addEventListener("click", (e) => {
-        const toggle = e.target.closest?.("[data-folder-toggle]");
-        if (toggle) {
-          e.preventDefault();
-          e.stopPropagation();
-          const key = String(toggle.getAttribute("data-folder-toggle") || "");
-          if (!state.libraryFolderCollapsed) state.libraryFolderCollapsed = {};
-          state.libraryFolderCollapsed[key] = !state.libraryFolderCollapsed[key];
-          renderList({ renderTranscript: false });
-          return;
-        }
-        if (e.target.closest?.('input[type="checkbox"]')) return;
-        if (e.target.closest?.(".bsb-resource-folder")) return;
-        const open = e.target.closest?.("[data-transcript-i]");
-        if (!open) return;
-        const item = state.items[Number(open.dataset.transcriptI)];
+      },
+      selectItem: (index, checked) => {
+        if (state.items[index]) state.items[index].selected = checked;
+        renderList({ renderTranscript: false });
+      },
+      toggleFolder: (key) => {
+        if (!state.libraryFolderCollapsed) state.libraryFolderCollapsed = {};
+        state.libraryFolderCollapsed[key] = !state.libraryFolderCollapsed[key];
+        renderList({ renderTranscript: false });
+      },
+      openItem: (index) => {
+        const item = state.items[index];
         if (item) selectTranscriptItem(item);
-      });
-    }
-    root.querySelector('[data-role="library-search"]')?.addEventListener("input", debounce((e) => {
-      state.libraryQuery = String(e.target.value || "").trim();
-      renderList({ renderTranscript: false });
-    }, 70));
-    root.querySelector('[data-role="library-filters"]')?.addEventListener("click", (e) => {
-      const button = e.target.closest?.("[data-library-filter]");
-      if (!button) return;
-      state.libraryFilter = String(button.dataset.libraryFilter || "all");
-      renderList({ renderTranscript: false });
+      },
+      searchLibrary: (query) => {
+        state.libraryQuery = query;
+        renderList({ renderTranscript: false });
+      },
+      filterLibrary: (filter) => {
+        state.libraryFilter = filter;
+        renderList({ renderTranscript: false });
+      },
+      searchTranscript: (query) => {
+        state.transcriptQuery = query;
+        renderTranscriptPanel();
+      },
+      switchTrack: (index) => {
+        switchTranscriptTrack(index).catch((error) => {
+          if (error?.name !== "AbortError") setStatus('切换字幕失败: ' + (error.message || error), "err");
+        });
+      },
+      setFollow: (enabled) => {
+        state.transcriptAutoFollow = enabled;
+        storageSet(TRANSCRIPT_FOLLOW_STORE_KEY, enabled ? "true" : "false");
+        if (enabled) updateTranscriptActiveCue(currentVideoTime(), true);
+      },
+      seekTranscript: seekTranscriptTime,
+      recordUserScroll: () => { state.transcriptUserScrollUntil = Date.now() + 3500; },
     });
-
-    const transcriptSearch = root.querySelector('[data-role="transcript-search"]');
-    transcriptSearch?.addEventListener("input", debounce((e) => {
-      state.transcriptQuery = String(e.target.value || "").trim();
-      renderTranscriptPanel();
-    }, 80));
-    root.querySelector('[data-role="transcript-track"]')?.addEventListener("change", (e) => {
-      switchTranscriptTrack(Number(e.target.value)).catch((error) => {
-        if (error?.name !== "AbortError") setStatus(`切换字幕失败: ${error.message || error}`, "err");
-      });
-    });
-    const followInput = root.querySelector('[data-role="transcript-follow"]');
-    if (followInput) {
-      followInput.checked = state.transcriptAutoFollow;
-      followInput.addEventListener("change", (e) => {
-        state.transcriptAutoFollow = !!e.target.checked;
-        storageSet(TRANSCRIPT_FOLLOW_STORE_KEY, state.transcriptAutoFollow ? "true" : "false");
-        if (state.transcriptAutoFollow) updateTranscriptActiveCue(currentVideoTime(), true);
-      });
-    }
-    const transcriptList = root.querySelector('[data-role="transcript-list"]');
-    transcriptList?.addEventListener("click", (e) => {
-      const timeButton = e.target.closest?.("[data-transcript-time]");
-      if (!timeButton) return;
-      seekTranscriptTime(Number(timeButton.dataset.transcriptTime));
-    });
-    transcriptList?.addEventListener("wheel", () => {
-      state.transcriptUserScrollUntil = Date.now() + 3500;
-    }, { passive: true });
-    transcriptList?.addEventListener("touchmove", () => {
-      state.transcriptUserScrollUntil = Date.now() + 3500;
-    }, { passive: true });
 
     root.addEventListener("change", (e) => {
       const shortcutPref = e.target.closest?.("[data-shortcut-pref]");
@@ -6553,58 +6520,6 @@ export function mountWorkbench(SubBatch) {
     updatePromptUi(root, getActivePromptProfile());
   }
 
-  /** Move `fromId` to the index of `toId` within an id list. */
-  function reorderIds(ids, fromId, toId) {
-    const list = Array.isArray(ids) ? ids.map(String) : [];
-    const from = list.indexOf(String(fromId || ""));
-    const to = list.indexOf(String(toId || ""));
-    if (from < 0 || to < 0 || from === to) return list;
-    const next = list.slice();
-    const [item] = next.splice(from, 1);
-    next.splice(to, 0, item);
-    return next;
-  }
-
-  /** Reorder LLM profiles by visible id order; missing ids keep relative tail. */
-  function applyConfigIdOrder(items, orderedIds) {
-    const list = Array.isArray(items) ? items.slice() : [];
-    const byId = new Map(list.map((item) => [String(item.id), item]));
-    const seen = new Set();
-    const next = [];
-    for (const id of orderedIds || []) {
-      const hit = byId.get(String(id));
-      if (!hit || seen.has(hit.id)) continue;
-      seen.add(hit.id);
-      next.push(hit);
-    }
-    for (const item of list) {
-      if (!seen.has(item.id)) next.push(item);
-    }
-    return next;
-  }
-
-  /**
-   * Reorder Prompt profiles within one stage by visible id order.
-   * Other stages keep their slots; only stage members are reassigned.
-   */
-  function applyPromptStageOrder(prompts, stage, orderedIds) {
-    const list = Array.isArray(prompts) ? prompts.slice() : [];
-    const byId = new Map(list.map((p) => [String(p.id), p]));
-    const ordered = [];
-    const seen = new Set();
-    for (const id of orderedIds || []) {
-      const hit = byId.get(String(id));
-      if (!hit || hit.stage !== stage || seen.has(hit.id)) continue;
-      seen.add(hit.id);
-      ordered.push(hit);
-    }
-    for (const p of list) {
-      if (p.stage === stage && !seen.has(p.id)) ordered.push(p);
-    }
-    let i = 0;
-    return list.map((p) => (p.stage === stage ? ordered[i++] || p : p));
-  }
-
   function commitConfigListReorder(kind, fromId, toId) {
     if (!fromId || !toId || fromId === toId) return false;
     const root = ensurePanel();
@@ -6612,9 +6527,9 @@ export function mountWorkbench(SubBatch) {
       try { saveAiProfilesFromForm(); } catch (_) { /* use memory/storage */ }
       const profiles = state.aiProfiles?.length ? state.aiProfiles.slice() : loadAiProfiles();
       const ids = profiles.map((p) => p.id);
-      const nextIds = reorderIds(ids, fromId, toId);
+      const nextIds = appCall("ordering.reorderIds", ids, fromId, toId);
       if (nextIds.join("\0") === ids.join("\0")) return false;
-      const next = applyConfigIdOrder(profiles, nextIds);
+      const next = appCall("ordering.applyConfigIdOrder", profiles, nextIds);
       saveAiProfiles(next);
       state.aiEditorId = fromId;
       fillAiConfigForm(root);
@@ -6638,9 +6553,9 @@ export function mountWorkbench(SubBatch) {
           ? "knowledge"
           : "preprocess";
       const stageIds = library.prompts.filter((p) => p.stage === stage).map((p) => p.id);
-      const nextStageIds = reorderIds(stageIds, fromId, toId);
+      const nextStageIds = appCall("ordering.reorderIds", stageIds, fromId, toId);
       if (nextStageIds.join("\0") === stageIds.join("\0")) return false;
-      const prompts = applyPromptStageOrder(library.prompts, stage, nextStageIds);
+      const prompts = appCall("ordering.applyPromptStageOrder", library.prompts, stage, nextStageIds);
       savePromptProfiles(prompts, library.activeId, library.activePreprocessId, library.activeKnowledgeId);
       state.promptEditorId = fromId;
       fillPromptConfigForm(root);
@@ -6651,149 +6566,15 @@ export function mountWorkbench(SubBatch) {
     return false;
   }
 
-  function bindConfigListDrag(root) {
-    if (!root || root._bsbConfigDragBound) return;
-    root._bsbConfigDragBound = true;
-    let drag = null; // { kind, id, list }
-
-    const clearDragUi = () => {
-      root.querySelectorAll(".bsb-config-list-item.dragging, .bsb-config-list-item.drag-over").forEach((el) => {
-        el.classList.remove("dragging", "drag-over");
-      });
-    };
-
-    root.addEventListener("dragstart", (e) => {
-      const item = e.target.closest?.(".bsb-config-list-item[draggable='true']");
-      if (!item || !root.contains(item)) return;
-      const list = item.closest?.('[data-role="prompt-list"], [data-role="ai-list"]');
-      if (!list || list.dataset.reorderLocked === "1") {
-        e.preventDefault();
-        return;
-      }
-      const kind = list.getAttribute("data-role") === "prompt-list" ? "prompt" : "llm";
-      const id = String(item.dataset.promptListId || item.dataset.aiListId || "");
-      if (!id) {
-        e.preventDefault();
-        return;
-      }
-      drag = { kind, id, list };
-      item.classList.add("dragging");
-      try {
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", id);
-      } catch (_) { /* some hosts reject setData */ }
-    });
-
-    root.addEventListener("dragend", () => {
-      clearDragUi();
-      drag = null;
-    });
-
-    root.addEventListener("dragover", (e) => {
-      if (!drag) return;
-      const item = e.target.closest?.(".bsb-config-list-item[draggable='true']");
-      if (!item) return;
-      const list = item.closest?.('[data-role="prompt-list"], [data-role="ai-list"]');
-      if (!list || list !== drag.list) return;
-      e.preventDefault();
-      try { e.dataTransfer.dropEffect = "move"; } catch (_) { /* ignore */ }
-      list.querySelectorAll(".bsb-config-list-item.drag-over").forEach((el) => {
-        if (el !== item) el.classList.remove("drag-over");
-      });
-      if (String(item.dataset.promptListId || item.dataset.aiListId || "") !== drag.id) {
-        item.classList.add("drag-over");
-      }
-    });
-
-    root.addEventListener("dragleave", (e) => {
-      const item = e.target.closest?.(".bsb-config-list-item");
-      if (!item) return;
-      const related = e.relatedTarget;
-      if (related && item.contains(related)) return;
-      item.classList.remove("drag-over");
-    });
-
-    root.addEventListener("drop", (e) => {
-      if (!drag) return;
-      const item = e.target.closest?.(".bsb-config-list-item[draggable='true']");
-      if (!item) return;
-      const list = item.closest?.('[data-role="prompt-list"], [data-role="ai-list"]');
-      if (!list || list !== drag.list) return;
-      e.preventDefault();
-      const toId = String(item.dataset.promptListId || item.dataset.aiListId || "");
-      const fromId = drag.id;
-      const kind = drag.kind;
-      clearDragUi();
-      drag = null;
-      commitConfigListReorder(kind, fromId, toId);
-    });
-  }
-
-  function bindFlowModelDrag(root) {
-    if (!root || root._bsbFlowModelDragBound) return;
-    root._bsbFlowModelDragBound = true;
-    let drag = null;
-
-    const clearDragUi = () => {
-      root.querySelectorAll(".bsb-model-rank.dragging, .bsb-model-rank.drag-over").forEach((el) => {
-        el.classList.remove("dragging", "drag-over");
-      });
-    };
-
-    root.addEventListener("dragstart", (e) => {
-      const item = e.target.closest?.(".bsb-model-rank[draggable='true']");
-      if (!item || !root.contains(item)) return;
-      const card = item.closest?.("[data-flow-task-id]");
-      const id = String(item.dataset.flowModelId || "");
-      if (!card || !id) return;
-      if (e.target.closest?.("[data-flow-task-model-remove]")) {
-        e.preventDefault();
-        return;
-      }
-      drag = { id, taskId: String(card.dataset.flowTaskId || ""), card };
-      item.classList.add("dragging");
-      try {
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", id);
-      } catch (_) { /* ignore */ }
-    });
-
-    root.addEventListener("dragend", () => {
-      clearDragUi();
-      drag = null;
-    });
-
-    root.addEventListener("dragover", (e) => {
-      if (!drag) return;
-      const item = e.target.closest?.(".bsb-model-rank[draggable='true']");
-      const card = item?.closest?.("[data-flow-task-id]");
-      if (!item || !card || String(card.dataset.flowTaskId || "") !== drag.taskId) return;
-      e.preventDefault();
-      try { e.dataTransfer.dropEffect = "move"; } catch (_) { /* ignore */ }
-      card.querySelectorAll(".bsb-model-rank.drag-over").forEach((el) => {
-        if (el !== item) el.classList.remove("drag-over");
-      });
-      if (String(item.dataset.flowModelId || "") !== drag.id) item.classList.add("drag-over");
-    });
-
-    root.addEventListener("drop", (e) => {
-      if (!drag) return;
-      const item = e.target.closest?.(".bsb-model-rank[draggable='true']");
-      const card = item?.closest?.("[data-flow-task-id]");
-      if (!item || !card || String(card.dataset.flowTaskId || "") !== drag.taskId) return;
-      e.preventDefault();
-      const fromId = drag.id;
-      const toId = String(item.dataset.flowModelId || "");
-      const taskId = drag.taskId;
-      clearDragUi();
-      drag = null;
-      if (!fromId || !toId || fromId === toId) return;
-      const tasks = currentPostTasks().map((t) => ({ ...t, modelIds: [...(t.modelIds || [])] }));
-      const task = tasks.find((t) => t.id === taskId);
-      if (!task) return;
-      task.modelIds = reorderIds(task.modelIds, fromId, toId);
-      savePostTasks(tasks);
-    });
+  function commitFlowModelReorder(taskId, fromId, toId) {
+    if (!fromId || !toId || fromId === toId) return;
+    const tasks = currentPostTasks().map((task) => ({
+      ...task, modelIds: [...(task.modelIds || [])],
+    }));
+    const task = tasks.find((task) => task.id === taskId);
+    if (!task) return;
+    task.modelIds = appCall("ordering.reorderIds", task.modelIds, fromId, toId);
+    savePostTasks(tasks);
   }
 
   function renderPromptList(root) {

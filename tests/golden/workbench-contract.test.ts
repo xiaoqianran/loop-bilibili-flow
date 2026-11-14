@@ -142,6 +142,30 @@ describe("Bundled full-feature workbench source", () => {
     expect(maintainedSource).toContain("scheduleAutoCapture(\"initial\", 180)");
   });
 
+  it("delegates all configuration and flow drag events to one typed UI owner", () => {
+    const source = extractFunctionSource(maintainedSource, "commitConfigListReorder");
+    expect(source).toContain('appCall("ordering.reorderIds"');
+    expect(source).toContain('appCall("ordering.applyConfigIdOrder"');
+    expect(source).toContain('appCall("ordering.applyPromptStageOrder"');
+    expect(maintainedSource).toContain("ui.reorderInteraction.bind(root,");
+    for (const obsolete of [
+      "function bindConfigListDrag(", "function bindFlowModelDrag(",
+      "function reorderIds(", "function applyConfigIdOrder(", "function applyPromptStageOrder(",
+    ]) {
+      expect(maintainedSource).not.toContain(obsolete);
+    }
+    expect(maintainedSource).toContain("function commitFlowModelReorder(");
+  });
+
+  it("delegates resource-library and transcript input listeners to a typed UI owner", () => {
+    expect(maintainedSource).toContain("ui.resourceInteraction.bind(root,");
+    expect(maintainedSource).not.toContain('const listBox = root.querySelector(\'[data-role="list"]\');');
+    expect(maintainedSource).not.toContain('transcriptList?.addEventListener("wheel"');
+    expect(maintainedSource).not.toContain('root.querySelector(\'[data-role="library-filters"]\')?.addEventListener');
+    expect(maintainedSource).toContain("selectGroup: (key, checked) =>");
+    expect(maintainedSource).toContain("recordUserScroll: () =>");
+  });
+
   it("has exactly one lifecycle owner for startup and SPA navigation", () => {
     const boot = extractFunctionSource(maintainedSource, "boot");
     const start = extractFunctionSource(maintainedSource, "startUserscript");
@@ -577,7 +601,9 @@ describe("Bundled full-feature workbench source", () => {
     expect(renderReadingStyles("bili-subbatch-panel")).toContain("font-size:var(--bsb-knowledge-font)");
     expect(maintainedSource).toContain("<strong>对话</strong>");
     expect(maintainedSource).toContain("function flowTaskModelsHtml(");
-    expect(maintainedSource).toContain("function bindFlowModelDrag(");
+    expect(maintainedSource).toContain("ui.reorderInteraction.bind(root,");
+    expect(maintainedSource).not.toContain("function bindFlowModelDrag(");
+    expect(maintainedSource).not.toContain("function bindConfigListDrag(");
     expect(maintainedSource).toContain('appCall("studio.compressTranscript"');
     expect(maintainedSource).toContain("function refreshStudioMemory(");
     expect(renderAiWorkspace()).toContain("data-ai-stage=\"chat\"");

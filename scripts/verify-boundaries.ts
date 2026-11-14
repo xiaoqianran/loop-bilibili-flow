@@ -87,6 +87,17 @@ async function main(): Promise<void> {
     }
   }
 
+  // Typed workspaces and Application modules must never grow new unchecked islands.
+  // The legacy workbench/runtime.ts is the sole grandfathered exception.
+  for (const layer of ["app", "ui"]) {
+    for (const file of await sourceFiles(join(root, "apps", "userscript", "src", layer))) {
+      const source = await readFile(file, "utf8");
+      if (source.split("\n").some(line => line.trim().startsWith("// @ts-nocheck"))) {
+        violations.push(relative(root, file) + ": disabling TypeScript is forbidden outside workbench/runtime.ts");
+      }
+    }
+  }
+
   const neutralProviderFiles = [
     join(root, "apps", "userscript", "src", "providers", "types.ts"),
     join(root, "apps", "userscript", "src", "providers", "registry.ts"),
