@@ -95,3 +95,125 @@ export function mergeScanItems(
   }
   return { added, existed };
 }
+
+
+export interface CollectionPart {
+  page?: number;
+  part?: string;
+}
+export interface CollectionArchive extends ScanItem {
+  aid?: number;
+  title?: string;
+  author?: string;
+  pages?: CollectionPart[];
+  part?: string;
+}
+export interface CollectionVideoView {
+  aid?: number;
+  title?: string;
+  owner?: { name?: string };
+  pages?: CollectionPart[];
+}
+export interface CollectionExpandPorts {
+  cancelled: () => boolean;
+  waitIfPaused: () => Promise<unknown>;
+  extractBvid: (raw: string) => string;
+  progress: (index: number, total: number, bvid: string) => void;
+  fetchView: (bvid: string) => Promise<CollectionVideoView>;
+  onFailure: (bvid: string, error: unknown) => void;
+  sleep: (ms: number) => Promise<unknown>;
+}
+/** Expand collection archives into distinct (BV, page) entries; browser effects are ports. */
+export async function expandCollectionParts(
+  archives: readonly CollectionArchive[] | null | undefined,
+  config: { delayMs?: number },
+  ports: CollectionExpandPorts,
+): Promise<CollectionArchive[]> {
+  const list = Array.isArray(archives) ? archives : [];
+  const out: CollectionArchive[] = [];
+  const seen = new Set<string>();
+  const normalizeBvid = (raw: string) => ports.extractBvid(raw) || String(raw || "").trim();
+  const pushItem = (item: CollectionArchive) => {
+    const bvid = normalizeBvid(item.bvid);
+    if (!bvid) return;
+    const page = Math.max(1, Number(item.page) || 1);
+    const key = bvid + "#" + page;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ ...item, bvid, page });
+  };
+  const delayMs = config.delayMs === undefined ? 160 : config.delayMs;
+
+  for (let i = 0; i < list.length; i++) {
+    assertScanActive(ports.cancelled);
+    await ports.waitIfPaused();
+    assertScanActive(ports.cancelled);
+    const item = list[i]!;
+    const bvid = normalizeBvid(item.bvid);
+    if (!bvid) continue;
+    ports.progress(i + 1, list.length, bvid);
+
+    let pages: CollectionPart[] | null = Array.isArray(item.pages) && item.pages.length ? item.pages : null;
+    let title = String(item.title || "").trim();
+    let author = String(item.author || "").trim();
+    let aid = item.aid;
+    if (!pages || pages.length <= 1) {
+      try {
+        const view = await ports.fetchView(bvid);
+        pages = Array.isArray(view.pages) ? view.pages : [];
+        title = String(view.title || title || bvid).trim();
+        author = String(view.owner?.name || author).trim();
+        aid = view.aid || aid;
+      } catch (error) {
+        if ((error as { name?: string })?.name === "AbortError") throw error;
+        ports.onFailure(bvid, error);
+        pushItem({ ...item, bvid, title, author, aid, page: Math.max(1, Number(item.page) || 1) });
+        continue;
+      }
+    }
+    if (!pages.length || pages.length <= 1) {
+      pushItem({ ...item, bvid, aid, title: title || item.title || bvid, author, page: 1, pages: pages || [] });
+    } else {
+      for (let p = 0; p < pages.length; p++) {
+        const part = pages[p] || {};
+        const pageNo = Math.max(1, Number(part.page) || p + 1);
+        const partName = String(part.part || "").trim();
+        pushItem({
+          ...item, bvid, aid,
+          title: (title || bvid) + " - P" + pageNo + (partName ? "【" + partName + "】" : ""),
+          author, page: pageNo, part: partName, pages,
+        });
+      }
+    }
+    if (delayMs && i < list.length - 1) {
+      await ports.sleep(delayMs);
+      assertScanActive(ports.cancelled);
+    }
+  }
+  return out;
+}
+
+
+export interface SeasonEntry {
+  meta?: { season_id?: string | number; mid?: string | number; name?: string; title?: string; total?: number };
+  archives?: Array<{ bvid?: string }>;
+}
+export function seasonMemberPlan(entry: SeasonEntry | null | undefined, fallbackMid: string) {
+  const meta = entry?.meta || {};
+  const sid = meta.season_id;
+  if (sid == null || sid === "") return null;
+  const bvids = (entry?.archives || []).map(archive => archive?.bvid).filter((bvid): bvid is string => !!bvid);
+  const total = Number(meta.total) || bvids.length;
+  return {
+    mid: String(meta.mid || fallbackMid),
+    season_id: String(sid),
+    name: String(meta.name || meta.title || "未命名合集").trim() || "未命名合集",
+    bvids,
+    missingMembers: total > bvids.length,
+    total,
+  };
+}
+/** Keep the larger list only, matching the legacy season member completion policy. */
+export function chooseSeasonMembers(recent: string[], loaded: string[]): string[] {
+  return loaded.length > recent.length ? loaded : recent;
+}

@@ -15,6 +15,9 @@ import { start } from "./video-carrier";
 
 export const libraryScan = {
   collectPages: libraryScanController.collectPages,
+  expandCollectionParts: libraryScanController.expandCollectionParts,
+  seasonMemberPlan: libraryScanController.seasonMemberPlan,
+  chooseSeasonMembers: libraryScanController.chooseSeasonMembers,
   mergeItems: libraryScanController.mergeScanItems,
   assertActive: libraryScanController.assertScanActive,
 } as const;

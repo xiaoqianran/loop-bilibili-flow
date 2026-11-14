@@ -2350,47 +2350,42 @@ export function mountWorkbench(SubBatch) {
       const seasonsList = lists.seasons_list || [];
       const pageInfo = lists.page || {};
       for (const entry of seasonsList) {
-        const metaBlock = (entry && entry.meta) || {};
-        const sid = metaBlock.season_id;
-        if (sid == null || sid === "") continue;
-        const archives = (entry && entry.archives) || [];
-        let bvids = archives.map((a) => a && a.bvid).filter(Boolean);
-        const total = Number(metaBlock.total) || bvids.length;
-        // 列表页往往只给 recent；成员不全时按合集拉全量 archives。
-        if (total > bvids.length) {
+        const plan = appCall("libraryScan.seasonMemberPlan", entry, midStr);
+        if (!plan) continue;
+        let bvids = plan.bvids;
+        if (plan.missingMembers) {
           if (onProgress) {
-            onProgress(`补全合集「${metaBlock.name || sid}」成员 ${bvids.length}/${total}…`);
+            onProgress("补全合集「" + plan.name + "」成员 " + bvids.length + "/" + plan.total + "…");
           }
           try {
             const full = await loadAllListItems(
-              { type: "collection", mid: midStr, season_id: String(sid) },
+              { type: "collection", mid: midStr, season_id: plan.season_id },
               {
                 maxPages: maxSeasonArchivePages,
                 pageSize: 30,
                 delayMs,
                 onProgress: (t) => {
-                  if (onProgress) onProgress(`合集 ${metaBlock.name || sid} · ${t}`);
+                  if (onProgress) onProgress("合集 " + (entry?.meta?.name || plan.season_id) + " · " + t);
                 },
                 shouldCancel,
               },
             );
             const fullBvids = full.items.map((it) => it.bvid).filter(Boolean);
-            if (fullBvids.length > bvids.length) bvids = fullBvids;
+            bvids = appCall("libraryScan.chooseSeasonMembers", bvids, fullBvids);
           } catch (err) {
             if (err?.name === "AbortError") throw err;
             console.warn(
               "[bili-subbatch] loadUserSpaceSeasons archives",
-              sid,
-              err?.message || err,
+              plan.season_id, err?.message || err,
             );
           }
         }
         seasons.push({
-          mid: String(metaBlock.mid || midStr),
-          season_id: String(sid),
-          name: String(metaBlock.name || metaBlock.title || "未命名合集").trim() || "未命名合集",
+          mid: plan.mid,
+          season_id: plan.season_id,
+          name: plan.name,
           bvids,
-          shortUrl: buildCollectionShortUrl(metaBlock.mid || midStr, sid),
+          shortUrl: buildCollectionShortUrl(entry?.meta?.mid || midStr, plan.season_id),
         });
       }
       const totalHint = pageInfo.total != null ? Number(pageInfo.total) : null;
@@ -2421,98 +2416,20 @@ export function mountWorkbench(SubBatch) {
     shouldCancel,
     delayMs = 160,
   } = {}) {
-    const list = Array.isArray(items) ? items : [];
-    const out = [];
-    const seen = new Set();
-    const canceled = () => typeof shouldCancel === "function" && shouldCancel();
-    const throwIfCanceled = () => {
-      if (!canceled()) return;
-      const error = new Error("扫描已取消");
-      error.name = "AbortError";
-      throw error;
-    };
-    const pushItem = (item) => {
-      const bvid = extractBvid(item.bvid) || String(item.bvid || "").trim();
-      if (!bvid) return;
-      const page = Math.max(1, Number(item.page) || 1);
-      const key = `${bvid}#${page}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      out.push({ ...item, bvid, page });
-    };
-
-    for (let i = 0; i < list.length; i++) {
-      throwIfCanceled();
-      await waitIfJobPaused();
-      throwIfCanceled();
-      const it = list[i];
-      const bvid = extractBvid(it.bvid) || String(it.bvid || "").trim();
-      if (!bvid) continue;
-      setLibraryJob({ kind: "scan", index: i + 1, total: list.length, label: `展开分P ${bvid}` });
-      if (onProgress) onProgress(`展开合集分P ${i + 1}/${list.length}（${bvid}）…`);
-
-      let pages = Array.isArray(it.pages) && it.pages.length ? it.pages : null;
-      let title = String(it.title || "").trim();
-      let author = String(it.author || "").trim();
-      let aid = it.aid;
-      if (!pages || pages.length <= 1) {
-        try {
-          const hit = await fetchVideoViewFast(bvid);
-          const view = hit?.value || {};
-          pages = Array.isArray(view.pages) ? view.pages : [];
-          title = String(view.title || title || bvid).trim();
-          author = String(view.owner?.name || author).trim();
-          aid = view.aid || aid;
-        } catch (error) {
-          if (error?.name === "AbortError") throw error;
-          console.warn("[bili-subbatch] expand collection parts", bvid, error?.message || error);
-          pushItem({
-            ...it,
-            bvid,
-            title,
-            author,
-            aid,
-            page: Math.max(1, Number(it.page) || 1),
-          });
-          continue;
-        }
-      }
-
-      if (!pages.length || pages.length <= 1) {
-        pushItem({
-          ...it,
-          bvid,
-          aid,
-          title: title || it.title || bvid,
-          author,
-          page: 1,
-          pages: pages || [],
-        });
-      } else {
-        for (let p = 0; p < pages.length; p++) {
-          const part = pages[p] || {};
-          const pageNo = Math.max(1, Number(part.page) || p + 1);
-          const partName = String(part.part || "").trim();
-          pushItem({
-            ...it,
-            bvid,
-            aid,
-            title: partName
-              ? `${title || bvid} - P${pageNo}【${partName}】`
-              : `${title || bvid} - P${pageNo}`,
-            author,
-            page: pageNo,
-            part: partName,
-            pages,
-          });
-        }
-      }
-      if (delayMs && i < list.length - 1) {
-        await sleep(delayMs);
-        throwIfCanceled();
-      }
-    }
-    return out;
+    return appCall("libraryScan.expandCollectionParts", items, { delayMs }, {
+      cancelled: () => typeof shouldCancel === "function" && shouldCancel(),
+      waitIfPaused: () => waitIfJobPaused(),
+      extractBvid,
+      progress: (index, total, bvid) => {
+        setLibraryJob({ kind: "scan", index, total, label: "展开分P " + bvid });
+        if (onProgress) onProgress("展开合集分P " + index + "/" + total + "（" + bvid + "）…");
+      },
+      fetchView: async (bvid) => (await fetchVideoViewFast(bvid))?.value || {},
+      onFailure: (bvid, error) => console.warn(
+        "[bili-subbatch] expand collection parts", bvid, error?.message || error,
+      ),
+      sleep,
+    });
   }
 
   async function loadVideoAsItems(bvid, expandAllParts) {

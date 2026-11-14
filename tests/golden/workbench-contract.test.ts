@@ -187,6 +187,14 @@ describe("Bundled full-feature workbench source", () => {
     expect(maintainedSource).not.toContain("const existingByKey = new Map(");
   });
 
+  it("delegates collection member planning and multipart expansion to Application", () => {
+    for (const name of ["expandCollectionParts", "seasonMemberPlan", "chooseSeasonMembers"]) {
+      expect(maintainedSource).toContain('"libraryScan.' + name + '"');
+    }
+    expect(maintainedSource).not.toContain("const pushItem = (item) => {");
+    expect(maintainedSource).toContain("async function expandCollectionArchivesWithParts(items,");
+  });
+
   it("delegates migrated acquisition rules to grouped Bilibili APIs", () => {
     expect(maintainedSource).toContain("function bilibiliCall(");
     expect(maintainedSource).toContain('bilibiliCall("video.runtimeView"');
