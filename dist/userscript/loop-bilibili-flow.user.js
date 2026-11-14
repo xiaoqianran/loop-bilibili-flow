@@ -3731,6 +3731,84 @@ ${prompt2.userPromptTemplate}`
     }
     throw lastError || new Error("预处理分块失败");
   }
+  async function runPipeline(items, promptName, modelName, settings2, ports) {
+    const runtime2 = ports.createRuntime();
+    const run = {
+      runtime: runtime2,
+      childRuntimes: /* @__PURE__ */ new Set(),
+      raw: "",
+      preview: "",
+      status: "running",
+      statusText: "准备智能切块",
+      busy: true,
+      modelName,
+      promptName,
+      cacheHits: 0,
+      total: items.length,
+      totalChunks: 0,
+      completedChunks: 0,
+      settings: { ...settings2 }
+    };
+    ports.onStart(run);
+    try {
+      const { prepared, jobs, hits } = await prepareJobs(items, {
+        getRaw: ports.getRaw,
+        cacheKey: ports.cacheKey,
+        readCache: ports.readCache,
+        split: ports.split,
+        forceRefresh: ports.forceRefresh
+      });
+      run.cacheHits = hits;
+      run.totalChunks = jobs.length;
+      run.statusText = jobs.length ? "智能切块完成 · " + jobs.length + " 块 · 并发 " + settings2.concurrency : "全部命中缓存 · " + hits + "/" + items.length;
+      ports.onUpdate(run);
+      if (jobs.length) {
+        await ports.runPool(jobs, settings2.concurrency, async (job, workerId) => {
+          const text = await ports.runChunk(job, workerId, run);
+          job.record.outputs[job.chunkIndex] = text;
+          run.completedChunks += 1;
+          run.preview = "";
+          run.statusText = "分块 " + run.completedChunks + "/" + run.totalChunks + " · 并发 " + settings2.concurrency;
+          ports.onUpdate(run);
+        }, () => ports.isCancelled(run));
+      }
+      for (const record2 of prepared) {
+        if (record2.cached) continue;
+        const text = ports.stitch(record2.chunks, record2.outputs);
+        record2.item.preprocessedText = text;
+        record2.item.preprocessCacheKey = record2.cacheKey;
+        void ports.writeCache(record2.cacheKey, {
+          text,
+          bvid: record2.item.bvid,
+          page: record2.item.page || 1,
+          model: ports.cacheModel,
+          chunkSettings: settings2,
+          chunkCount: record2.chunks.length
+        }).catch(() => {
+        });
+      }
+      run.raw = buildPayload(items);
+      run.text = run.raw;
+      run.cacheHits = hits;
+      run.status = "done";
+      run.statusText = "完成 · " + items.length + " 个视频 · " + jobs.length + " 个新分块 · 缓存 " + hits + " · 并发 " + settings2.concurrency;
+      run.busy = false;
+      ports.onUpdate(run);
+      ports.onComplete(run);
+      return run.raw;
+    } catch (error) {
+      const stopped = ports.isCancelled(run);
+      runtime2.abort = true;
+      for (const child of run.childRuntimes) ports.abortChild(child);
+      run.status = stopped ? "stopped" : "error";
+      run.statusText = stopped ? "已停止" : "失败 · " + String(
+        error instanceof Error ? error.message : error
+      ).slice(0, 80);
+      run.busy = false;
+      ports.onUpdate(run);
+      throw error;
+    }
+  }
   function selectAnchor(anchorId, nodes) {
     const latest = nodes.filter((node) => node.anchorId === anchorId).reduce((best, node) => !best || Number(node.updatedAt || 0) > Number(best.updatedAt || 0) ? node : best, void 0);
     return { anchorId, nodeId: latest?.id || "" };
@@ -4739,7 +4817,8 @@ ${prompt2.userPromptTemplate}`
     readingBlocks,
     buildPayload,
     prepareJobs,
-    runChunkWithRetry
+    runChunkWithRetry,
+    runPipeline
   };
   const studio = {
     parseStore,
@@ -20953,102 +21032,45 @@ body{padding:48px 20px 80px}
 
   async function preprocessItemsForAi(items, prompt, cfg) {
     const settings = appCall("preprocess.settings", state);
-    const runtime = createAiRuntime(`字幕预处理 · ${cfg.name || cfg.model}`); // parent runtime: logical cancel token only
-    state.preprocessRun = {
-      runtime,
-      childRuntimes: new Set(),
-      raw: "",
-      preview: "",
-      status: "running",
-      statusText: "准备智能切块",
-      busy: true,
-      modelName: cfg.name || cfg.model,
-      promptName: prompt.name,
-      cacheHits: 0,
-      total: items.length,
-      totalChunks: 0,
-      completedChunks: 0,
-      settings: { ...settings },
-    };
-    state.aiViewingPreprocess = true;
-    renderAiResultTabs();
-    setAiBusy(true);
-
-    try {
-      const { prepared, jobs, hits } = await appCall("preprocess.prepareJobs", items, {
-        getRaw: (item) => coreCall("cuesToAiText", item.data || [], item.bvid, item.page || 1),
-        cacheKey: (item, raw) => coreCall("preprocessCacheKey", item, raw, prompt, cfg, settings),
-        readCache: (key) => persistentCacheRead(key),
-        split: (item) => coreCall("splitCuesForPreprocess", item, settings),
-        forceRefresh: state.forcePreprocessOnce,
-      });
-
-      state.preprocessRun.cacheHits = hits;
-      state.preprocessRun.totalChunks = jobs.length;
-      state.preprocessRun.statusText = jobs.length
-        ? `智能切块完成 · ${jobs.length} 块 · 并发 ${settings.concurrency}`
-        : `全部命中缓存 · ${hits}/${items.length}`;
-      renderAiResultTabs();
-
-      if (jobs.length) {
-        await appCall("ai.runPool", jobs, settings.concurrency, async (job, workerId) => {
-          const text = await appCall("preprocess.runChunkWithRetry", job, settings.retries, workerId, {
-            isCancelled: () => !!state.aiAbort || !!state.preprocessRun?.runtime?.abort,
-            createRuntime: (label) => createAiRuntime(label),
-            register: (child) => state.preprocessRun?.childRuntimes?.add(child),
-            unregister: (child) => state.preprocessRun?.childRuntimes?.delete(child),
-            abort: (child) => abortPreprocessChildRuntime(child),
-            formatClock: (seconds) => coreCall("formatClock", seconds),
-            execute: (child, vars, label) => requestPreprocessChunk(child, cfg, prompt, vars, label),
-            onRetry: (label) => {
-              if (state.preprocessRun) state.preprocessRun.statusText = label + " · 失败，准备重试";
-            },
-            sleep,
-          });
-          job.record.outputs[job.chunkIndex] = text;
-          if (state.preprocessRun) {
-            state.preprocessRun.completedChunks += 1;
-            state.preprocessRun.preview = "";
-            state.preprocessRun.statusText = `分块 ${state.preprocessRun.completedChunks}/${state.preprocessRun.totalChunks} · 并发 ${settings.concurrency}`;
-            renderAiResultTabs();
-          }
-        }, () => !!state.aiAbort || !!state.preprocessRun?.runtime?.abort);
-      }
-
-      for (const record of prepared) {
-        if (record.cached) continue;
-        const text = coreCall("stitchPreprocessChunks", record.chunks, record.outputs);
-        record.item.preprocessedText = text;
-        record.item.preprocessCacheKey = record.cacheKey;
-        persistentCacheWrite(record.cacheKey, {
-          text,
-          bvid: record.item.bvid,
-          page: record.item.page || 1,
-          model: cfg.model,
-          chunkSettings: settings,
-          chunkCount: record.chunks.length,
-        }, PREPROCESS_CACHE_TTL_MS).catch(() => {});
-      }
-
-      state.preprocessRun.raw = appCall("preprocess.buildPayload", items);
-      state.preprocessRun.text = state.preprocessRun.raw;
-      state.preprocessRun.cacheHits = hits;
-      state.preprocessRun.status = "done";
-      state.preprocessRun.statusText = `完成 · ${items.length} 个视频 · ${jobs.length} 个新分块 · 缓存 ${hits} · 并发 ${settings.concurrency}`;
-      state.preprocessRun.busy = false;
-      renderAiResultTabs();
-      if (currentAiWorkbenchStage() === "preprocess" && state.aiInputView === "processed") renderPreprocessCanvas().catch(() => {});
-      return state.preprocessRun.raw;
-    } catch (error) {
-      const userStopped = !!state.aiAbort || !!runtime.abort;
-      runtime.abort = true; // 任一分块最终失败后停止其余 worker，避免继续消耗 API。
-      for (const child of state.preprocessRun?.childRuntimes || []) abortPreprocessChildRuntime(child);
-      state.preprocessRun.status = userStopped ? "stopped" : "error";
-      state.preprocessRun.statusText = userStopped ? "已停止" : `失败 · ${String(error?.message || error).slice(0, 80)}`;
-      state.preprocessRun.busy = false;
-      renderAiResultTabs();
-      throw error;
-    }
+    const modelName = cfg.name || cfg.model;
+    return appCall("preprocess.runPipeline", items, prompt.name, modelName, settings, {
+      createRuntime: () => createAiRuntime("字幕预处理 · " + modelName),
+      onStart: (run) => {
+        state.preprocessRun = run;
+        state.aiViewingPreprocess = true;
+        renderAiResultTabs();
+        setAiBusy(true);
+      },
+      onUpdate: () => renderAiResultTabs(),
+      onComplete: () => {
+        if (currentAiWorkbenchStage() === "preprocess" && state.aiInputView === "processed") {
+          renderPreprocessCanvas().catch(() => {});
+        }
+      },
+      isCancelled: (run) => !!state.aiAbort || !!run.runtime.abort,
+      abortChild: (child) => abortPreprocessChildRuntime(child),
+      getRaw: (item) => coreCall("cuesToAiText", item.data || [], item.bvid, item.page || 1),
+      cacheKey: (item, raw) => coreCall("preprocessCacheKey", item, raw, prompt, cfg, settings),
+      readCache: (key) => persistentCacheRead(key),
+      split: (item) => coreCall("splitCuesForPreprocess", item, settings),
+      forceRefresh: state.forcePreprocessOnce,
+      cacheModel: cfg.model,
+      runPool: (jobs, concurrency, handler, cancelled) =>
+        appCall("ai.runPool", jobs, concurrency, handler, cancelled),
+      runChunk: (job, workerId, run) => appCall("preprocess.runChunkWithRetry", job, settings.retries, workerId, {
+        isCancelled: () => !!state.aiAbort || !!run.runtime.abort,
+        createRuntime: (label) => createAiRuntime(label),
+        register: (child) => run.childRuntimes.add(child),
+        unregister: (child) => run.childRuntimes.delete(child),
+        abort: (child) => abortPreprocessChildRuntime(child),
+        formatClock: (seconds) => coreCall("formatClock", seconds),
+        execute: (child, vars, label) => requestPreprocessChunk(child, cfg, prompt, vars, label),
+        onRetry: (label) => { run.statusText = label + " · 失败，准备重试"; },
+        sleep,
+      }),
+      stitch: (chunks, outputs) => coreCall("stitchPreprocessChunks", chunks, outputs),
+      writeCache: (key, value) => persistentCacheWrite(key, value, PREPROCESS_CACHE_TTL_MS),
+    });
   }
 
   async function selectPreprocessResult() {

@@ -40,6 +40,7 @@ export const preprocess = {
   buildPayload: preprocessController.buildPayload,
   prepareJobs: preprocessController.prepareJobs,
   runChunkWithRetry: preprocessController.runChunkWithRetry,
+  runPipeline: preprocessController.runPipeline,
 } as const;
 
 export const studio = {

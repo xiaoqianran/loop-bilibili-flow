@@ -179,3 +179,109 @@ export async function runChunkWithRetry<T extends PreprocessJobItem, R extends {
   }
   throw lastError || new Error("预处理分块失败");
 }
+
+
+export interface PipelineSettings {
+  concurrency: number; retries: number; targetMinutes: number; overlapSeconds: number; maxChars: number;
+}
+export interface PipelineRun<R> {
+  runtime: R; childRuntimes: Set<R>; raw: string; text?: string; preview: string;
+  status: "running" | "done" | "error" | "stopped";
+  statusText: string; busy: boolean; modelName: string; promptName: string;
+  cacheHits: number; total: number; totalChunks: number; completedChunks: number;
+  settings: PipelineSettings;
+}
+export interface PipelinePorts<T extends PreprocessJobItem, R extends { abort?: boolean }> {
+  createRuntime: () => R;
+  onStart: (run: PipelineRun<R>) => void;
+  onUpdate: (run: PipelineRun<R>) => void;
+  onComplete: (run: PipelineRun<R>) => void;
+  isCancelled: (run: PipelineRun<R>) => boolean;
+  abortChild: (runtime: R) => void;
+  getRaw: (item: T) => string;
+  cacheKey: (item: T, raw: string) => string;
+  readCache: (key: string) => Promise<{ value?: { text?: string } } | null>;
+  split: (item: T) => Chunk[];
+  forceRefresh: boolean;
+  cacheModel: string;
+  runPool: (
+    jobs: readonly ChunkJob<T>[], concurrency: number,
+    handler: (job: ChunkJob<T>, workerId: number) => Promise<void>,
+    cancelled: () => boolean,
+  ) => Promise<void>;
+  runChunk: (job: ChunkJob<T>, workerId: number, run: PipelineRun<R>) => Promise<string>;
+  stitch: (chunks: Chunk[], outputs: string[]) => string;
+  writeCache: (key: string, value: {
+    text: string; bvid: string; page: number; model: string;
+    chunkSettings: PipelineSettings; chunkCount: number;
+  }) => Promise<unknown>;
+}
+/** Owns PRE execution lifecycle. UI, storage and network remain injected runtime ports. */
+export async function runPipeline<T extends PreprocessJobItem, R extends { abort?: boolean }>(
+  items: T[], promptName: string, modelName: string,
+  settings: PipelineSettings, ports: PipelinePorts<T, R>,
+): Promise<string> {
+  const runtime = ports.createRuntime();
+  const run: PipelineRun<R> = {
+    runtime, childRuntimes: new Set<R>(), raw: "", preview: "",
+    status: "running", statusText: "准备智能切块", busy: true,
+    modelName, promptName, cacheHits: 0, total: items.length,
+    totalChunks: 0, completedChunks: 0, settings: { ...settings },
+  };
+  ports.onStart(run);
+  try {
+    const { prepared, jobs, hits } = await prepareJobs(items, {
+      getRaw: ports.getRaw, cacheKey: ports.cacheKey,
+      readCache: ports.readCache, split: ports.split,
+      forceRefresh: ports.forceRefresh,
+    });
+    run.cacheHits = hits;
+    run.totalChunks = jobs.length;
+    run.statusText = jobs.length
+      ? "智能切块完成 · " + jobs.length + " 块 · 并发 " + settings.concurrency
+      : "全部命中缓存 · " + hits + "/" + items.length;
+    ports.onUpdate(run);
+    if (jobs.length) {
+      await ports.runPool(jobs, settings.concurrency, async (job, workerId) => {
+        const text = await ports.runChunk(job, workerId, run);
+        job.record.outputs[job.chunkIndex] = text;
+        run.completedChunks += 1;
+        run.preview = "";
+        run.statusText = "分块 " + run.completedChunks + "/" + run.totalChunks
+          + " · 并发 " + settings.concurrency;
+        ports.onUpdate(run);
+      }, () => ports.isCancelled(run));
+    }
+    for (const record of prepared) {
+      if (record.cached) continue;
+      const text = ports.stitch(record.chunks, record.outputs);
+      record.item.preprocessedText = text;
+      record.item.preprocessCacheKey = record.cacheKey;
+      void ports.writeCache(record.cacheKey, {
+        text, bvid: record.item.bvid, page: record.item.page || 1,
+        model: ports.cacheModel, chunkSettings: settings, chunkCount: record.chunks.length,
+      }).catch(() => {});
+    }
+    run.raw = buildPayload(items);
+    run.text = run.raw;
+    run.cacheHits = hits;
+    run.status = "done";
+    run.statusText = "完成 · " + items.length + " 个视频 · " + jobs.length
+      + " 个新分块 · 缓存 " + hits + " · 并发 " + settings.concurrency;
+    run.busy = false;
+    ports.onUpdate(run);
+    ports.onComplete(run);
+    return run.raw;
+  } catch (error) {
+    const stopped = ports.isCancelled(run);
+    runtime.abort = true;
+    for (const child of run.childRuntimes) ports.abortChild(child);
+    run.status = stopped ? "stopped" : "error";
+    run.statusText = stopped ? "已停止" : "失败 · " + String(
+      error instanceof Error ? error.message : error,
+    ).slice(0, 80);
+    run.busy = false;
+    ports.onUpdate(run);
+    throw error;
+  }
+}
