@@ -1,3 +1,5 @@
+import * as batchCoordinator from "./ai-batch-coordinator";
+import * as knowledgeController from "./knowledge-controller";
 import * as acquisitionApi from "./acquisition";
 import * as aiController from "./ai-controller";
 import * as studioController from "./studio-controller";
@@ -22,6 +24,7 @@ export const transcript = {
 } as const;
 
 export const ai = {
+  createCoordinator: batchCoordinator.createCoordinator,
   request: aiController.request,
   runPool: aiController.runPool,
 } as const;
@@ -34,6 +37,8 @@ export const studio = {
 } as const;
 
 export const knowledge = {
+  createController: knowledgeController.createController,
+  selectAnchor: knowledgeController.selectAnchor,
   createRepository: knowledgeRepository.createRepository,
 } as const;
 

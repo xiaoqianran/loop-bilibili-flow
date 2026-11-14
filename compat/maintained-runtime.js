@@ -3408,49 +3408,15 @@
     }, 60));
     bindConfigListDrag(root);
     bindFlowModelDrag(root);
-    const studioInput = root.querySelector('[data-role="studio-input"]');
-    if (studioInput) {
-      studioInput.addEventListener("input", () => {
-        studioInput.style.height = "auto";
-        studioInput.style.height = `${Math.min(120, Math.max(40, studioInput.scrollHeight))}px`;
-        renderStudioSlashMenu();
-      });
-      studioInput.addEventListener("keydown", (e) => {
-        const menu = root.querySelector('[data-role="studio-slash"]');
-        const open = menu && !menu.hidden;
-        const items = open ? Array.from(menu.querySelectorAll("[data-studio-slash]")) : [];
-        if (open && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
-          e.preventDefault();
-          const delta = e.key === "ArrowDown" ? 1 : -1;
-          state.studioSlashIndex = (state.studioSlashIndex + delta + items.length) % Math.max(1, items.length);
-          renderStudioSlashMenu();
-          return;
-        }
-        if (open && (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey))) {
-          e.preventDefault();
-          const active = items[state.studioSlashIndex] || items[0];
-          if (active) {
-            studioInput.value = "";
-            hideStudioSlashMenu();
-            runStudioSlash(active.dataset.studioSlash);
-          }
-          return;
-        }
-        if (e.key === "Escape" && open) {
-          e.preventDefault();
-          hideStudioSlashMenu();
-          return;
-        }
-        if (e.key === "Enter" && !e.shiftKey) {
-          e.preventDefault();
-          const text = String(studioInput.value || "");
-          studioInput.value = "";
-          studioInput.style.height = "40px";
-          hideStudioSlashMenu();
-          sendStudioChat(text).catch((error) => setStatus(`对话失败：${error?.message || error}`, "err"));
-        }
-      });
-    }
+    SubBatch.SubBatchMonorepo.ui.studioInteractionController.bind(root, {
+      getIndex: () => state.studioSlashIndex,
+      setIndex: (index) => { state.studioSlashIndex = index; },
+      renderMenu: renderStudioSlashMenu,
+      hideMenu: hideStudioSlashMenu,
+      runCommand: runStudioSlash,
+      send: sendStudioChat,
+      onError: (error) => setStatus(`对话失败：${error?.message || error}`, "err"),
+    });
     root.querySelector('[data-role="knowledge-search"]')?.addEventListener("input", debounce((e) => {
       state.knowledgeSearch = String(e.target.value || "");
       renderKnowledgeWorkspace().catch(() => {});
@@ -6585,10 +6551,9 @@
     try { await knowledgeRefreshCache(); } catch (error) { setStatus(`知识库读取失败：${error.message || error}`, "err"); }
     const anchor = knowledgeAnchorById(anchorId);
     if (!anchor) return;
-    state.knowledgeActiveAnchorId = anchor.id;
-    const nodes = knowledgeNodesForAnchor(anchor.id);
-    const latest = [...nodes].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))[0];
-    state.knowledgeActiveNodeId = latest?.id || "";
+    const selection = appCall("knowledge.selectAnchor", anchor.id, state.knowledgeNodes);
+    state.knowledgeActiveAnchorId = selection.anchorId;
+    state.knowledgeActiveNodeId = selection.nodeId;
     if (workspace) {
       setWorkspace("knowledge");
       await renderKnowledgeWorkspace();
@@ -6752,6 +6717,8 @@
     return anchor;
   }
 
+  let knowledgeController = null;
+
   async function knowledgeAsk(anchorId, parentId, question) {
     const q = String(question || "").trim();
     if (!q || state.knowledgeBusy) return;
@@ -6812,9 +6779,11 @@
     }
     const runtime = createAiRuntime(`Knowledge · ${model.name || model.model}`);
     state.knowledgeRuntime = runtime;
+    knowledgeController ||= appCall("knowledge.createController");
+    const request = knowledgeController.begin(node.id);
     let latest = "";
     let lastPreviewPersistAt = 0;
-    await new Promise((resolve, reject) => {
+    await request.stage(() => new Promise((resolve, reject) => {
       requestChatCompletion({
         runtime,
         baseUrl: model.baseUrl,
@@ -6841,19 +6810,21 @@
         },
         onError(error) { reject(error instanceof Error ? error : new Error(String(error || "Knowledge 请求失败"))); },
       });
-    }).then(async () => {
+    })).then(async () => {
       const parsed = parseKnowledgeOutput(latest);
       node.answer = parsed.answer || latest.trim();
       node.preview = "";
       node.suggestions = parsed.suggestions;
-      node.status = "done";
+      node.status = runtime.abort || !request.current() ? "stopped" : "done";
+      request.finish(node.status);
       node.updatedAt = Date.now();
       anchor.updatedAt = node.updatedAt;
       await Promise.all([knowledgePutNode(node), knowledgePutAnchor(anchor)]);
       await ensureKnowledgeRenderLibs(node.answer).catch(() => {});
       setStatus(`Knowledge · 已回答：${q.slice(0, 28)}${q.length > 28 ? "…" : ""}`, "ok");
     }).catch(async (error) => {
-      const stopped = !!runtime.abort;
+      const stopped = !!runtime.abort || !request.current();
+      request.finish(stopped ? "stopped" : "error");
       node.answer = knowledgeVisibleAnswer(latest);
       node.preview = "";
       node.status = stopped ? "stopped" : "error";
@@ -6862,6 +6833,7 @@
       await knowledgePutNode(node).catch(() => {});
       setStatus(stopped ? "Knowledge 已停止" : `Knowledge 失败：${node.error}`, stopped ? "" : "err");
     }).finally(async () => {
+      if (state.knowledgeRuntime !== runtime) return;
       state.knowledgeBusy = false;
       state.knowledgeRuntime = null;
       await renderKnowledgeRail();
@@ -6870,6 +6842,7 @@
   }
 
   function abortKnowledgeRequest() {
+    knowledgeController?.stop();
     const runtime = state.knowledgeRuntime;
     if (!runtime) return;
     runtime.abort = true;
@@ -9063,6 +9036,7 @@
   }
 
   function abortAllAiRuns() {
+    aiBatchCoordinator?.stop();
     state.aiRunOrder.forEach((id) => abortAiRun(state.aiRuns.get(id)));
     if (state.preprocessRun?.runtime) {
       state.preprocessRun.runtime.abort = true;
@@ -11943,6 +11917,8 @@ body{padding:48px 20px 80px}
     return run;
   }
 
+  let aiBatchCoordinator = null;
+
   async function doAiAnalyze(options = {}) {
     const automatic = !!options.automatic;
     if (state.aiBusy) {
@@ -12071,6 +12047,8 @@ body{padding:48px 20px 80px}
     state.preprocessRun = null;
     state.aiViewingPreprocess = false;
     const sessionId = ++state.aiSessionSeq;
+    aiBatchCoordinator ||= appCall("ai.createCoordinator");
+    const batch = aiBatchCoordinator.begin(String(sessionId));
     for (const plan of taskPlans) {
       for (const profile of plan.models) {
         const run = createAiRun(profile, sessionId, plan.task, plan.prompt);
@@ -12093,9 +12071,10 @@ body{padding:48px 20px 80px}
     }
 
     try {
-      const ready = await ensureSubtitlesForAi(targets);
+      const ready = await batch.stage(() => ensureSubtitlesForAi(targets));
       if (options.expectedRouteKey && currentRouteVideoKey() !== options.expectedRouteKey) throw new Error("页面已切换到其他视频");
       if (!ready.length) {
+        batch.finish("error");
         state.aiRunOrder.forEach((id) => {
           const run = state.aiRuns.get(id);
           if (run) updateAiRun(run, { busy: false, status: "error", statusText: "无可用字幕", error: "勾选项均无字幕" });
@@ -12111,7 +12090,7 @@ body{padding:48px 20px 80px}
       let stageInput = rawBuilt;
       if (state.preprocessEnabled) {
         setStatus(`阶段 1/2 · 字幕预处理 · ${preprocessPrompt.name} · ${preprocessConfig.name || preprocessConfig.model}`);
-        stageInput = await preprocessItemsForAi(ready, preprocessPrompt, preprocessConfig);
+        stageInput = await batch.stage(() => preprocessItemsForAi(ready, preprocessPrompt, preprocessConfig));
         if (state.aiAbort) throw new Error("用户停止");
       }
       const cut = coreCall("truncateForAi", stageInput, MAX_SUBTITLE_CHARS);
@@ -12175,6 +12154,7 @@ body{padding:48px 20px 80px}
       }
 
       if (!generateIds.length) {
+        batch.finish();
         setStatus(`已复用缓存 · ${reused} 个模型版本 · 未调用模型`, "ok");
         if (state.aiActiveRunId) await selectAiRun(state.aiActiveRunId);
         persistAiSessionCache().catch(() => {});
@@ -12182,13 +12162,15 @@ body{padding:48px 20px 80px}
       }
 
       setStatus(`复用缓存 ${reused} · 新生成 ${generateIds.length} · ${ready.length} 条字幕${cut.truncated ? " · 输入已截断" : ""}`);
-      await Promise.allSettled(generateIds.map((id) => {
+      await batch.stage(() => Promise.allSettled(generateIds.map((id) => {
         const run = state.aiRuns.get(id);
         return runAiProfile(run, vars, run.promptProfile, commonMeta);
-      }));
+      })));
+      batch.finish(state.aiAbort ? "stopped" : "done");
       if (sessionId === state.aiSessionSeq) summarizeAiRuns(reused ? "部分模型复用缓存后生成结束" : "全部产物生成结束");
     } catch (error) {
       const message = String(error?.message || error);
+      batch.finish(state.aiAbort ? "stopped" : "error");
       if (sessionId === state.aiSessionSeq) {
         if (!state.aiAbort) setStatus(`AI 准备失败: ${message}`, "err");
         abortAllAiRuns();
