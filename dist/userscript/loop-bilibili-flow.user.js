@@ -9980,11 +9980,72 @@ ${prompt2.userPromptTemplate}`
     status,
     statusLabel
   }, Symbol.toStringTag, { value: "Module" }));
+  function nodesForAnchor(nodes, anchorId) {
+    return nodes.filter((node) => node.anchorId === anchorId);
+  }
+  function anchorById(anchors, id) {
+    return anchors.find((anchor) => anchor.id === id) || null;
+  }
+  function nodeById(nodes, id) {
+    return nodes.find((node) => node.id === id) || null;
+  }
+  function filterAnchors(anchors, nodes, search) {
+    const query = String(search || "").trim().toLocaleLowerCase();
+    if (!query) return anchors;
+    const nodeMatches = /* @__PURE__ */ new Set();
+    for (const node of nodes) {
+      const haystack = [node.question || "", node.answer || "", node.preview || ""].join("\n").toLocaleLowerCase();
+      if (haystack.includes(query)) nodeMatches.add(node.anchorId);
+    }
+    return anchors.filter((anchor) => [anchor.selectedText, anchor.title, anchor.contextText].join("\n").toLocaleLowerCase().includes(query) || nodeMatches.has(anchor.id));
+  }
+  function resolveSelection(anchors, nodes, anchorId, nodeId, isSmall) {
+    let selectedAnchor = anchorId;
+    let selectedNode = nodeId;
+    if (!anchors.some((anchor) => anchor.id === selectedAnchor)) {
+      selectedAnchor = isSmall ? "" : anchors[0]?.id || "";
+      selectedNode = "";
+    }
+    if (selectedAnchor) {
+      const candidates = nodesForAnchor(nodes, selectedAnchor);
+      if (!candidates.some((node) => node.id === selectedNode)) {
+        selectedNode = [...candidates].sort(
+          (a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0)
+        )[0]?.id || "";
+      }
+    }
+    return { anchorId: selectedAnchor, nodeId: selectedNode };
+  }
+  function groupAnchors(anchors, sourceKey) {
+    const groups = /* @__PURE__ */ new Map();
+    for (const anchor of anchors) {
+      const key = String(anchor.sourceKey || sourceKey(anchor) || "unknown");
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          label: String(anchor.title || anchor.bvid || "未命名来源") + (anchor.bvid ? " · " + anchor.bvid : "") + (Number(anchor.page) > 1 ? " P" + anchor.page : ""),
+          anchors: []
+        });
+      }
+      groups.get(key).anchors.push(anchor);
+    }
+    return [...groups.values()];
+  }
+  const knowledgeNavigationController = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    anchorById,
+    filterAnchors,
+    groupAnchors,
+    nodeById,
+    nodesForAnchor,
+    resolveSelection
+  }, Symbol.toStringTag, { value: "Module" }));
   const ui = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
     aiStyles,
     folioStyles,
     knowledgeDrilldownStyles: knowledgeStyles,
+    knowledgeNavigation: knowledgeNavigationController,
     knowledgeWorkspaceStyles,
     lateStudioStyles: lateStyles,
     libraryController,
@@ -15511,13 +15572,13 @@ ${addition}`.trim() };
       };
     }
     function knowledgeNodesForAnchor(anchorId) {
-      return (state2.knowledgeNodes || []).filter((n) => n.anchorId === anchorId);
+      return SubBatch2.SubBatchMonorepo.ui.knowledgeNavigation.nodesForAnchor(state2.knowledgeNodes || [], anchorId);
     }
     function knowledgeAnchorById(id) {
-      return (state2.knowledgeAnchors || []).find((a) => a.id === id) || null;
+      return SubBatch2.SubBatchMonorepo.ui.knowledgeNavigation.anchorById(state2.knowledgeAnchors || [], id);
     }
     function knowledgeNodeById(id) {
-      return (state2.knowledgeNodes || []).find((n) => n.id === id) || null;
+      return SubBatch2.SubBatchMonorepo.ui.knowledgeNavigation.nodeById(state2.knowledgeNodes || [], id);
     }
     function parseKnowledgeOutput2(raw) {
       const source = String(raw || "");
@@ -15790,19 +15851,11 @@ ${addition}`.trim() };
       if (!anchors.length) {
         return '<div class="bsb-knowledge-library-empty">没有匹配的知识锚点。<br>去 AI → 预处理 → AI 处理字幕中选中概念开始。</div>';
       }
-      const groups = /* @__PURE__ */ new Map();
-      for (const anchor of anchors) {
-        const key = String(anchor.sourceKey || knowledgeSourceKey(anchor.bvid, anchor.page || 1) || "unknown");
-        if (!groups.has(key)) {
-          groups.set(key, {
-            key,
-            label: `${anchor.title || anchor.bvid || "未命名来源"}${anchor.bvid ? ` · ${anchor.bvid}` : ""}${anchor.page > 1 ? ` P${anchor.page}` : ""}`,
-            anchors: []
-          });
-        }
-        groups.get(key).anchors.push(anchor);
-      }
-      return [...groups.values()].map((group) => {
+      const groups = SubBatch2.SubBatchMonorepo.ui.knowledgeNavigation.groupAnchors(
+        anchors,
+        (anchor) => knowledgeSourceKey(anchor.bvid, anchor.page || 1)
+      );
+      return groups.map((group) => {
         const items = group.anchors.map((anchor) => {
           const count = knowledgeNodesForAnchor(anchor.id).length;
           const active = anchor.id === activeAnchorId;
@@ -16326,32 +16379,22 @@ ${addition}`.trim() };
         detail.innerHTML = `<div class="bsb-empty"><strong>知识库不可用</strong><span>${escapeHtml(error.message || error)}</span></div>`;
         return;
       }
-      const q = String(state2.knowledgeSearch || "").trim().toLocaleLowerCase();
-      const nodeMatchIds = /* @__PURE__ */ new Set();
-      if (q) {
-        for (const node of state2.knowledgeNodes) {
-          const hay = `${node.question || ""}
-${node.answer || ""}
-${node.preview || ""}`.toLocaleLowerCase();
-          if (hay.includes(q)) nodeMatchIds.add(node.anchorId);
-        }
-      }
-      const anchors = q ? state2.knowledgeAnchors.filter((a) => `${a.selectedText}
-${a.title}
-${a.contextText}`.toLocaleLowerCase().includes(q) || nodeMatchIds.has(a.id)) : state2.knowledgeAnchors;
+      const anchors = SubBatch2.SubBatchMonorepo.ui.knowledgeNavigation.filterAnchors(
+        state2.knowledgeAnchors,
+        state2.knowledgeNodes,
+        state2.knowledgeSearch
+      );
       if (count) count.textContent = String(anchors.length);
-      const activeStillVisible = anchors.some((a) => a.id === state2.knowledgeActiveAnchorId);
-      if (!activeStillVisible) {
-        state2.knowledgeActiveAnchorId = isSmall ? "" : anchors[0]?.id || "";
-        state2.knowledgeActiveNodeId = "";
-      }
+      const selection = SubBatch2.SubBatchMonorepo.ui.knowledgeNavigation.resolveSelection(
+        anchors,
+        state2.knowledgeNodes,
+        state2.knowledgeActiveAnchorId,
+        state2.knowledgeActiveNodeId,
+        isSmall
+      );
+      state2.knowledgeActiveAnchorId = selection.anchorId;
+      state2.knowledgeActiveNodeId = selection.nodeId;
       const anchor = knowledgeAnchorById(state2.knowledgeActiveAnchorId);
-      if (anchor) {
-        const nodes = knowledgeNodesForAnchor(anchor.id);
-        if (!nodes.some((n) => n.id === state2.knowledgeActiveNodeId)) {
-          state2.knowledgeActiveNodeId = [...nodes].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))[0]?.id || "";
-        }
-      }
       const activeNode = knowledgeNodeById(state2.knowledgeActiveNodeId);
       const answerText = knowledgeVisibleAnswer(activeNode?.answer || activeNode?.preview || "");
       try {

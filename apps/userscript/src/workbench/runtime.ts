@@ -5511,15 +5511,15 @@ export function mountWorkbench(SubBatch) {
   }
 
   function knowledgeNodesForAnchor(anchorId) {
-    return (state.knowledgeNodes || []).filter((n) => n.anchorId === anchorId);
+    return SubBatch.SubBatchMonorepo.ui.knowledgeNavigation.nodesForAnchor(state.knowledgeNodes || [], anchorId);
   }
 
   function knowledgeAnchorById(id) {
-    return (state.knowledgeAnchors || []).find((a) => a.id === id) || null;
+    return SubBatch.SubBatchMonorepo.ui.knowledgeNavigation.anchorById(state.knowledgeAnchors || [], id);
   }
 
   function knowledgeNodeById(id) {
-    return (state.knowledgeNodes || []).find((n) => n.id === id) || null;
+    return SubBatch.SubBatchMonorepo.ui.knowledgeNavigation.nodeById(state.knowledgeNodes || [], id);
   }
 
   function parseKnowledgeOutput(raw) {
@@ -5867,19 +5867,10 @@ export function mountWorkbench(SubBatch) {
     if (!anchors.length) {
       return '<div class="bsb-knowledge-library-empty">没有匹配的知识锚点。<br>去 AI → 预处理 → AI 处理字幕中选中概念开始。</div>';
     }
-    const groups = new Map();
-    for (const anchor of anchors) {
-      const key = String(anchor.sourceKey || knowledgeSourceKey(anchor.bvid, anchor.page || 1) || "unknown");
-      if (!groups.has(key)) {
-        groups.set(key, {
-          key,
-          label: `${anchor.title || anchor.bvid || "未命名来源"}${anchor.bvid ? ` · ${anchor.bvid}` : ""}${anchor.page > 1 ? ` P${anchor.page}` : ""}`,
-          anchors: [],
-        });
-      }
-      groups.get(key).anchors.push(anchor);
-    }
-    return [...groups.values()].map((group) => {
+    const groups = SubBatch.SubBatchMonorepo.ui.knowledgeNavigation.groupAnchors(
+      anchors, (anchor) => knowledgeSourceKey(anchor.bvid, anchor.page || 1),
+    );
+    return groups.map((group) => {
       const items = group.anchors.map((anchor) => {
         const count = knowledgeNodesForAnchor(anchor.id).length;
         const active = anchor.id === activeAnchorId;
@@ -6411,31 +6402,16 @@ export function mountWorkbench(SubBatch) {
       detail.innerHTML = `<div class="bsb-empty"><strong>知识库不可用</strong><span>${escapeHtml(error.message || error)}</span></div>`;
       return;
     }
-    const q = String(state.knowledgeSearch || "").trim().toLocaleLowerCase();
-    const nodeMatchIds = new Set();
-    if (q) {
-      for (const node of state.knowledgeNodes) {
-        const hay = `${node.question || ""}\n${node.answer || ""}\n${node.preview || ""}`.toLocaleLowerCase();
-        if (hay.includes(q)) nodeMatchIds.add(node.anchorId);
-      }
-    }
-    const anchors = q
-      ? state.knowledgeAnchors.filter((a) => `${a.selectedText}\n${a.title}\n${a.contextText}`.toLocaleLowerCase().includes(q) || nodeMatchIds.has(a.id))
-      : state.knowledgeAnchors;
+    const anchors = SubBatch.SubBatchMonorepo.ui.knowledgeNavigation.filterAnchors(
+      state.knowledgeAnchors, state.knowledgeNodes, state.knowledgeSearch,
+    );
     if (count) count.textContent = String(anchors.length);
-
-    const activeStillVisible = anchors.some((a) => a.id === state.knowledgeActiveAnchorId);
-    if (!activeStillVisible) {
-      state.knowledgeActiveAnchorId = isSmall ? "" : (anchors[0]?.id || "");
-      state.knowledgeActiveNodeId = "";
-    }
+    const selection = SubBatch.SubBatchMonorepo.ui.knowledgeNavigation.resolveSelection(
+      anchors, state.knowledgeNodes, state.knowledgeActiveAnchorId, state.knowledgeActiveNodeId, isSmall,
+    );
+    state.knowledgeActiveAnchorId = selection.anchorId;
+    state.knowledgeActiveNodeId = selection.nodeId;
     const anchor = knowledgeAnchorById(state.knowledgeActiveAnchorId);
-    if (anchor) {
-      const nodes = knowledgeNodesForAnchor(anchor.id);
-      if (!nodes.some((n) => n.id === state.knowledgeActiveNodeId)) {
-        state.knowledgeActiveNodeId = [...nodes].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))[0]?.id || "";
-      }
-    }
     const activeNode = knowledgeNodeById(state.knowledgeActiveNodeId);
     const answerText = knowledgeVisibleAnswer(activeNode?.answer || activeNode?.preview || "");
     try {

@@ -247,6 +247,17 @@ describe("Bundled full-feature workbench source", () => {
     expect(maintainedSource).not.toContain("const nodeIds = state.knowledgeNodes.filter(");
   });
 
+  it("delegates Knowledge search, grouping and selection to the UI controller", () => {
+    for (const method of [
+      "nodesForAnchor", "anchorById", "nodeById",
+      "filterAnchors", "resolveSelection", "groupAnchors",
+    ]) {
+      expect(maintainedSource).toContain("SubBatch.SubBatchMonorepo.ui.knowledgeNavigation." + method + "(");
+    }
+    expect(maintainedSource).not.toContain("const nodeMatchIds = new Set()");
+    expect(maintainedSource).not.toContain("const groups = new Map();\n    for (const anchor of anchors)");
+  });
+
   it("delegates migrated acquisition rules to grouped Bilibili APIs", () => {
     expect(maintainedSource).toContain("function bilibiliCall(");
     expect(maintainedSource).toContain('bilibiliCall("video.runtimeView"');

@@ -23,3 +23,4 @@ export * as studioInteractionController from "./workspaces/studio-interaction-co
 
 export * as transcriptController from "./workspaces/transcript-controller";
 export * as libraryController from "./workspaces/library-controller";
+export * as knowledgeNavigation from "./workspaces/knowledge-navigation-controller";
