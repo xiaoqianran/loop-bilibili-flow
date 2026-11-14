@@ -217,3 +217,105 @@ export function seasonMemberPlan(entry: SeasonEntry | null | undefined, fallback
 export function chooseSeasonMembers(recent: string[], loaded: string[]): string[] {
   return loaded.length > recent.length ? loaded : recent;
 }
+
+
+export interface UserSeasonPage {
+  code: number;
+  message?: string;
+  data?: {
+    items_lists?: {
+      seasons_list?: SeasonEntry[];
+      series_list?: unknown[];
+      page?: { total?: number | string | null };
+    };
+  };
+}
+export interface UserSeason {
+  mid: string;
+  season_id: string;
+  name: string;
+  bvids: string[];
+  shortUrl: string;
+}
+export interface UserSeasonPorts {
+  fetchPage: (mid: string, page: number, pageSize: number) => Promise<UserSeasonPage>;
+  loadMembers: (
+    mid: string, seasonId: string, maxPages: number, delayMs: number,
+    onProgress: (message: string) => void,
+  ) => Promise<string[]>;
+  shortUrl: (mid: string, seasonId: string) => string;
+  progress?: (message: string) => void;
+  cancelled: () => boolean;
+  sleep: (ms: number) => Promise<unknown>;
+  warn: (seasonId: string, error: unknown) => void;
+}
+/** Personal-space season list pagination. IO remains in the caller-provided ports. */
+export async function collectUserSeasons(
+  midValue: unknown,
+  config: { maxPages?: number; pageSize?: number; delayMs?: number; maxSeasonArchivePages?: number },
+  ports: UserSeasonPorts,
+): Promise<UserSeason[]> {
+  const mid = String(midValue || "").trim();
+  if (!mid) return [];
+  const maxPages = config.maxPages ?? 30;
+  const pageSize = config.pageSize ?? 20;
+  const delayMs = config.delayMs ?? 280;
+  const maxSeasonArchivePages = config.maxSeasonArchivePages ?? 40;
+  const seasons: UserSeason[] = [];
+  let page = 1;
+  let hasMore = true;
+
+  while (hasMore && page <= maxPages) {
+    assertScanActive(ports.cancelled);
+    ports.progress?.("拉取合集列表 " + page + "/" + maxPages + "…（已 " + seasons.length + " 个）");
+    const result = await ports.fetchPage(mid, page, pageSize);
+    assertScanActive(ports.cancelled);
+    if (result.code !== 0) {
+      throw new Error(result.message || "seasons_series_list code=" + result.code);
+    }
+    const lists = result.data?.items_lists || {};
+    const entries = lists.seasons_list || [];
+    const pageInfo = lists.page || {};
+
+    for (const entry of entries) {
+      const plan = seasonMemberPlan(entry, mid);
+      if (!plan) continue;
+      let bvids = plan.bvids;
+      if (plan.missingMembers) {
+        ports.progress?.("补全合集「" + plan.name + "」成员 " + bvids.length + "/" + plan.total + "…");
+        try {
+          const loaded = await ports.loadMembers(
+            mid, plan.season_id, maxSeasonArchivePages, delayMs,
+            message => ports.progress?.("合集 " + (entry?.meta?.name || plan.season_id) + " · " + message),
+          );
+          bvids = chooseSeasonMembers(bvids, loaded);
+        } catch (error) {
+          if ((error as { name?: string })?.name === "AbortError") throw error;
+          ports.warn(plan.season_id, error);
+        }
+      }
+      seasons.push({
+        mid: plan.mid,
+        season_id: plan.season_id,
+        name: plan.name,
+        bvids,
+        shortUrl: ports.shortUrl(String(entry?.meta?.mid || mid), plan.season_id),
+      });
+    }
+
+    const totalHint = pageInfo.total != null ? Number(pageInfo.total) : null;
+    if (totalHint != null && Number.isFinite(totalHint) && totalHint > 0) {
+      // API total counts seasons and series entries, not page count.
+      hasMore = page * pageSize < totalHint;
+    } else {
+      hasMore = entries.length >= pageSize || (lists.series_list || []).length >= pageSize;
+    }
+    if (!hasMore) break;
+    page++;
+    if (page <= maxPages) {
+      await ports.sleep(delayMs || 280);
+      assertScanActive(ports.cancelled);
+    }
+  }
+  return seasons;
+}

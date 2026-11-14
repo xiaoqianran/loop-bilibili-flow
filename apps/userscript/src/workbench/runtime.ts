@@ -2319,91 +2319,33 @@ export function mountWorkbench(SubBatch) {
     shouldCancel,
     maxSeasonArchivePages = 40,
   } = {}) {
-    const midStr = String(mid || "").trim();
-    if (!midStr) return [];
-    const canceled = () => typeof shouldCancel === "function" && shouldCancel();
-    const throwIfCanceled = () => {
-      if (!canceled()) return;
-      const error = new Error("扫描已取消");
-      error.name = "AbortError";
-      throw error;
-    };
-
-    const seasons = [];
-    let page = 1;
-    let hasMore = true;
-    while (hasMore && page <= maxPages) {
-      throwIfCanceled();
-      if (onProgress) onProgress(`拉取合集列表 ${page}/${maxPages}…（已 ${seasons.length} 个）`);
-      const result = await httpJson(
-        `https://api.bilibili.com/x/polymer/web-space/seasons_series_list?mid=${encodeURIComponent(midStr)}&page_num=${page}&page_size=${pageSize}&web_location=333.1387`,
-        {
-          Referer: `https://space.bilibili.com/${midStr}`,
-          Origin: "https://space.bilibili.com",
+    return appCall("libraryScan.collectUserSeasons",
+      mid, { maxPages, pageSize, delayMs, maxSeasonArchivePages }, {
+        fetchPage: (midStr, page, size) => httpJson(
+          "https://api.bilibili.com/x/polymer/web-space/seasons_series_list"
+          + "?mid=" + encodeURIComponent(midStr)
+          + "&page_num=" + page + "&page_size=" + size
+          + "&web_location=333.1387",
+          { Referer: "https://space.bilibili.com/" + midStr, Origin: "https://space.bilibili.com" },
+        ),
+        loadMembers: async (midStr, sid, archivePages, ms, progress) => {
+          const full = await loadAllListItems(
+            { type: "collection", mid: midStr, season_id: sid },
+            {
+              maxPages: archivePages, pageSize: 30, delayMs: ms,
+              onProgress: progress, shouldCancel,
+            },
+          );
+          return full.items.map((item) => item.bvid).filter(Boolean);
         },
-      );
-      throwIfCanceled();
-      if (result.code !== 0) {
-        throw new Error(result.message || `seasons_series_list code=${result.code}`);
-      }
-      const lists = (result.data && result.data.items_lists) || {};
-      const seasonsList = lists.seasons_list || [];
-      const pageInfo = lists.page || {};
-      for (const entry of seasonsList) {
-        const plan = appCall("libraryScan.seasonMemberPlan", entry, midStr);
-        if (!plan) continue;
-        let bvids = plan.bvids;
-        if (plan.missingMembers) {
-          if (onProgress) {
-            onProgress("补全合集「" + plan.name + "」成员 " + bvids.length + "/" + plan.total + "…");
-          }
-          try {
-            const full = await loadAllListItems(
-              { type: "collection", mid: midStr, season_id: plan.season_id },
-              {
-                maxPages: maxSeasonArchivePages,
-                pageSize: 30,
-                delayMs,
-                onProgress: (t) => {
-                  if (onProgress) onProgress("合集 " + (entry?.meta?.name || plan.season_id) + " · " + t);
-                },
-                shouldCancel,
-              },
-            );
-            const fullBvids = full.items.map((it) => it.bvid).filter(Boolean);
-            bvids = appCall("libraryScan.chooseSeasonMembers", bvids, fullBvids);
-          } catch (err) {
-            if (err?.name === "AbortError") throw err;
-            console.warn(
-              "[bili-subbatch] loadUserSpaceSeasons archives",
-              plan.season_id, err?.message || err,
-            );
-          }
-        }
-        seasons.push({
-          mid: plan.mid,
-          season_id: plan.season_id,
-          name: plan.name,
-          bvids,
-          shortUrl: buildCollectionShortUrl(entry?.meta?.mid || midStr, plan.season_id),
-        });
-      }
-      const totalHint = pageInfo.total != null ? Number(pageInfo.total) : null;
-      if (totalHint != null && Number.isFinite(totalHint) && totalHint > 0) {
-        // API total 多为 seasons+series 条目总数（非页数）
-        hasMore = page * pageSize < totalHint;
-      } else {
-        hasMore = seasonsList.length >= pageSize
-          || ((lists.series_list || []).length >= pageSize);
-      }
-      if (!hasMore) break;
-      page += 1;
-      if (page <= maxPages) {
-        await sleep(delayMs || 280);
-        throwIfCanceled();
-      }
-    }
-    return seasons;
+        shortUrl: buildCollectionShortUrl,
+        progress: onProgress,
+        cancelled: () => typeof shouldCancel === "function" && shouldCancel(),
+        sleep,
+        warn: (sid, error) => console.warn(
+          "[bili-subbatch] loadUserSpaceSeasons archives", sid, error?.message || error,
+        ),
+      });
   }
 
   /**

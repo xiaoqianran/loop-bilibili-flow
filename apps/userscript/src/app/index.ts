@@ -17,6 +17,7 @@ export const libraryScan = {
   collectPages: libraryScanController.collectPages,
   expandCollectionParts: libraryScanController.expandCollectionParts,
   seasonMemberPlan: libraryScanController.seasonMemberPlan,
+  collectUserSeasons: libraryScanController.collectUserSeasons,
   chooseSeasonMembers: libraryScanController.chooseSeasonMembers,
   mergeItems: libraryScanController.mergeScanItems,
   assertActive: libraryScanController.assertScanActive,

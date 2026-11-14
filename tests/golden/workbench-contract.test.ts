@@ -188,11 +188,18 @@ describe("Bundled full-feature workbench source", () => {
   });
 
   it("delegates collection member planning and multipart expansion to Application", () => {
-    for (const name of ["expandCollectionParts", "seasonMemberPlan", "chooseSeasonMembers"]) {
+    for (const name of ["expandCollectionParts", "collectUserSeasons"]) {
       expect(maintainedSource).toContain('"libraryScan.' + name + '"');
     }
     expect(maintainedSource).not.toContain("const pushItem = (item) => {");
     expect(maintainedSource).toContain("async function expandCollectionArchivesWithParts(items,");
+  });
+
+  it("delegates personal-space season paging to the Application coordinator", () => {
+    expect(maintainedSource).toContain('appCall("libraryScan.collectUserSeasons"');
+    expect(maintainedSource).toContain("async function loadUserSpaceSeasons(mid,");
+    expect(maintainedSource).not.toContain("const seasonsList = lists.seasons_list || [];");
+    expect(maintainedSource).not.toContain("const totalHint = pageInfo.total");
   });
 
   it("delegates migrated acquisition rules to grouped Bilibili APIs", () => {
