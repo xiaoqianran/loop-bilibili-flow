@@ -63,6 +63,9 @@ describe("Bundled full-feature workbench source", () => {
       "scheduleAutoHide",
       "knowledgeAncestorNodes",
       "knowledgeBranchContext",
+      "knowledgeTreeHtml",
+      "knowledgeBreadcrumbHtml",
+      "knowledgeSuggestionsHtml",
       "openCacheDatabase",
       "openKnowledgeDb",
       "persistentCacheRead",
@@ -256,6 +259,15 @@ describe("Bundled full-feature workbench source", () => {
     }
     expect(maintainedSource).not.toContain("const nodeMatchIds = new Set()");
     expect(maintainedSource).not.toContain("const groups = new Map();\n    for (const anchor of anchors)");
+  });
+
+  it("routes Knowledge tree HTML and navigation intent through the UI owner", () => {
+    for (const name of ["treeHtml", "breadcrumbHtml", "suggestionsHtml", "dispatchNavigationClick"]) {
+      expect(maintainedSource).toContain("SubBatch.SubBatchMonorepo.ui.knowledgeTreeRenderer." + name + "(");
+    }
+    for (const old of ["function knowledgeTreeHtml(", "function knowledgeBreadcrumbHtml(", "function knowledgeSuggestionsHtml("]) {
+      expect(maintainedSource).not.toContain(old);
+    }
   });
 
   it("delegates migrated acquisition rules to grouped Bilibili APIs", () => {

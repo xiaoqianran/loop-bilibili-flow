@@ -10040,12 +10040,78 @@ ${prompt2.userPromptTemplate}`
     nodesForAnchor,
     resolveSelection
   }, Symbol.toStringTag, { value: "Module" }));
+  function treeHtml(anchorId, activeNodeId, nodes, escapeHtml, escapeAttr) {
+    const scoped = nodes.filter((node) => node.anchorId === anchorId);
+    const children = /* @__PURE__ */ new Map();
+    for (const node of scoped) {
+      const key = node.parentId || "__root__";
+      if (!children.has(key)) children.set(key, []);
+      children.get(key).push(node);
+    }
+    const renderLevel = (parentId, depth = 0) => {
+      if (depth > 64) return "";
+      return (children.get(parentId || "__root__") || []).map((node) => {
+        const kids = children.get(node.id) || [];
+        const cls = node.id === activeNodeId ? " active" : "";
+        return `<div class="bsb-knowledge-tree-node" style="--depth:${depth}"><button type="button" class="${cls}" data-knowledge-node-id="${escapeAttr(node.id)}"><span class="bsb-knowledge-tree-branch">${kids.length ? "⌄" : "·"}</span><span>${escapeHtml(node.question)}</span>${node.starred ? '<span class="bsb-knowledge-star">★</span>' : ""}</button>${kids.length ? renderLevel(node.id, depth + 1) : ""}</div>`;
+      }).join("");
+    };
+    return renderLevel(null) || '<div class="bsb-knowledge-empty-small">还没有追问。直接提出第一个问题。</div>';
+  }
+  function breadcrumbHtml(node, ancestors, escapeHtml, escapeAttr) {
+    if (!node) return "";
+    const chain = [...ancestors, node];
+    return chain.map((n, i) => `<button type="button" data-knowledge-node-id="${escapeAttr(n.id)}" title="${escapeAttr(n.question)}">${escapeHtml(n.question.length > 28 ? `${n.question.slice(0, 28)}…` : n.question)}</button>${i < chain.length - 1 ? "<span>›</span>" : ""}`).join("");
+  }
+  function suggestionsHtml(node, escapeAttr, escapeHtml) {
+    const suggestions = Array.isArray(node?.suggestions) ? node.suggestions.filter(Boolean).slice(0, 4) : [];
+    if (!suggestions.length) return "";
+    return `<div class="bsb-knowledge-suggestions"><span class="bsb-knowledge-kicker">继续深入</span>${suggestions.map((q) => `<button type="button" data-knowledge-suggestion="${escapeAttr(q)}"><span>→</span>${escapeHtml(q)}</button>`).join("")}</div>`;
+  }
+  function dispatchNavigationClick(target, actions) {
+    if (!target) return false;
+    for (const [selector, action] of [
+      ["[data-knowledge-back-list]", "backList"],
+      ["[data-knowledge-tree-toggle]", "toggleTree"],
+      ["[data-knowledge-open-workspace]", "openWorkspace"],
+      ["[data-knowledge-new-root]", "newRoot"]
+    ]) {
+      if (target.closest?.(selector)) {
+        actions[action]();
+        return true;
+      }
+    }
+    const anchor = target.closest?.("[data-knowledge-anchor-list]");
+    if (anchor) {
+      actions.selectAnchor(anchor.getAttribute("data-knowledge-anchor-list") || "");
+      return true;
+    }
+    const node = target.closest?.("[data-knowledge-node-id]");
+    if (node) {
+      actions.selectNode(node.getAttribute("data-knowledge-node-id") || "");
+      return true;
+    }
+    const suggestion = target.closest?.("[data-knowledge-suggestion]");
+    if (suggestion) {
+      actions.askSuggestion(suggestion.getAttribute("data-knowledge-suggestion") || "");
+      return true;
+    }
+    return false;
+  }
+  const knowledgeTreeRenderer = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    breadcrumbHtml,
+    dispatchNavigationClick,
+    suggestionsHtml,
+    treeHtml
+  }, Symbol.toStringTag, { value: "Module" }));
   const ui = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
     aiStyles,
     folioStyles,
     knowledgeDrilldownStyles: knowledgeStyles,
     knowledgeNavigation: knowledgeNavigationController,
+    knowledgeTreeRenderer,
     knowledgeWorkspaceStyles,
     lateStudioStyles: lateStyles,
     libraryController,
@@ -13401,12 +13467,47 @@ ${prompt2.userPromptTemplate}`
           }
           return;
         }
-        if (e.target.closest?.("[data-knowledge-back-list]")) {
+        const handledKnowledgeNavigation = SubBatch2.SubBatchMonorepo.ui.knowledgeTreeRenderer.dispatchNavigationClick(e.target, {
+          backList: () => {
+            state2.knowledgeActiveAnchorId = "";
+            state2.knowledgeActiveNodeId = "";
+            renderKnowledgeWorkspace().catch(() => {
+            });
+          },
+          toggleTree: () => {
+            state2.knowledgeTreeOpen = !state2.knowledgeTreeOpen;
+            renderKnowledgeRail().catch(() => {
+            });
+          },
+          openWorkspace: () => {
+            setWorkspace("knowledge");
+            renderKnowledgeWorkspace().catch(() => {
+            });
+          },
+          newRoot: () => {
+            state2.knowledgeActiveNodeId = "";
+            renderKnowledgeRail().then(() => ensurePanel().querySelector('[data-role="knowledge-question"]')?.focus()).catch(() => {
+            });
+          },
+          selectAnchor: (id) => {
+            state2.knowledgeActiveAnchorId = id;
+            state2.knowledgeActiveNodeId = "";
+            renderKnowledgeWorkspace().catch(() => {
+            });
+          },
+          selectNode: (id) => {
+            state2.knowledgeActiveNodeId = id;
+            if (state2.ui?.view === "knowledge") renderKnowledgeWorkspace().catch(() => {
+            });
+            else renderKnowledgeRail().catch(() => {
+            });
+          },
+          askSuggestion: (question) => {
+            knowledgeAsk(state2.knowledgeActiveAnchorId, state2.knowledgeActiveNodeId || null, question).catch((error) => setStatus("Knowledge 追问失败：" + (error?.message || error), "err"));
+          }
+        });
+        if (handledKnowledgeNavigation) {
           e.preventDefault();
-          state2.knowledgeActiveAnchorId = "";
-          state2.knowledgeActiveNodeId = "";
-          renderKnowledgeWorkspace().catch(() => {
-          });
           return;
         }
         if (e.target.closest?.("[data-knowledge-evidence-toggle]")) {
@@ -13431,53 +13532,6 @@ ${prompt2.userPromptTemplate}`
           root.querySelectorAll?.('[data-role="knowledge-more-menu"]').forEach((menu) => {
             menu.hidden = true;
           });
-        }
-        if (e.target.closest?.("[data-knowledge-tree-toggle]")) {
-          e.preventDefault();
-          state2.knowledgeTreeOpen = !state2.knowledgeTreeOpen;
-          renderKnowledgeRail().catch(() => {
-          });
-          return;
-        }
-        if (e.target.closest?.("[data-knowledge-open-workspace]")) {
-          e.preventDefault();
-          setWorkspace("knowledge");
-          renderKnowledgeWorkspace().catch(() => {
-          });
-          return;
-        }
-        if (e.target.closest?.("[data-knowledge-new-root]")) {
-          e.preventDefault();
-          state2.knowledgeActiveNodeId = "";
-          renderKnowledgeRail().then(() => ensurePanel().querySelector('[data-role="knowledge-question"]')?.focus()).catch(() => {
-          });
-          return;
-        }
-        const knowledgeAnchorList = e.target.closest?.("[data-knowledge-anchor-list]");
-        if (knowledgeAnchorList) {
-          e.preventDefault();
-          state2.knowledgeActiveAnchorId = String(knowledgeAnchorList.dataset.knowledgeAnchorList || "");
-          state2.knowledgeActiveNodeId = "";
-          renderKnowledgeWorkspace().catch(() => {
-          });
-          return;
-        }
-        const knowledgeNode = e.target.closest?.("[data-knowledge-node-id]");
-        if (knowledgeNode) {
-          e.preventDefault();
-          state2.knowledgeActiveNodeId = String(knowledgeNode.dataset.knowledgeNodeId || "");
-          if (state2.ui?.view === "knowledge") renderKnowledgeWorkspace().catch(() => {
-          });
-          else renderKnowledgeRail().catch(() => {
-          });
-          return;
-        }
-        const knowledgeSuggestion = e.target.closest?.("[data-knowledge-suggestion]");
-        if (knowledgeSuggestion) {
-          e.preventDefault();
-          const q = String(knowledgeSuggestion.dataset.knowledgeSuggestion || "");
-          knowledgeAsk(state2.knowledgeActiveAnchorId, state2.knowledgeActiveNodeId || null, q).catch((error) => setStatus(`Knowledge 追问失败：${error?.message || error}`, "err"));
-          return;
         }
         const knowledgeQuick = e.target.closest?.("[data-knowledge-quick]");
         if (knowledgeQuick) {
@@ -15761,34 +15815,6 @@ ${addition}`.trim() };
       if (!ready.length) return '<option value="">没有可用 LLM</option>';
       return ready.map((p) => `<option value="${escapeAttr(p.id)}"${selected?.id === p.id ? " selected" : ""}>${escapeHtml(p.name || p.model)}</option>`).join("");
     }
-    function knowledgeTreeHtml(anchorId, activeNodeId) {
-      const nodes = knowledgeNodesForAnchor(anchorId);
-      const children = /* @__PURE__ */ new Map();
-      for (const node of nodes) {
-        const key = node.parentId || "__root__";
-        if (!children.has(key)) children.set(key, []);
-        children.get(key).push(node);
-      }
-      const renderLevel = (parentId, depth = 0) => {
-        if (depth > 64) return "";
-        return (children.get(parentId || "__root__") || []).map((node) => {
-          const kids = children.get(node.id) || [];
-          const cls = node.id === activeNodeId ? " active" : "";
-          return `<div class="bsb-knowledge-tree-node" style="--depth:${depth}"><button type="button" class="${cls}" data-knowledge-node-id="${escapeAttr(node.id)}"><span class="bsb-knowledge-tree-branch">${kids.length ? "⌄" : "·"}</span><span>${escapeHtml(node.question)}</span>${node.starred ? '<span class="bsb-knowledge-star">★</span>' : ""}</button>${kids.length ? renderLevel(node.id, depth + 1) : ""}</div>`;
-        }).join("");
-      };
-      return renderLevel(null) || '<div class="bsb-knowledge-empty-small">还没有追问。直接提出第一个问题。</div>';
-    }
-    function knowledgeBreadcrumbHtml(node) {
-      if (!node) return "";
-      const chain = [...appCall("knowledge.ancestorNodes", node, state2.knowledgeNodes || []), node];
-      return chain.map((n, i) => `<button type="button" data-knowledge-node-id="${escapeAttr(n.id)}" title="${escapeAttr(n.question)}">${escapeHtml(n.question.length > 28 ? `${n.question.slice(0, 28)}…` : n.question)}</button>${i < chain.length - 1 ? "<span>›</span>" : ""}`).join("");
-    }
-    function knowledgeSuggestionsHtml(node) {
-      const suggestions = Array.isArray(node?.suggestions) ? node.suggestions.filter(Boolean).slice(0, 4) : [];
-      if (!suggestions.length) return "";
-      return `<div class="bsb-knowledge-suggestions"><span class="bsb-knowledge-kicker">继续深入</span>${suggestions.map((q) => `<button type="button" data-knowledge-suggestion="${escapeAttr(q)}"><span>→</span>${escapeHtml(q)}</button>`).join("")}</div>`;
-    }
     function knowledgeContextHtml(anchor) {
       const selected = String(anchor?.selectedText || "").trim();
       const context = String(anchor?.contextText || "").trim();
@@ -15818,7 +15844,7 @@ ${addition}`.trim() };
       const answerHtml = answer ? renderKnowledgeAnswerCards(answer, { streaming }) : answerFallback;
       return `<article class="bsb-knowledge-question-card"><div class="bsb-knowledge-question"><div class="bsb-knowledge-question-meta"><span>${statusLabel2}</span><button type="button" class="bsb-knowledge-node-star${activeNode.starred ? " active" : ""}" data-knowledge-star-node title="${activeNode.starred ? "取消收藏这个回答" : "收藏这个回答"}">${activeNode.starred ? "★" : "☆"}</button></div><h3>${escapeHtml(activeNode.question)}</h3></div></article>
       <div class="bsb-knowledge-answer${streaming ? " streaming" : ""}">${answerHtml}</div>
-      ${knowledgeSuggestionsHtml(activeNode)}`;
+      ${SubBatch2.SubBatchMonorepo.ui.knowledgeTreeRenderer.suggestionsHtml(activeNode, escapeAttr, escapeHtml)}`;
     }
     function knowledgeComposerHtml() {
       return `<div class="bsb-knowledge-composer">
@@ -15833,9 +15859,9 @@ ${addition}`.trim() };
     }
     function knowledgeRailBodyHtml(anchor, activeNode, { showTree = state2.knowledgeTreeOpen } = {}) {
       const treeOpen = !!showTree;
-      const treePane = treeOpen ? `<aside class="bsb-knowledge-tree-pane" data-role="knowledge-tree-pane"><div class="bsb-knowledge-pane-head"><span class="bsb-knowledge-kicker">追问树</span><button type="button" class="bsb-icon-btn" data-knowledge-tree-toggle title="收起追问树">‹</button></div><div class="bsb-knowledge-tree">${knowledgeTreeHtml(anchor.id, activeNode?.id || "")}</div></aside>` : "";
+      const treePane = treeOpen ? `<aside class="bsb-knowledge-tree-pane" data-role="knowledge-tree-pane"><div class="bsb-knowledge-pane-head"><span class="bsb-knowledge-kicker">追问树</span><button type="button" class="bsb-icon-btn" data-knowledge-tree-toggle title="收起追问树">‹</button></div><div class="bsb-knowledge-tree">${SubBatch2.SubBatchMonorepo.ui.knowledgeTreeRenderer.treeHtml(anchor.id, activeNode?.id || "", state2.knowledgeNodes || [], escapeHtml, escapeAttr)}</div></aside>` : "";
       return `${knowledgeContextHtml(anchor)}
-      <div class="bsb-knowledge-crumbs">${knowledgeBreadcrumbHtml(activeNode)}${!treeOpen ? `<button type="button" class="bsb-mini" data-knowledge-tree-toggle title="展开追问树" style="margin-left:auto">☷ 追问树</button>` : ""}</div>
+      <div class="bsb-knowledge-crumbs">${SubBatch2.SubBatchMonorepo.ui.knowledgeTreeRenderer.breadcrumbHtml(activeNode, activeNode ? appCall("knowledge.ancestorNodes", activeNode, state2.knowledgeNodes || []) : [], escapeHtml, escapeAttr)}${!treeOpen ? `<button type="button" class="bsb-mini" data-knowledge-tree-toggle title="展开追问树" style="margin-left:auto">☷ 追问树</button>` : ""}</div>
       <div class="bsb-knowledge-rail-split${treeOpen ? " with-tree" : ""}">${treePane}<div class="bsb-knowledge-split-main"><div class="bsb-knowledge-panel-main">${knowledgeAnswerBodyHtml(activeNode)}</div>${knowledgeComposerHtml()}</div></div>`;
     }
     function knowledgeAnchorListItemHtml(anchor, activeAnchorId = state2.knowledgeActiveAnchorId) {
@@ -15859,7 +15885,7 @@ ${addition}`.trim() };
         const items = group.anchors.map((anchor) => {
           const count = knowledgeNodesForAnchor(anchor.id).length;
           const active = anchor.id === activeAnchorId;
-          const threads = active && count ? `<div class="bsb-knowledge-nav-threads">${knowledgeTreeHtml(anchor.id, activeNodeId || "")}</div>` : "";
+          const threads = active && count ? `<div class="bsb-knowledge-nav-threads">${SubBatch2.SubBatchMonorepo.ui.knowledgeTreeRenderer.treeHtml(anchor.id, activeNodeId || "", state2.knowledgeNodes || [], escapeHtml, escapeAttr)}</div>` : "";
           return `<div class="bsb-knowledge-nav-anchor">${knowledgeAnchorListItemHtml(anchor, activeAnchorId)}${threads}</div>`;
         }).join("");
         return `<section class="bsb-knowledge-source-group"><div class="bsb-knowledge-source-label" title="${escapeAttr(group.label)}">${escapeHtml(group.label)}</div>${items}</section>`;
@@ -15889,7 +15915,7 @@ ${addition}`.trim() };
         </div>
       </header>
       ${knowledgeContextHtml(anchor)}
-      <div class="bsb-knowledge-crumbs">${knowledgeBreadcrumbHtml(activeNode)}</div>
+      <div class="bsb-knowledge-crumbs">${SubBatch2.SubBatchMonorepo.ui.knowledgeTreeRenderer.breadcrumbHtml(activeNode, activeNode ? appCall("knowledge.ancestorNodes", activeNode, state2.knowledgeNodes || []) : [], escapeHtml, escapeAttr)}</div>
       <div class="bsb-knowledge-reader-scroll" data-role="knowledge-reader-scroll">
         <div class="bsb-knowledge-reader-scroll-inner">${knowledgeAnswerBodyHtml(activeNode)}</div>
       </div>
