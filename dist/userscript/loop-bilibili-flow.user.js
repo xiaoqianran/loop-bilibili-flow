@@ -9320,6 +9320,75 @@ ${prompt2.userPromptTemplate}`
     __proto__: null,
     bind
   }, Symbol.toStringTag, { value: "Module" }));
+  function formatTime(seconds, withHours = false) {
+    const total = Math.max(0, Math.floor(Number(seconds) || 0));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor(total % 3600 / 60);
+    const sec = total % 60;
+    if (withHours || h > 0) {
+      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+    }
+    return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  }
+  function filterIndexes(cues, query) {
+    const needle = String(query || "").trim().toLocaleLowerCase();
+    const indexes = [];
+    (cues || []).forEach((cue, index) => {
+      if (!needle || String(cue?.content || "").toLocaleLowerCase().includes(needle)) indexes.push(index);
+    });
+    return indexes;
+  }
+  function cueIndexAt(cues, time, parseSeconds2) {
+    let low = 0;
+    let high = cues.length - 1;
+    let candidate = -1;
+    while (low <= high) {
+      const mid = low + high >> 1;
+      const cue2 = cues[mid];
+      const from = Number(cue2.from_sec ?? parseSeconds2(cue2.from));
+      if (time < from) high = mid - 1;
+      else {
+        candidate = mid;
+        low = mid + 1;
+      }
+    }
+    if (candidate < 0) return -1;
+    const cue = cues[candidate];
+    const to = Number(cue.to_sec ?? parseSeconds2(cue.to));
+    return time <= to + 0.2 ? candidate : -1;
+  }
+  const SUBTITLE_STATE_FIELDS = [
+    "aid",
+    "cid",
+    "pages",
+    "subStatus",
+    "cue_count",
+    "data",
+    "error",
+    "lan",
+    "lan_doc",
+    "tracks",
+    "activeTrackIndex",
+    "cachePath",
+    "cacheLevel",
+    "cacheStale",
+    "source",
+    "autoCaptured"
+  ];
+  function copySubtitleState(target, source) {
+    if (!target || !source) return target;
+    for (const field of SUBTITLE_STATE_FIELDS) {
+      if (source[field] !== void 0) target[field] = source[field];
+    }
+    return target;
+  }
+  const transcriptController = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    copySubtitleState,
+    cueIndexAt,
+    filterIndexes,
+    formatTime
+  }, Symbol.toStringTag, { value: "Module" }));
   const ui = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
     aiStyles,
@@ -9339,6 +9408,7 @@ ${prompt2.userPromptTemplate}`
     studioController,
     studioInteractionController,
     subsStyles,
+    transcriptController,
     workspaceControlsStyles: controlsStyles,
     workspaceLayoutStyles: layoutStyles,
     workspaceMarkup: markup,
@@ -14003,16 +14073,6 @@ ${prompt2.userPromptTemplate}`
       });
       return state2.playerSubtitleOperation;
     }
-    function formatTranscriptTime(seconds, withHours = false) {
-      const total = Math.max(0, Math.floor(Number(seconds) || 0));
-      const h = Math.floor(total / 3600);
-      const m = Math.floor(total % 3600 / 60);
-      const sec = total % 60;
-      if (withHours || h > 0) {
-        return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
-      }
-      return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
-    }
     function currentTranscriptItem() {
       if (state2.transcriptItemKey) {
         const exact = state2.items.find(
@@ -14036,31 +14096,6 @@ ${prompt2.userPromptTemplate}`
       state2.transcriptItem = item;
       state2.transcriptItemKey = routeVideoKey2(item.bvid, item.page || 1);
       return item;
-    }
-    function copySubtitleState(target, source) {
-      if (!target || !source) return target;
-      const fields = [
-        "aid",
-        "cid",
-        "pages",
-        "subStatus",
-        "cue_count",
-        "data",
-        "error",
-        "lan",
-        "lan_doc",
-        "tracks",
-        "activeTrackIndex",
-        "cachePath",
-        "cacheLevel",
-        "cacheStale",
-        "source",
-        "autoCaptured"
-      ];
-      fields.forEach((field) => {
-        if (source[field] !== void 0) target[field] = source[field];
-      });
-      return target;
     }
     function selectTranscriptItem(item, { focusSearch = false } = {}) {
       if (!item) return;
@@ -14117,14 +14152,6 @@ ${prompt2.userPromptTemplate}`
       select.value = String(Math.max(0, active));
       select.disabled = tracks.length <= 1;
     }
-    function filterTranscriptIndexes(cues, query) {
-      const needle = String(query || "").trim().toLocaleLowerCase();
-      const indexes = [];
-      (cues || []).forEach((cue, index) => {
-        if (!needle || String(cue?.content || "").toLocaleLowerCase().includes(needle)) indexes.push(index);
-      });
-      return indexes;
-    }
     function renderTranscriptPanel() {
       const root = document.getElementById(PANEL_ID);
       if (!root) return;
@@ -14148,7 +14175,7 @@ ${prompt2.userPromptTemplate}`
       meta.textContent = `${item.cue_count || item.data.length} 条 · ${item.lan_doc || item.lan || "字幕"} · ${item.cachePath || item.source || "已加载"}`;
       populateTranscriptTrackSelect(item);
       const query = state2.transcriptQuery.trim();
-      const indexes = filterTranscriptIndexes(item.data, query);
+      const indexes = SubBatch2.SubBatchMonorepo.ui.transcriptController.filterIndexes(item.data, query);
       state2.transcriptFilteredIndexes = query ? indexes : null;
       count.textContent = query ? `${indexes.length}/${item.data.length}` : String(item.data.length);
       const epoch = ++state2.transcriptRenderEpoch;
@@ -14163,8 +14190,8 @@ ${prompt2.userPromptTemplate}`
         time.type = "button";
         time.className = "bsb-transcript-time";
         time.dataset.transcriptTime = String(cue.from_sec ?? coreCall("parseSeconds", cue.from));
-        time.textContent = formatTranscriptTime(cue.from_sec ?? coreCall("parseSeconds", cue.from));
-        time.title = `跳转到 ${formatTranscriptTime(cue.from_sec ?? coreCall("parseSeconds", cue.from), true)}`;
+        time.textContent = SubBatch2.SubBatchMonorepo.ui.transcriptController.formatTime(cue.from_sec ?? coreCall("parseSeconds", cue.from));
+        time.title = `跳转到 ${SubBatch2.SubBatchMonorepo.ui.transcriptController.formatTime(cue.from_sec ?? coreCall("parseSeconds", cue.from), true)}`;
         const text = document.createElement("p");
         text.className = "bsb-transcript-text";
         appendTranscriptHighlightedText(text, cue.content || "", query);
@@ -14175,31 +14202,13 @@ ${prompt2.userPromptTemplate}`
       list.replaceChildren(fragment);
       updateTranscriptActiveCue(currentVideoTime(), true);
     }
-    function transcriptCueIndexAt(cues, time) {
-      let low = 0;
-      let high = cues.length - 1;
-      let candidate = -1;
-      while (low <= high) {
-        const mid = low + high >> 1;
-        const from = Number(cues[mid].from_sec ?? coreCall("parseSeconds", cues[mid].from));
-        if (time < from) high = mid - 1;
-        else {
-          candidate = mid;
-          low = mid + 1;
-        }
-      }
-      if (candidate < 0) return -1;
-      const cue = cues[candidate];
-      const to = Number(cue.to_sec ?? coreCall("parseSeconds", cue.to));
-      return time <= to + 0.2 ? candidate : -1;
-    }
     function currentVideoTime() {
       return Number(document.querySelector("video")?.currentTime || 0);
     }
     function updateTranscriptActiveCue(time, force = false) {
       const item = currentTranscriptItem();
       if (!item?.data?.length) return;
-      const index = transcriptCueIndexAt(item.data, Number(time) || 0);
+      const index = SubBatch2.SubBatchMonorepo.ui.transcriptController.cueIndexAt(item.data, Number(time) || 0, (value) => coreCall("parseSeconds", value));
       const root = document.getElementById(PANEL_ID);
       if (index < 0) {
         root?.querySelector(".bsb-transcript-row.active")?.classList.remove("active");
@@ -21363,7 +21372,7 @@ ${latest}`;
         Object.assign(state2.items[sameIndex], target);
         target = state2.items[sameIndex];
         target.sources = Array.from(new Set([...target.sources || [], "打开视频"].filter(Boolean)));
-        copySubtitleState(target, item);
+        SubBatch2.SubBatchMonorepo.ui.transcriptController.copySubtitleState(target, item);
         state2.transcriptItem = target;
         state2.transcriptItemKey = captureKey;
       } else {

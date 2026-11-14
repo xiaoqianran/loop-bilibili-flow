@@ -61,6 +61,10 @@ describe("Bundled full-feature workbench source", () => {
       .sort();
     const migrated = [
       "scheduleAutoHide",
+      "formatTranscriptTime",
+      "copySubtitleState",
+      "filterTranscriptIndexes",
+      "transcriptCueIndexAt",
       "aiSubtitleStat",
       "buildProcessedSubtitlePayload",
       "currentPreprocessSettings",
@@ -120,6 +124,21 @@ describe("Bundled full-feature workbench source", () => {
     expect(missing).toEqual(migrated);
     expect(maintainedSource).toContain("function boot()");
     expect(maintainedSource).toContain("scheduleAutoCapture(\"initial\", 180)");
+  });
+
+  it("routes subtitle reading policies through the bundled UI namespace", () => {
+    const controller = "SubBatch.SubBatchMonorepo.ui.transcriptController.";
+    for (const method of ["formatTime", "filterIndexes", "cueIndexAt", "copySubtitleState"]) {
+      expect(maintainedSource).toContain(controller + method + "(");
+    }
+    for (const obsolete of [
+      "function formatTranscriptTime(",
+      "function filterTranscriptIndexes(",
+      "function transcriptCueIndexAt(",
+      "function copySubtitleState(",
+    ]) {
+      expect(maintainedSource).not.toContain(obsolete);
+    }
   });
 
   it("delegates migrated acquisition rules to grouped Bilibili APIs", () => {

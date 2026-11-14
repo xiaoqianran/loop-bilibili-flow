@@ -4800,17 +4800,6 @@ export function mountWorkbench(SubBatch) {
     return state.playerSubtitleOperation;
   }
 
-  function formatTranscriptTime(seconds, withHours = false) {
-    const total = Math.max(0, Math.floor(Number(seconds) || 0));
-    const h = Math.floor(total / 3600);
-    const m = Math.floor((total % 3600) / 60);
-    const sec = total % 60;
-    if (withHours || h > 0) {
-      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
-    }
-    return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
-  }
-
   function currentTranscriptItem() {
     if (state.transcriptItemKey) {
       const exact = state.items.find(
@@ -4841,19 +4830,6 @@ export function mountWorkbench(SubBatch) {
     state.transcriptItem = item;
     state.transcriptItemKey = routeVideoKey(item.bvid, item.page || 1);
     return item;
-  }
-
-  function copySubtitleState(target, source) {
-    if (!target || !source) return target;
-    const fields = [
-      "aid", "cid", "pages", "subStatus", "cue_count", "data", "error",
-      "lan", "lan_doc", "tracks", "activeTrackIndex", "cachePath", "cacheLevel",
-      "cacheStale", "source", "autoCaptured",
-    ];
-    fields.forEach((field) => {
-      if (source[field] !== undefined) target[field] = source[field];
-    });
-    return target;
   }
 
   function selectTranscriptItem(item, { focusSearch = false } = {}) {
@@ -4914,15 +4890,6 @@ export function mountWorkbench(SubBatch) {
     select.disabled = tracks.length <= 1;
   }
 
-  function filterTranscriptIndexes(cues, query) {
-    const needle = String(query || "").trim().toLocaleLowerCase();
-    const indexes = [];
-    (cues || []).forEach((cue, index) => {
-      if (!needle || String(cue?.content || "").toLocaleLowerCase().includes(needle)) indexes.push(index);
-    });
-    return indexes;
-  }
-
   function renderTranscriptPanel() {
     const root = document.getElementById(PANEL_ID);
     if (!root) return;
@@ -4957,7 +4924,7 @@ export function mountWorkbench(SubBatch) {
     populateTranscriptTrackSelect(item);
 
     const query = state.transcriptQuery.trim();
-    const indexes = filterTranscriptIndexes(item.data, query);
+    const indexes = SubBatch.SubBatchMonorepo.ui.transcriptController.filterIndexes(item.data, query);
     state.transcriptFilteredIndexes = query ? indexes : null;
     count.textContent = query ? `${indexes.length}/${item.data.length}` : String(item.data.length);
 
@@ -4974,8 +4941,8 @@ export function mountWorkbench(SubBatch) {
       time.type = "button";
       time.className = "bsb-transcript-time";
       time.dataset.transcriptTime = String(cue.from_sec ?? coreCall("parseSeconds", cue.from));
-      time.textContent = formatTranscriptTime(cue.from_sec ?? coreCall("parseSeconds", cue.from));
-      time.title = `跳转到 ${formatTranscriptTime(cue.from_sec ?? coreCall("parseSeconds", cue.from), true)}`;
+      time.textContent = SubBatch.SubBatchMonorepo.ui.transcriptController.formatTime(cue.from_sec ?? coreCall("parseSeconds", cue.from));
+      time.title = `跳转到 ${SubBatch.SubBatchMonorepo.ui.transcriptController.formatTime(cue.from_sec ?? coreCall("parseSeconds", cue.from), true)}`;
 
       const text = document.createElement("p");
       text.className = "bsb-transcript-text";
@@ -4988,22 +4955,6 @@ export function mountWorkbench(SubBatch) {
     updateTranscriptActiveCue(currentVideoTime(), true);
   }
 
-  function transcriptCueIndexAt(cues, time) {
-    let low = 0;
-    let high = cues.length - 1;
-    let candidate = -1;
-    while (low <= high) {
-      const mid = (low + high) >> 1;
-      const from = Number(cues[mid].from_sec ?? coreCall("parseSeconds", cues[mid].from));
-      if (time < from) high = mid - 1;
-      else { candidate = mid; low = mid + 1; }
-    }
-    if (candidate < 0) return -1;
-    const cue = cues[candidate];
-    const to = Number(cue.to_sec ?? coreCall("parseSeconds", cue.to));
-    return time <= to + 0.2 ? candidate : -1;
-  }
-
   function currentVideoTime() {
     return Number(document.querySelector("video")?.currentTime || 0);
   }
@@ -5011,7 +4962,7 @@ export function mountWorkbench(SubBatch) {
   function updateTranscriptActiveCue(time, force = false) {
     const item = currentTranscriptItem();
     if (!item?.data?.length) return;
-    const index = transcriptCueIndexAt(item.data, Number(time) || 0);
+    const index = SubBatch.SubBatchMonorepo.ui.transcriptController.cueIndexAt(item.data, Number(time) || 0, (value) => coreCall("parseSeconds", value));
     const root = document.getElementById(PANEL_ID);
     if (index < 0) {
       root?.querySelector(".bsb-transcript-row.active")?.classList.remove("active");
@@ -12679,7 +12630,7 @@ body{padding:48px 20px 80px}
       Object.assign(state.items[sameIndex], target);
       target = state.items[sameIndex];
       target.sources = Array.from(new Set([...(target.sources || []), "打开视频"].filter(Boolean)));
-      copySubtitleState(target, item);
+      SubBatch.SubBatchMonorepo.ui.transcriptController.copySubtitleState(target, item);
       state.transcriptItem = target;
       state.transcriptItemKey = captureKey;
     } else {

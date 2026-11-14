@@ -20,3 +20,5 @@ export * as lateStudioStyles from "./workspaces/late-styles";
 export * as studioController from "./workspaces/studio-controller";
 
 export * as studioInteractionController from "./workspaces/studio-interaction-controller";
+
+export * as transcriptController from "./workspaces/transcript-controller";
