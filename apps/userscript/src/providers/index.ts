@@ -24,6 +24,7 @@ export { createProviderRegistry } from "./registry";
 export {
   createTranscriptSourceRegistry,
   type AcquiredTranscript,
+  type TranscriptAcquireResult,
   type TranscriptAcquireContext,
   type TranscriptSource,
   type TranscriptSourceRegistry,

@@ -5923,7 +5923,20 @@
     return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
   }
 
+  let knowledgeRepository = null;
+  function currentKnowledgeRepository() {
+    if (!knowledgeRepository) {
+      const factory = appFn("knowledge.createRepository");
+      if (factory && globalThis.indexedDB) {
+        knowledgeRepository = factory(globalThis.indexedDB);
+      }
+    }
+    return knowledgeRepository;
+  }
+
   function openKnowledgeDb() {
+    const repo = currentKnowledgeRepository();
+    if (repo) return repo.open();
     if (state.knowledgeDbPromise) return state.knowledgeDbPromise;
     state.knowledgeDbPromise = new Promise((resolve, reject) => {
       if (!globalThis.indexedDB) return reject(new Error("IndexedDB unavailable"));
@@ -5952,6 +5965,8 @@
   }
 
   async function knowledgeStoreRequest(storeName, mode, handler) {
+    const repo = currentKnowledgeRepository();
+    if (repo) return repo.request(storeName, mode, handler);
     const db = await openKnowledgeDb();
     return await new Promise((resolve, reject) => {
       const tx = db.transaction(storeName, mode);
@@ -6027,6 +6042,17 @@
   }
 
   async function knowledgeDeleteAnchor(anchorId) {
+    const repo = currentKnowledgeRepository();
+    if (repo) {
+      await repo.deleteAnchor(anchorId);
+      state.knowledgeAnchors = state.knowledgeAnchors.filter((a) => a.id !== anchorId);
+      state.knowledgeNodes = state.knowledgeNodes.filter((n) => n.anchorId !== anchorId);
+      if (state.knowledgeActiveAnchorId === anchorId) {
+        state.knowledgeActiveAnchorId = "";
+        state.knowledgeActiveNodeId = "";
+      }
+      return;
+    }
     const nodeIds = state.knowledgeNodes.filter((n) => n.anchorId === anchorId).map((n) => n.id);
     await Promise.all(nodeIds.map((id) => knowledgeStoreRequest(KNOWLEDGE_NODE_STORE, "readwrite", (s) => s.delete(id))));
     await knowledgeStoreRequest(KNOWLEDGE_ANCHOR_STORE, "readwrite", (s) => s.delete(anchorId));
@@ -7960,6 +7986,11 @@
   }
 
   function loadStudioChatStore() {
+    const parseStore = appFn("studio.parseStore");
+    if (parseStore) {
+      try { return parseStore(storageGet(STUDIO_CHAT_STORE_KEY, null)); }
+      catch (_) { return {}; }
+    }
     try {
       const raw = storageGet(STUDIO_CHAT_STORE_KEY, null);
       if (!raw) return {};
@@ -7973,6 +8004,12 @@
   function persistStudioChat(routeKey = currentRouteVideoKey()) {
     const key = String(routeKey || "").trim();
     if (!key) return;
+    const persist = appFn("studio.persist");
+    if (persist) {
+      const store = persist(loadStudioChatStore(), key, state, Date.now());
+      try { storageSet(STUDIO_CHAT_STORE_KEY, JSON.stringify(store)); } catch (_) { /* ignore */ }
+      return;
+    }
     const store = loadStudioChatStore();
     store[key] = {
       messages: (state.studioMessages || []).slice(-40),
@@ -7989,6 +8026,11 @@
 
   function loadStudioChat(routeKey = currentRouteVideoKey()) {
     const key = String(routeKey || "").trim();
+    const restore = appFn("studio.restore");
+    if (restore) {
+      Object.assign(state, restore(loadStudioChatStore(), key));
+      return;
+    }
     const entry = key ? loadStudioChatStore()[key] : null;
     state.studioMessages = Array.isArray(entry?.messages) ? entry.messages : [];
     state.studioMemory = String(entry?.memory || "");
@@ -8371,18 +8413,22 @@
           onError(error) { reject(error instanceof Error ? error : new Error(String(error || "压缩失败"))); },
         });
       });
+      if (state.studioRuntime !== runtime || runtime.abort) return;
       const next = compactStudioMemoryText(latest.trim());
       if (next) state.studioMemory = next;
       persistStudioChat();
       renderStudioCanvas();
       setStatus(`记忆已精炼 · ${state.studioMemory.length} 字`, "ok");
     } catch (error) {
+      if (state.studioRuntime !== runtime) return;
       if (runtime.abort) setStatus("已停止记忆压缩");
       else setStatus(`记忆精炼失败，仍保留抽取稿：${error?.message || error}`, "err");
     } finally {
-      state.studioBusy = false;
-      state.studioRuntime = null;
-      refreshStudioStopUi();
+      if (state.studioRuntime === runtime) {
+        state.studioBusy = false;
+        state.studioRuntime = null;
+        refreshStudioStopUi();
+      }
     }
   }
 
@@ -8455,11 +8501,6 @@
       [text, ...(state.studioMessages || []).filter((m) => m.role === "user").slice(-3).map((m) => m.content)].join(" "),
     );
     state.studioLastContextMeta = packed;
-    const history = state.studioMessages
-      .filter((m) => m.role === "user" || m.role === "assistant")
-      .filter((m) => m.id !== botMsg.id && m.content)
-      .slice(-STUDIO_CHAT_KEEP_RECENT)
-      .map((m) => ({ role: m.role, content: m.content }));
     const memory = String(state.studioMemory || "").trim();
     const system = [
       "你在帮用户研读当前这条视频字幕。只根据提供的字幕与压缩记忆回答，不编造字幕没有的事实。",
@@ -8473,6 +8514,8 @@
       packed.text,
       "</transcript>",
     ].filter(Boolean).join("\n");
+    const messages = appCall("studio.buildChatMessages",
+      system, state.studioMessages, userMsg.id, text, STUDIO_CHAT_KEEP_RECENT);
     const runtime = createAiRuntime(`对话 · ${model.name || model.model}`);
     state.studioRuntime = runtime;
     state.studioBusy = true;
@@ -8488,31 +8531,36 @@
           temperature: model.temperature,
           maxTokens: model.maxTokens,
           stream: model.stream !== false,
-          messages: [{ role: "system", content: system }, ...history, { role: "user", content: text }],
+          messages,
           onStatus() {},
           onDelta(_delta, full) {
+            if (state.studioRuntime !== runtime) return;
             latest = String(full || "");
             botMsg.content = latest;
             if (!paintStudioAnswer(botMsg.id, latest, true)) renderStudioCanvas();
           },
-          onDone(full) { latest = String(full || latest || ""); resolve(); },
+          onDone(full) { if (state.studioRuntime === runtime) latest = String(full || latest || ""); resolve(); },
           onError(error) { reject(error instanceof Error ? error : new Error(String(error || "对话失败"))); },
         });
       });
+      if (state.studioRuntime !== runtime) return;
       botMsg.content = latest.trim();
-      botMsg.status = "done";
-      setStatus("对话已回复", "ok");
+      botMsg.status = runtime.abort ? "stopped" : "done";
+      setStatus(runtime.abort ? "对话已停止" : "对话已回复", runtime.abort ? "" : "ok");
     } catch (error) {
+      if (state.studioRuntime !== runtime) return;
       const stopped = !!runtime.abort;
       botMsg.content = latest.trim() || (stopped ? "已停止" : String(error?.message || error));
       botMsg.status = stopped ? "stopped" : "error";
       setStatus(stopped ? "对话已停止" : `对话失败：${error?.message || error}`, stopped ? "" : "err");
     } finally {
-      state.studioBusy = false;
-      state.studioRuntime = null;
-      persistStudioChat();
-      renderStudioCanvas();
-      refreshStudioStopUi();
+      if (state.studioRuntime === runtime) {
+        state.studioBusy = false;
+        state.studioRuntime = null;
+        persistStudioChat();
+        renderStudioCanvas();
+        refreshStudioStopUi();
+      }
     }
   }
 
@@ -8526,6 +8574,14 @@
     const root = document.getElementById(PANEL_ID);
     if (!root) return;
     const stage = currentAiWorkbenchStage();
+    const apply = typeof SubBatch !== "undefined"
+      ? SubBatch?.SubBatchMonorepo?.ui?.studioController?.applyWorkbenchStageUi
+      : null;
+    if (typeof apply === "function") {
+      apply(root, stage, state.aiInputView);
+      refreshStudioStopUi();
+      return;
+    }
     root.querySelectorAll("[data-ai-stage]").forEach((button) => {
       const active = button.dataset.aiStage === stage;
       button.classList.toggle("active", active);
@@ -10939,6 +10995,18 @@ body{padding:48px 20px 80px}
    */
   function requestChatCompletion(opts) {
     const runtime = opts.runtime || createAiRuntime(opts.model || "AI");
+    // Production path: AI Controller owns transport, streaming and cancellation.
+    // A cross-origin POST is sent via GM once, never replayed after fetch errors.
+    const requestFromApp = appFn("ai.request");
+    if (requestFromApp) {
+      return requestFromApp({
+        ...opts,
+        runtime,
+        network: runtimeNetwork(),
+        pageHref: location.href,
+      });
+    }
+    // Historical standalone fallback only (official builds always have the app).
     const {
       baseUrl,
       apiKey,
@@ -11604,6 +11672,11 @@ body{padding:48px 20px 80px}
   }
 
   async function runPreprocessWorkerPool(jobs, workerCount, handler) {
+    const pool = appFn("ai.runPool");
+    if (pool) {
+      return pool(jobs, workerCount, handler, () =>
+        !!state.aiAbort || !!state.preprocessRun?.runtime?.abort);
+    }
     let cursor = 0;
     async function worker(workerId) {
       while (true) {

@@ -1,6 +1,7 @@
 import { create } from "./userscript";
 import { observe } from "./spa";
 import * as shortcutApi from "./shortcuts";
+import { createKnowledgeDb } from "./knowledge-db";
 
 export const RUNTIME_VERSION = "0.1.0";
 
@@ -10,6 +11,10 @@ export const userscript = {
 
 export const spa = {
   observe,
+} as const;
+
+export const knowledgeDb = {
+  create: createKnowledgeDb,
 } as const;
 
 export const shortcut = {
@@ -27,3 +32,4 @@ export * from "./types";
 export * from "./userscript";
 export * from "./spa";
 export * from "./shortcuts";
+export * from "./knowledge-db";

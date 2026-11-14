@@ -2595,7 +2595,7 @@ ${prompt2.userPromptTemplate}`
     );
   }
   const CORE_VERSION = "0.6.0";
-  const ai = {
+  const ai$1 = {
     extractText: extractAssistantText,
     extractChoice: extractFromChoice,
     display: formatAiDisplay,
@@ -2656,7 +2656,7 @@ ${prompt2.userPromptTemplate}`
     chapterIndex: formatFolioChapterIndex,
     summary: folioOutlineSummary
   };
-  const knowledge = {
+  const knowledge$1 = {
     parse: parseKnowledgeOutput,
     branchContext: knowledgeBranchContext
   };
@@ -2744,7 +2744,7 @@ ${prompt2.userPromptTemplate}`
     SPACE_LOOSE_VIDEOS_FOLDER,
     SUBTITLE_EXPORT_INDEX_NAME,
     SUBTITLE_EXPORT_ROOT,
-    ai,
+    ai: ai$1,
     aiRunIdentityKey,
     aiSession,
     aiSessionCacheKey,
@@ -2794,7 +2794,7 @@ ${prompt2.userPromptTemplate}`
     isSpaceLooseVideosKey,
     isUsableAiSessionCache,
     joinFileName,
-    knowledge,
+    knowledge: knowledge$1,
     knowledgeBranchContext,
     library,
     makeAiProfileId,
@@ -3112,11 +3112,143 @@ ${prompt2.userPromptTemplate}`
     target.addEventListener("keydown", listener, capture);
     return () => target.removeEventListener("keydown", listener, capture);
   }
+  function createKnowledgeDb(factory, settings) {
+    let pending = null;
+    function open() {
+      if (pending) return pending;
+      pending = new Promise((resolve2, reject) => {
+        if (!factory) {
+          reject(new Error("IndexedDB unavailable"));
+          return;
+        }
+        const req = factory.open(settings.name, settings.version);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains(settings.anchorStore)) {
+            const store = db.createObjectStore(settings.anchorStore, { keyPath: "id" });
+            store.createIndex("sourceKey", "sourceKey", { unique: false });
+            store.createIndex("updatedAt", "updatedAt", { unique: false });
+          }
+          if (!db.objectStoreNames.contains(settings.nodeStore)) {
+            const store = db.createObjectStore(settings.nodeStore, { keyPath: "id" });
+            store.createIndex("anchorId", "anchorId", { unique: false });
+            store.createIndex("parentId", "parentId", { unique: false });
+            store.createIndex("updatedAt", "updatedAt", { unique: false });
+          }
+        };
+        req.onblocked = () => reject(new Error("Knowledge 数据库升级被其他标签页阻塞"));
+        req.onerror = () => reject(req.error || new Error("Knowledge DB open failed"));
+        req.onsuccess = () => {
+          const db = req.result;
+          db.onversionchange = () => {
+            db.close();
+            pending = null;
+          };
+          resolve2(db);
+        };
+      }).catch((error) => {
+        pending = null;
+        throw error;
+      });
+      return pending;
+    }
+    async function request2(storeName, mode, handler) {
+      const db = await open();
+      return new Promise((resolve2, reject) => {
+        let tx;
+        try {
+          tx = db.transaction(storeName, mode);
+        } catch (error) {
+          reject(error);
+          return;
+        }
+        let value;
+        let settled = false;
+        const rejectOnce = (error) => {
+          if (settled) return;
+          settled = true;
+          reject(error || tx.error || new Error("Knowledge transaction failed"));
+        };
+        tx.oncomplete = () => {
+          if (settled) return;
+          settled = true;
+          resolve2(value);
+        };
+        tx.onerror = () => rejectOnce(tx.error);
+        tx.onabort = () => rejectOnce(tx.error || new Error("Knowledge transaction aborted"));
+        try {
+          const result = handler(tx.objectStore(storeName));
+          if (result && typeof result === "object" && "onsuccess" in result) {
+            const req = result;
+            req.onsuccess = () => {
+              value = req.result;
+            };
+            req.onerror = () => rejectOnce(req.error);
+          } else {
+            value = result;
+          }
+        } catch (error) {
+          try {
+            tx.abort();
+          } catch {
+          }
+          rejectOnce(error);
+        }
+      });
+    }
+    async function deleteAnchor(anchorId) {
+      const db = await open();
+      await new Promise((resolve2, reject) => {
+        let tx;
+        try {
+          tx = db.transaction([settings.anchorStore, settings.nodeStore], "readwrite");
+        } catch (error) {
+          reject(error);
+          return;
+        }
+        let settled = false;
+        const rejectOnce = (error) => {
+          if (settled) return;
+          settled = true;
+          reject(error || tx.error || new Error("Knowledge delete failed"));
+        };
+        tx.oncomplete = () => {
+          if (settled) return;
+          settled = true;
+          resolve2();
+        };
+        tx.onerror = () => rejectOnce(tx.error);
+        tx.onabort = () => rejectOnce(tx.error || new Error("Knowledge delete aborted"));
+        try {
+          const nodes = tx.objectStore(settings.nodeStore).index("anchorId");
+          const cursorRequest = nodes.openCursor(IDBKeyRange.only(anchorId));
+          cursorRequest.onsuccess = () => {
+            const cursor = cursorRequest.result;
+            if (!cursor) return;
+            cursor.delete();
+            cursor.continue();
+          };
+          cursorRequest.onerror = () => rejectOnce(cursorRequest.error);
+          tx.objectStore(settings.anchorStore).delete(anchorId);
+        } catch (error) {
+          try {
+            tx.abort();
+          } catch {
+          }
+          rejectOnce(error);
+        }
+      });
+    }
+    return { open, request: request2, deleteAnchor };
+  }
   const userscript = {
     create
   };
   const spa = {
     observe: observe$1
+  };
+  const knowledgeDb = {
+    create: createKnowledgeDb
   };
   const shortcut = {
     chordFromEvent,
@@ -3398,7 +3530,7 @@ ${prompt2.userPromptTemplate}`
     fallback: "network-or-http",
     headers: { Accept: "application/json, text/plain, */*" }
   };
-  function request(signal) {
+  function request$1(signal) {
     return { ...JSON_REQUEST, ...signal ? { signal } : {} };
   }
   function isAbortError(error) {
@@ -3410,7 +3542,7 @@ ${prompt2.userPromptTemplate}`
     if (cached && now - cached.at < WBI_TTL_MS) return cached.keys;
     const payload = await network.json(
       wbi.navUrl(),
-      request(signal)
+      request$1(signal)
     );
     const imgUrl = payload?.data?.wbi_img?.img_url || "";
     const subUrl = payload?.data?.wbi_img?.sub_url || "";
@@ -3431,7 +3563,7 @@ ${prompt2.userPromptTemplate}`
   async function fetchVideoView(network, bvid, signal) {
     const payload = await network.json(
       video$1.url(bvid),
-      request(signal)
+      request$1(signal)
     );
     if (payload?.code !== 0 || !payload.data) {
       throw new Error(payload?.message || "视频信息接口返回失败");
@@ -3442,11 +3574,11 @@ ${prompt2.userPromptTemplate}`
     const query = await signWbi(network, { bvid, need_elec: 0 }, signal);
     return network.json(
       wbi.videoDetailUrl(query),
-      request(signal)
+      request$1(signal)
     );
   }
   async function fetchSubtitleBody(network, url, signal) {
-    const payload = await network.json(url, request(signal));
+    const payload = await network.json(url, request$1(signal));
     return Array.isArray(payload?.body) ? payload.body : [];
   }
   async function fetchPlayerWbiTracks(network, meta, signal) {
@@ -3454,7 +3586,7 @@ ${prompt2.userPromptTemplate}`
     const query = await signWbi(network, params, signal);
     const payload = await network.json(
       wbi.playerUrl(query),
-      request(signal)
+      request$1(signal)
     );
     if (payload?.code !== 0) {
       throw new Error(payload?.message || "WBI 字幕轨道接口返回失败");
@@ -3464,7 +3596,7 @@ ${prompt2.userPromptTemplate}`
   async function fetchPlayerV2Tracks(network, meta, signal) {
     const payload = await network.json(
       subtitle.playerUrl(meta),
-      request(signal)
+      request$1(signal)
     );
     if (payload?.code !== 0) {
       throw new Error(payload?.message || "字幕轨道接口返回失败");
@@ -3474,7 +3606,7 @@ ${prompt2.userPromptTemplate}`
   async function fetchDmSubtitleTracks(network, meta, signal) {
     const payload = await network.json(
       subtitle.dmUrl(meta),
-      request(signal)
+      request$1(signal)
     );
     if (payload?.code !== 0) {
       throw new Error(payload?.message || "弹幕字幕接口返回失败");
@@ -3485,7 +3617,7 @@ ${prompt2.userPromptTemplate}`
     if (!meta.aid) return "";
     const payload = await network.json(
       subtitle.aiStatUrl(meta),
-      request(signal)
+      request$1(signal)
     );
     if (payload?.code !== 0) return "";
     return subtitle.normalizeUrl(payload.data?.subtitle_url);
@@ -3540,6 +3672,235 @@ ${prompt2.userPromptTemplate}`
     const result = await collectSubtitleTracks(network, meta, signal);
     if (!result.subs.length && result.error) throw result.error;
     return result.subs;
+  }
+  function completionUrl(baseUrl) {
+    const base = String(baseUrl || "").trim().replace(/\/+$/, "");
+    if (!base) throw new Error("AI Base URL 不能为空");
+    const url = new URL(base + "/chat/completions");
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+      throw new Error("AI Base URL 仅支持 HTTP(S)");
+    }
+    return url.href;
+  }
+  function transportFor(url, pageHref) {
+    try {
+      return new URL(url).origin === new URL(pageHref).origin ? "page" : "privileged";
+    } catch {
+      return "privileged";
+    }
+  }
+  function toError(value) {
+    return value instanceof Error ? value : new Error(String(value));
+  }
+  function streamAccumulator(onDelta) {
+    let content2 = "";
+    let reasoning = "";
+    let finishReason = "";
+    let sawDone = false;
+    let foundEvents = false;
+    let buffer = "";
+    const current = () => ({ content: content2, reasoning, finishReason, sawDone });
+    const consumeLine = (line) => {
+      const cleaned = line.trim();
+      if (cleaned.startsWith("data:")) foundEvents = true;
+      const parsed = ai$1.parseSseLine(cleaned);
+      if (parsed.kind === "error") throw new Error(parsed.message);
+      if (parsed.kind === "done") sawDone = true;
+      if (parsed.kind !== "delta") return;
+      content2 += parsed.content;
+      reasoning += parsed.reasoning;
+      if (parsed.finishReason) finishReason = parsed.finishReason;
+      if (parsed.content || parsed.reasoning) {
+        onDelta?.("", ai$1.display(content2, reasoning), current());
+      }
+    };
+    return {
+      push(chunk) {
+        buffer += chunk;
+        let newline = buffer.indexOf("\n");
+        while (newline !== -1) {
+          consumeLine(buffer.slice(0, newline));
+          buffer = buffer.slice(newline + 1);
+          newline = buffer.indexOf("\n");
+        }
+      },
+      finish() {
+        if (buffer.trim()) consumeLine(buffer);
+        buffer = "";
+        return current();
+      },
+      current,
+      hasEvents: () => foundEvents
+    };
+  }
+  function parseJsonResponse(text) {
+    const data = JSON.parse(text);
+    if (data.error) {
+      const error = data.error;
+      throw new Error(error?.message || JSON.stringify(data.error));
+    }
+    const choice = Array.isArray(data.choices) ? data.choices[0] : null;
+    const { content: content2, reasoning } = ai$1.extractChoice(choice);
+    const finishReason = choice && typeof choice === "object" ? String(choice.finish_reason || "") : "";
+    return { content: content2, reasoning, finishReason, sawDone: false };
+  }
+  function request(options) {
+    const runtime2 = options.runtime;
+    try {
+      runtime2.abortController?.abort();
+    } catch {
+    }
+    try {
+      runtime2.xhr?.abort?.();
+    } catch {
+    }
+    runtime2.abortController = null;
+    runtime2.xhr = null;
+    let url;
+    try {
+      url = completionUrl(options.baseUrl);
+    } catch (error) {
+      options.onError?.(toError(error));
+      return runtime2;
+    }
+    const controller = new AbortController();
+    runtime2.abortController = controller;
+    const useStream = options.stream !== false;
+    const maxTokens = Math.max(256, Math.min(128e3, Math.floor(Number(options.maxTokens) || 8192)));
+    const transport = transportFor(url, options.pageHref);
+    options.onStatus?.("准备请求 · max_tokens=" + maxTokens);
+    options.onStatus?.(transport === "privileged" ? "跨域 GM 单次请求…" : "页内 fetch 请求…");
+    const accumulator = streamAccumulator(options.onDelta);
+    const payload = {
+      model: String(options.model || "").trim(),
+      messages: options.messages,
+      temperature: options.temperature,
+      max_tokens: maxTokens,
+      stream: useStream
+    };
+    void (async () => {
+      let result = null;
+      try {
+        if (runtime2.abort) throw new Error("用户停止");
+        const response = await options.network.request(url, {
+          method: "POST",
+          transport,
+          fallback: "never",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer " + options.apiKey,
+            Accept: useStream ? "text/event-stream, application/json" : "application/json"
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+          stream: useStream,
+          ...useStream ? { onChunk: (text) => accumulator.push(text) } : {}
+        });
+        if (!response.ok) throw new Error("HTTP " + response.status + ": " + response.text.slice(0, 300));
+        if (useStream && accumulator.hasEvents()) {
+          result = accumulator.finish();
+        } else {
+          result = parseJsonResponse(response.text);
+          options.onDelta?.("", ai$1.display(result.content, result.reasoning), result);
+        }
+        if (!result.content && !result.reasoning) throw new Error("AI 响应无正文");
+        if (result.finishReason === "length") {
+          throw new Error("输出达到 max_tokens=" + maxTokens + "，结果已截断");
+        }
+        if (useStream && accumulator.hasEvents() && !result.sawDone && !result.finishReason) {
+          throw new Error("流式连接在 [DONE]/finish_reason 之前中断");
+        }
+        options.onDone?.(ai$1.display(result.content, result.reasoning), result);
+      } catch (error) {
+        const partial = result || accumulator.current();
+        if (runtime2.abort || controller.signal.aborted) {
+          if (partial.content || partial.reasoning) {
+            options.onStatus?.("已停止，保留已接收内容");
+            options.onDone?.(ai$1.display(partial.content, partial.reasoning), partial);
+          } else {
+            options.onError?.(new Error("用户停止"));
+          }
+        } else {
+          options.onError?.(toError(error));
+        }
+      } finally {
+        if (runtime2.abortController === controller) runtime2.abortController = null;
+      }
+    })();
+    return runtime2;
+  }
+  async function runPool(jobs, workerCount, handler, isCancelled = () => false) {
+    let cursor = 0;
+    let failed = false;
+    async function worker(workerId) {
+      while (!failed) {
+        if (isCancelled()) throw new Error("用户停止");
+        const index = cursor++;
+        if (index >= jobs.length) return;
+        try {
+          await handler(jobs[index], workerId);
+        } catch (error) {
+          failed = true;
+          throw error;
+        }
+      }
+    }
+    const count = Math.min(Math.max(1, Math.floor(workerCount) || 1), Math.max(1, jobs.length));
+    await Promise.all(Array.from({ length: count }, (_, i) => worker(i + 1)));
+  }
+  function parseStore(raw) {
+    try {
+      const value = typeof raw === "string" ? JSON.parse(raw) : raw;
+      return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    } catch {
+      return {};
+    }
+  }
+  function persist(current, routeKey, state2, now) {
+    const key = String(routeKey || "").trim();
+    if (!key) return current;
+    const next = { ...current };
+    next[key] = {
+      messages: (state2.studioMessages || []).slice(-40),
+      memory: String(state2.studioMemory || ""),
+      memoryUntilId: String(state2.studioMemoryUntilId || ""),
+      memoryTurns: Number(state2.studioMemoryTurns) || 0,
+      contextPref: state2.studioContextPref || "auto",
+      updatedAt: now
+    };
+    const keys = Object.keys(next).sort((a, b) => Number(next[b]?.updatedAt || 0) - Number(next[a]?.updatedAt || 0));
+    for (const extra of keys.slice(24)) delete next[extra];
+    return next;
+  }
+  function restore(store, routeKey) {
+    const entry = String(routeKey || "").trim() ? store[routeKey] : null;
+    const pref = entry?.contextPref;
+    return {
+      studioMessages: Array.isArray(entry?.messages) ? entry.messages : [],
+      studioMemory: String(entry?.memory || ""),
+      studioMemoryUntilId: String(entry?.memoryUntilId || ""),
+      studioMemoryTurns: Number(entry?.memoryTurns) || 0,
+      studioLastContextMeta: null,
+      studioContextPref: pref === "raw" || pref === "processed" ? pref : "auto"
+    };
+  }
+  function buildChatMessages(system, messages, currentUserId, question, keepRecent) {
+    const history = messages.filter((message) => (message.role === "user" || message.role === "assistant") && message.id !== currentUserId && Boolean(message.content) && message.status !== "running").slice(-Math.max(0, keepRecent)).map((message) => ({ role: String(message.role), content: String(message.content) }));
+    return [{ role: "system", content: system }, ...history, { role: "user", content: question }];
+  }
+  const V6_KNOWLEDGE_DB = {
+    name: "bili-subbatch-knowledge-v1",
+    version: 1,
+    anchorStore: "anchors",
+    nodeStore: "nodes"
+  };
+  function createRepository(factory) {
+    return knowledgeDb.create(factory, {
+      name: V6_KNOWLEDGE_DB.name,
+      version: V6_KNOWLEDGE_DB.version,
+      anchorStore: V6_KNOWLEDGE_DB.anchorStore,
+      nodeStore: V6_KNOWLEDGE_DB.nodeStore
+    });
   }
   function contentRefKey(ref) {
     const segment = String(ref.segmentId || "").trim();
@@ -3688,15 +4049,42 @@ ${prompt2.userPromptTemplate}`
       }
     };
   }
+  function classifyAcquisitionError(error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const status = Number(error?.status);
+    const aborted = error?.name === "AbortError";
+    const rateLimited = status === 429 || /(?:HTTP\s*(?:429|412)|rate.limit|too many requests)/i.test(message);
+    const unauthorized = status === 401 || status === 403 || /HTTP\s*(?:401|403)/i.test(message);
+    const network = /(?:network|failed to fetch|load failed|timeout|http\s*5\d\d)/i.test(message);
+    const code = aborted ? "aborted" : rateLimited ? "rate_limited" : unauthorized ? "unauthorized" : network ? "network" : "unknown";
+    return {
+      status: "error",
+      code,
+      message,
+      retryable: rateLimited || network,
+      cause: error
+    };
+  }
   function createTranscriptSourceRegistry(sources) {
     const byId = new Map(sources.map((source) => [source.id, source]));
     return {
       get(source) {
         return byId.get(source) ?? null;
       },
-      async acquire(resolved, context) {
+      async acquireDetailed(resolved, context) {
         const source = byId.get(resolved.ref.source);
-        return source ? source.acquire(resolved, context) : null;
+        if (!source) return { status: "unavailable", code: "unsupported", retryable: false };
+        try {
+          const transcript2 = await source.acquire(resolved, context);
+          return transcript2 ? { status: "ok", transcript: transcript2 } : { status: "unavailable", code: "no_transcript", retryable: false };
+        } catch (error) {
+          return classifyAcquisitionError(error);
+        }
+      },
+      async acquire(resolved, context) {
+        const result = await this.acquireDetailed(resolved, context);
+        if (result.status === "error") throw result.cause;
+        return result.status === "ok" ? result.transcript : null;
       }
     };
   }
@@ -3886,13 +4274,18 @@ ${prompt2.userPromptTemplate}`
     id: YOUTUBE_SOURCE,
     async acquire(resolved, context) {
       const current = resolved;
+      let networkError;
       try {
         const network = await acquireFromCaptionTrack(current, context);
         if (network) return network;
       } catch (error) {
         if (context.signal?.aborted) throw error;
+        networkError = error;
       }
-      return acquireFromDom(current, context);
+      const dom = await acquireFromDom(current, context);
+      if (dom) return dom;
+      if (networkError) throw networkError;
+      return null;
     }
   };
   const providerRegistry = createProviderRegistry([
@@ -3911,6 +4304,15 @@ ${prompt2.userPromptTemplate}`
     const resolved = providerRegistry.resolveCurrent({ href, pageRuntime });
     if (!resolved) return null;
     return transcriptSourceRegistry.acquire(resolved, {
+      network,
+      pageRuntime,
+      ...signal ? { signal } : {}
+    });
+  }
+  async function acquireDetailed(href, pageRuntime, network, signal) {
+    const resolved = providerRegistry.resolveCurrent({ href, pageRuntime });
+    if (!resolved) return { status: "unavailable", code: "unsupported", retryable: false };
+    return transcriptSourceRegistry.acquireDetailed(resolved, {
       network,
       pageRuntime,
       ...signal ? { signal } : {}
@@ -4062,7 +4464,21 @@ ${prompt2.userPromptTemplate}`
     resolve
   };
   const transcript = {
-    acquire
+    acquire,
+    acquireDetailed
+  };
+  const ai = {
+    request,
+    runPool
+  };
+  const studio = {
+    parseStore,
+    persist,
+    restore,
+    buildChatMessages
+  };
+  const knowledge = {
+    createRepository
   };
   const acquisition = {
     signWbi,
@@ -4084,6 +4500,7 @@ ${prompt2.userPromptTemplate}`
     acquireCurrentTranscript,
     acquisition,
     activation,
+    ai,
     collectSubtitleTracks,
     content,
     fetchSubtitleBody,
@@ -4091,6 +4508,7 @@ ${prompt2.userPromptTemplate}`
     fetchVideoDetail,
     fetchVideoView,
     installNavigationLifecycle,
+    knowledge,
     navigation,
     observe,
     resolve,
@@ -4100,6 +4518,7 @@ ${prompt2.userPromptTemplate}`
     signWbi,
     start,
     startUserscriptLifecycle,
+    studio,
     transcript,
     video
   }, Symbol.toStringTag, { value: "Module" }));
@@ -8335,6 +8754,49 @@ ${prompt2.userPromptTemplate}`
     __proto__: null,
     renderLateStudioStyles
   }, Symbol.toStringTag, { value: "Module" }));
+  function stageOf(value) {
+    return value === "postprocess" || value === "chat" ? value : "preprocess";
+  }
+  function applyWorkbenchStageUi(root, stageValue, inputView) {
+    const stage = stageOf(stageValue);
+    root.querySelectorAll("[data-ai-stage]").forEach((button) => {
+      const active = button.dataset.aiStage === stage;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+    const preNav = root.querySelector('[data-role="ai-preprocess-nav"]');
+    const postNav = root.querySelector('[data-role="ai-postprocess-nav"]');
+    const dock = root.querySelector('[data-role="studio-dock"]');
+    const wrap = root.querySelector(".bsb-ai-canvas-wrap");
+    if (preNav) preNav.hidden = stage !== "preprocess";
+    if (postNav) postNav.hidden = stage !== "postprocess";
+    if (dock) dock.hidden = stage !== "chat";
+    wrap?.classList.toggle("is-studio", stage === "chat");
+    root.querySelectorAll("[data-preprocess-action]").forEach((node) => {
+      node.hidden = stage !== "preprocess";
+    });
+    root.querySelectorAll("[data-postprocess-action]").forEach((node) => {
+      node.hidden = stage !== "postprocess";
+    });
+    root.querySelectorAll("[data-studio-action]").forEach((node) => {
+      node.hidden = stage !== "chat";
+    });
+    root.querySelectorAll("[data-pipeline-action]").forEach((node) => {
+      node.hidden = stage === "chat";
+    });
+    const label = root.querySelector('[data-role="ai-canvas-stage-label"]');
+    if (label) label.textContent = stage === "preprocess" ? "预处理" : stage === "chat" ? "对话" : "后处理";
+    root.querySelectorAll("[data-ai-preprocess-view]").forEach((button) => {
+      const active = button.dataset.aiPreprocessView === inputView;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+  }
+  const studioController = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    applyWorkbenchStageUi,
+    stageOf
+  }, Symbol.toStringTag, { value: "Module" }));
   const ui = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
     aiStyles,
@@ -8351,6 +8813,7 @@ ${prompt2.userPromptTemplate}`
     panelStyles: styles,
     readingStyles,
     settingsStyles,
+    studioController,
     subsStyles,
     workspaceControlsStyles: controlsStyles,
     workspaceLayoutStyles: layoutStyles,
@@ -14515,7 +14978,20 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
     return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
   }
 
+  let knowledgeRepository = null;
+  function currentKnowledgeRepository() {
+    if (!knowledgeRepository) {
+      const factory = appFn("knowledge.createRepository");
+      if (factory && globalThis.indexedDB) {
+        knowledgeRepository = factory(globalThis.indexedDB);
+      }
+    }
+    return knowledgeRepository;
+  }
+
   function openKnowledgeDb() {
+    const repo = currentKnowledgeRepository();
+    if (repo) return repo.open();
     if (state.knowledgeDbPromise) return state.knowledgeDbPromise;
     state.knowledgeDbPromise = new Promise((resolve, reject) => {
       if (!globalThis.indexedDB) return reject(new Error("IndexedDB unavailable"));
@@ -14544,6 +15020,8 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
   }
 
   async function knowledgeStoreRequest(storeName, mode, handler) {
+    const repo = currentKnowledgeRepository();
+    if (repo) return repo.request(storeName, mode, handler);
     const db = await openKnowledgeDb();
     return await new Promise((resolve, reject) => {
       const tx = db.transaction(storeName, mode);
@@ -14619,6 +15097,17 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
   }
 
   async function knowledgeDeleteAnchor(anchorId) {
+    const repo = currentKnowledgeRepository();
+    if (repo) {
+      await repo.deleteAnchor(anchorId);
+      state.knowledgeAnchors = state.knowledgeAnchors.filter((a) => a.id !== anchorId);
+      state.knowledgeNodes = state.knowledgeNodes.filter((n) => n.anchorId !== anchorId);
+      if (state.knowledgeActiveAnchorId === anchorId) {
+        state.knowledgeActiveAnchorId = "";
+        state.knowledgeActiveNodeId = "";
+      }
+      return;
+    }
     const nodeIds = state.knowledgeNodes.filter((n) => n.anchorId === anchorId).map((n) => n.id);
     await Promise.all(nodeIds.map((id) => knowledgeStoreRequest(KNOWLEDGE_NODE_STORE, "readwrite", (s) => s.delete(id))));
     await knowledgeStoreRequest(KNOWLEDGE_ANCHOR_STORE, "readwrite", (s) => s.delete(anchorId));
@@ -16552,6 +17041,11 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
   }
 
   function loadStudioChatStore() {
+    const parseStore = appFn("studio.parseStore");
+    if (parseStore) {
+      try { return parseStore(storageGet(STUDIO_CHAT_STORE_KEY, null)); }
+      catch (_) { return {}; }
+    }
     try {
       const raw = storageGet(STUDIO_CHAT_STORE_KEY, null);
       if (!raw) return {};
@@ -16565,6 +17059,12 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
   function persistStudioChat(routeKey = currentRouteVideoKey()) {
     const key = String(routeKey || "").trim();
     if (!key) return;
+    const persist = appFn("studio.persist");
+    if (persist) {
+      const store = persist(loadStudioChatStore(), key, state, Date.now());
+      try { storageSet(STUDIO_CHAT_STORE_KEY, JSON.stringify(store)); } catch (_) { /* ignore */ }
+      return;
+    }
     const store = loadStudioChatStore();
     store[key] = {
       messages: (state.studioMessages || []).slice(-40),
@@ -16581,6 +17081,11 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
 
   function loadStudioChat(routeKey = currentRouteVideoKey()) {
     const key = String(routeKey || "").trim();
+    const restore = appFn("studio.restore");
+    if (restore) {
+      Object.assign(state, restore(loadStudioChatStore(), key));
+      return;
+    }
     const entry = key ? loadStudioChatStore()[key] : null;
     state.studioMessages = Array.isArray(entry?.messages) ? entry.messages : [];
     state.studioMemory = String(entry?.memory || "");
@@ -16963,18 +17468,22 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
           onError(error) { reject(error instanceof Error ? error : new Error(String(error || "压缩失败"))); },
         });
       });
+      if (state.studioRuntime !== runtime || runtime.abort) return;
       const next = compactStudioMemoryText(latest.trim());
       if (next) state.studioMemory = next;
       persistStudioChat();
       renderStudioCanvas();
       setStatus(`记忆已精炼 · ${state.studioMemory.length} 字`, "ok");
     } catch (error) {
+      if (state.studioRuntime !== runtime) return;
       if (runtime.abort) setStatus("已停止记忆压缩");
       else setStatus(`记忆精炼失败，仍保留抽取稿：${error?.message || error}`, "err");
     } finally {
-      state.studioBusy = false;
-      state.studioRuntime = null;
-      refreshStudioStopUi();
+      if (state.studioRuntime === runtime) {
+        state.studioBusy = false;
+        state.studioRuntime = null;
+        refreshStudioStopUi();
+      }
     }
   }
 
@@ -17047,11 +17556,6 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
       [text, ...(state.studioMessages || []).filter((m) => m.role === "user").slice(-3).map((m) => m.content)].join(" "),
     );
     state.studioLastContextMeta = packed;
-    const history = state.studioMessages
-      .filter((m) => m.role === "user" || m.role === "assistant")
-      .filter((m) => m.id !== botMsg.id && m.content)
-      .slice(-STUDIO_CHAT_KEEP_RECENT)
-      .map((m) => ({ role: m.role, content: m.content }));
     const memory = String(state.studioMemory || "").trim();
     const system = [
       "你在帮用户研读当前这条视频字幕。只根据提供的字幕与压缩记忆回答，不编造字幕没有的事实。",
@@ -17065,6 +17569,8 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
       packed.text,
       "</transcript>",
     ].filter(Boolean).join("\n");
+    const messages = appCall("studio.buildChatMessages",
+      system, state.studioMessages, userMsg.id, text, STUDIO_CHAT_KEEP_RECENT);
     const runtime = createAiRuntime(`对话 · ${model.name || model.model}`);
     state.studioRuntime = runtime;
     state.studioBusy = true;
@@ -17080,31 +17586,36 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
           temperature: model.temperature,
           maxTokens: model.maxTokens,
           stream: model.stream !== false,
-          messages: [{ role: "system", content: system }, ...history, { role: "user", content: text }],
+          messages,
           onStatus() {},
           onDelta(_delta, full) {
+            if (state.studioRuntime !== runtime) return;
             latest = String(full || "");
             botMsg.content = latest;
             if (!paintStudioAnswer(botMsg.id, latest, true)) renderStudioCanvas();
           },
-          onDone(full) { latest = String(full || latest || ""); resolve(); },
+          onDone(full) { if (state.studioRuntime === runtime) latest = String(full || latest || ""); resolve(); },
           onError(error) { reject(error instanceof Error ? error : new Error(String(error || "对话失败"))); },
         });
       });
+      if (state.studioRuntime !== runtime) return;
       botMsg.content = latest.trim();
-      botMsg.status = "done";
-      setStatus("对话已回复", "ok");
+      botMsg.status = runtime.abort ? "stopped" : "done";
+      setStatus(runtime.abort ? "对话已停止" : "对话已回复", runtime.abort ? "" : "ok");
     } catch (error) {
+      if (state.studioRuntime !== runtime) return;
       const stopped = !!runtime.abort;
       botMsg.content = latest.trim() || (stopped ? "已停止" : String(error?.message || error));
       botMsg.status = stopped ? "stopped" : "error";
       setStatus(stopped ? "对话已停止" : `对话失败：${error?.message || error}`, stopped ? "" : "err");
     } finally {
-      state.studioBusy = false;
-      state.studioRuntime = null;
-      persistStudioChat();
-      renderStudioCanvas();
-      refreshStudioStopUi();
+      if (state.studioRuntime === runtime) {
+        state.studioBusy = false;
+        state.studioRuntime = null;
+        persistStudioChat();
+        renderStudioCanvas();
+        refreshStudioStopUi();
+      }
     }
   }
 
@@ -17118,6 +17629,14 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
     const root = document.getElementById(PANEL_ID);
     if (!root) return;
     const stage = currentAiWorkbenchStage();
+    const apply = typeof SubBatch !== "undefined"
+      ? SubBatch?.SubBatchMonorepo?.ui?.studioController?.applyWorkbenchStageUi
+      : null;
+    if (typeof apply === "function") {
+      apply(root, stage, state.aiInputView);
+      refreshStudioStopUi();
+      return;
+    }
     root.querySelectorAll("[data-ai-stage]").forEach((button) => {
       const active = button.dataset.aiStage === stage;
       button.classList.toggle("active", active);
@@ -19531,6 +20050,18 @@ body{padding:48px 20px 80px}
    */
   function requestChatCompletion(opts) {
     const runtime = opts.runtime || createAiRuntime(opts.model || "AI");
+    // Production path: AI Controller owns transport, streaming and cancellation.
+    // A cross-origin POST is sent via GM once, never replayed after fetch errors.
+    const requestFromApp = appFn("ai.request");
+    if (requestFromApp) {
+      return requestFromApp({
+        ...opts,
+        runtime,
+        network: runtimeNetwork(),
+        pageHref: location.href,
+      });
+    }
+    // Historical standalone fallback only (official builds always have the app).
     const {
       baseUrl,
       apiKey,
@@ -20196,6 +20727,11 @@ body{padding:48px 20px 80px}
   }
 
   async function runPreprocessWorkerPool(jobs, workerCount, handler) {
+    const pool = appFn("ai.runPool");
+    if (pool) {
+      return pool(jobs, workerCount, handler, () =>
+        !!state.aiAbort || !!state.preprocessRun?.runtime?.abort);
+    }
     let cursor = 0;
     async function worker(workerId) {
       while (true) {

@@ -1,6 +1,9 @@
 import * as acquisitionApi from "./acquisition";
+import * as aiController from "./ai-controller";
+import * as studioController from "./studio-controller";
+import * as knowledgeRepository from "./knowledge-repository";
 import { resolve as resolveContent } from "./current-content";
-import { acquire as acquireTranscript } from "./current-transcript";
+import { acquire as acquireTranscript, acquireDetailed as acquireTranscriptDetailed } from "./current-transcript";
 import { resolve as resolveVideo } from "./current-video";
 import { observe } from "./navigation";
 import { start } from "./video-carrier";
@@ -15,6 +18,23 @@ export const video = {
 
 export const transcript = {
   acquire: acquireTranscript,
+  acquireDetailed: acquireTranscriptDetailed,
+} as const;
+
+export const ai = {
+  request: aiController.request,
+  runPool: aiController.runPool,
+} as const;
+
+export const studio = {
+  parseStore: studioController.parseStore,
+  persist: studioController.persist,
+  restore: studioController.restore,
+  buildChatMessages: studioController.buildChatMessages,
+} as const;
+
+export const knowledge = {
+  createRepository: knowledgeRepository.createRepository,
 } as const;
 
 export const acquisition = {

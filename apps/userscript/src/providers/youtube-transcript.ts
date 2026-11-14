@@ -234,12 +234,18 @@ export const youtubeTranscriptSource: TranscriptSource = {
 
   async acquire(resolved, context): Promise<AcquiredTranscript | null> {
     const current = resolved as ResolvedContent<YoutubeCurrentVideoRef>;
+    let networkError: unknown;
     try {
       const network = await acquireFromCaptionTrack(current, context);
       if (network) return network;
     } catch (error) {
       if (context.signal?.aborted) throw error;
+      networkError = error;
     }
-    return acquireFromDom(current, context);
+    const dom = await acquireFromDom(current, context);
+    if (dom) return dom;
+    // Report the original network failure if the fallback cannot recover.
+    if (networkError) throw networkError;
+    return null;
   },
 };

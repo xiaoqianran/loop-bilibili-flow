@@ -21,4 +21,19 @@ export async function acquire(
   });
 }
 
+export async function acquireDetailed(
+  href: string,
+  pageRuntime: unknown,
+  network: NetworkAdapter,
+  signal?: AbortSignal,
+) {
+  const resolved = providerRegistry.resolveCurrent({ href, pageRuntime });
+  if (!resolved) return { status: "unavailable" as const, code: "unsupported" as const, retryable: false as const };
+  return transcriptSourceRegistry.acquireDetailed(resolved, {
+    network,
+    pageRuntime,
+    ...(signal ? { signal } : {}),
+  });
+}
+
 export const acquireCurrentTranscript = acquire;
