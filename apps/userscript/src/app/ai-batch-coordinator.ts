@@ -179,3 +179,81 @@ export async function ensureSubtitles<T extends SubtitleCandidate>(
   }
   return targets.filter(item => item.subStatus === "ok" && !!item.data?.length);
 }
+
+
+export interface BatchSubtitle {
+  bvid: string;
+  title?: string;
+  author?: string;
+}
+export function prepareBatchInput<T extends BatchSubtitle>(
+  ready: readonly T[],
+  rawBuilt: string,
+  stageInput: string,
+  preprocessEnabled: boolean,
+  truncate: (text: string) => { text: string; truncated: boolean },
+  preprocessPromptName: string,
+  preprocessModelName: string,
+) {
+  const first = ready[0];
+  const sourceBvids = ready.map(item => item.bvid).filter(Boolean);
+  const cut = truncate(stageInput);
+  const vars = {
+    title: ready.map(item => item.title).filter(Boolean).join(" / ") || first?.title || "",
+    bvid: ready.map(item => item.bvid).join(", "),
+    author: first?.author || "",
+    subtitle: cut.text,
+    rawSubtitle: rawBuilt,
+    processedSubtitle: preprocessEnabled ? stageInput : "",
+  };
+  const commonMeta = {
+    sourceBvids,
+    truncated: cut.truncated,
+    readyCount: ready.length,
+    preprocessEnabled,
+    preprocessPromptName,
+    preprocessModelName,
+  };
+  return { vars, commonMeta, sourceBvids, cut };
+}
+
+export interface BatchRunIdentity {
+  taskId: string;
+  profileId: string;
+}
+export interface BatchRunState extends BatchRunIdentity {
+  id: string;
+  sourceBvids?: string[];
+  [key: string]: unknown;
+}
+
+/** Assign cached model output to its existing run identity; return only missing run IDs. */
+export function hydratePlannedRuns<
+  T extends BatchRunState,
+  C,
+  P extends BatchRunIdentity,
+>(
+  runs: readonly T[],
+  split: {
+    reuse: readonly { plan: P; cached: C }[];
+    generate: readonly P[];
+  },
+  sourceBvids: readonly string[],
+  draft: (cached: C) => Record<string, unknown> | null,
+) {
+  const findRun = (item: BatchRunIdentity) =>
+    runs.find(run => run.taskId === item.taskId && run.profileId === item.profileId);
+  let reused = 0;
+  for (const item of split.reuse) {
+    const run = findRun(item.plan);
+    if (!run) continue;
+    const restored = draft(item.cached);
+    if (!restored) continue;
+    Object.assign(run, restored, { sourceBvids: [...sourceBvids] });
+    reused++;
+  }
+  const generateIds = split.generate.map(plan => findRun(plan)?.id).filter(
+    (id): id is string => Boolean(id),
+  );
+  return { reused, generateIds };
+}

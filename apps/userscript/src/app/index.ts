@@ -32,6 +32,8 @@ export const ai = {
   cloneSessionInput: batchCoordinator.cloneSessionInput,
   summarizeRuns: batchCoordinator.summarizeRuns,
   ensureSubtitles: batchCoordinator.ensureSubtitles,
+  prepareBatchInput: batchCoordinator.prepareBatchInput,
+  hydratePlannedRuns: batchCoordinator.hydratePlannedRuns,
   request: aiController.request,
   runPool: aiController.runPool,
 } as const;

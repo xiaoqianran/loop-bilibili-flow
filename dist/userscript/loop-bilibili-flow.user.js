@@ -3643,6 +3643,44 @@ ${prompt2.userPromptTemplate}`
     }
     return targets.filter((item) => item.subStatus === "ok" && !!item.data?.length);
   }
+  function prepareBatchInput(ready, rawBuilt, stageInput, preprocessEnabled, truncate, preprocessPromptName, preprocessModelName) {
+    const first = ready[0];
+    const sourceBvids = ready.map((item) => item.bvid).filter(Boolean);
+    const cut = truncate(stageInput);
+    const vars = {
+      title: ready.map((item) => item.title).filter(Boolean).join(" / ") || first?.title || "",
+      bvid: ready.map((item) => item.bvid).join(", "),
+      author: first?.author || "",
+      subtitle: cut.text,
+      rawSubtitle: rawBuilt,
+      processedSubtitle: preprocessEnabled ? stageInput : ""
+    };
+    const commonMeta = {
+      sourceBvids,
+      truncated: cut.truncated,
+      readyCount: ready.length,
+      preprocessEnabled,
+      preprocessPromptName,
+      preprocessModelName
+    };
+    return { vars, commonMeta, sourceBvids, cut };
+  }
+  function hydratePlannedRuns(runs, split, sourceBvids, draft) {
+    const findRun = (item) => runs.find((run) => run.taskId === item.taskId && run.profileId === item.profileId);
+    let reused = 0;
+    for (const item of split.reuse) {
+      const run = findRun(item.plan);
+      if (!run) continue;
+      const restored = draft(item.cached);
+      if (!restored) continue;
+      Object.assign(run, restored, { sourceBvids: [...sourceBvids] });
+      reused++;
+    }
+    const generateIds = split.generate.map((plan) => findRun(plan)?.id).filter(
+      (id) => Boolean(id)
+    );
+    return { reused, generateIds };
+  }
   function settings(value) {
     return {
       concurrency: Math.min(8, Math.max(1, Number(value.preprocessConcurrency) || 6)),
@@ -4857,6 +4895,8 @@ ${prompt2.userPromptTemplate}`
     cloneSessionInput,
     summarizeRuns,
     ensureSubtitles,
+    prepareBatchInput,
+    hydratePlannedRuns,
     request,
     runPool
   };
@@ -21378,31 +21418,16 @@ body{padding:48px 20px 80px}
       if (state.aiAbort) throw new Error("用户停止");
 
       const rawBuilt = buildSubtitlePayload(ready);
-      const first = ready[0];
-      const sourceBvids = ready.map((x) => x.bvid).filter(Boolean);
       let stageInput = rawBuilt;
       if (state.preprocessEnabled) {
         setStatus(`阶段 1/2 · 字幕预处理 · ${preprocessPrompt.name} · ${preprocessConfig.name || preprocessConfig.model}`);
         stageInput = await batch.stage(() => preprocessItemsForAi(ready, preprocessPrompt, preprocessConfig));
         if (state.aiAbort) throw new Error("用户停止");
       }
-      const cut = coreCall("truncateForAi", stageInput, MAX_SUBTITLE_CHARS);
-      const vars = {
-        title: ready.map((x) => x.title).filter(Boolean).join(" / ") || first.title || "",
-        bvid: ready.map((x) => x.bvid).join(", "),
-        author: first.author || "",
-        subtitle: cut.text,
-        rawSubtitle: rawBuilt,
-        processedSubtitle: state.preprocessEnabled ? stageInput : "",
-      };
-      const commonMeta = {
-        sourceBvids,
-        truncated: cut.truncated,
-        readyCount: ready.length,
-        preprocessEnabled: !!state.preprocessEnabled,
-        preprocessPromptName: preprocessPrompt?.name || "",
-        preprocessModelName: preprocessConfig?.name || preprocessConfig?.model || "",
-      };
+      const { cut, vars, commonMeta, sourceBvids } = appCall("ai.prepareBatchInput",
+        ready, rawBuilt, stageInput, !!state.preprocessEnabled,
+        (text) => coreCall("truncateForAi", text, MAX_SUBTITLE_CHARS),
+        preprocessPrompt?.name || "", preprocessConfig?.name || preprocessConfig?.model || "");
       const sessionRouteKey = options.expectedRouteKey || currentRouteVideoKey();
       state.aiSessionRouteKey = sessionRouteKey;
       state.aiSessionInput = appCall("ai.cloneSessionInput", {
@@ -21429,17 +21454,10 @@ body{padding:48px 20px 80px}
       const split = (!forceAll && cachedPayload && typeof partitionFn === "function")
         ? partitionFn(plannedRuns, cachedPayload.runs, inputHash)
         : { reuse: [], generate: plannedRuns };
-      const findPlannedRun = (taskId, profileId) =>
-        state.aiRunOrder.map((id) => state.aiRuns.get(id)).find((run) => run?.taskId === taskId && run?.profileId === profileId);
-      let reused = 0;
-      for (const item of split.reuse || []) {
-        const run = findPlannedRun(item.plan.taskId, item.plan.profileId);
-        const draft = coreFn("draftHydratedAiRun") ? coreFn("draftHydratedAiRun")(item.cached) : null;
-        if (!run || !draft) continue;
-        Object.assign(run, draft, { sourceBvids: [...sourceBvids] });
-        reused += 1;
-      }
-      const generateIds = (split.generate || []).map((plan) => findPlannedRun(plan.taskId, plan.profileId)?.id).filter(Boolean);
+      const { reused, generateIds } = appCall("ai.hydratePlannedRuns",
+        state.aiRunOrder.map((id) => state.aiRuns.get(id)).filter(Boolean),
+        split, sourceBvids,
+        (cached) => coreFn("draftHydratedAiRun") ? coreFn("draftHydratedAiRun")(cached) : null);
       renderAiResultTabs();
       if (state.aiActiveRunId) {
         const active = state.aiRuns.get(state.aiActiveRunId);
