@@ -2298,41 +2298,13 @@ export function mountWorkbench(SubBatch) {
   }
 
   async function loadAllListItems(ctx, { maxPages, pageSize, onProgress, delayMs, shouldCancel }) {
-    const all = [];
-    const seen = new Set();
-    const canceled = () => typeof shouldCancel === "function" && shouldCancel();
-    const throwIfCanceled = () => {
-      if (!canceled()) return;
-      const error = new Error("扫描已取消");
-      error.name = "AbortError";
-      throw error;
-    };
-    let page = 1;
-    let hasMore = true;
-    let meta = {};
-    while (hasMore && page <= maxPages) {
-      throwIfCanceled();
-      await waitIfJobPaused();
-      throwIfCanceled();
-      if (onProgress) onProgress(`拉取列表 ${page}/${maxPages}…（已 ${all.length}）`);
-      const res = await fetchListPage(ctx, page, pageSize);
-      throwIfCanceled();
-      meta = Object.assign(meta, res.meta || {});
-      for (const it of res.items) {
-        const key = it.bvid + "#" + (it.page || 1);
-        if (!it.bvid || seen.has(key)) continue;
-        seen.add(key);
-        all.push(it);
-      }
-      hasMore = res.hasMore;
-      if (!hasMore) break;
-      page += 1;
-      if (hasMore && page <= maxPages) {
-        await sleep(delayMs || 300);
-        throwIfCanceled();
-      }
-    }
-    return { items: all, meta, pagesFetched: Math.min(page, maxPages), truncated: hasMore };
+    return appCall("libraryScan.collectPages", { maxPages, pageSize, delayMs }, {
+      fetchPage: (page, size) => fetchListPage(ctx, page, size),
+      waitIfPaused: () => waitIfJobPaused(),
+      cancelled: () => typeof shouldCancel === "function" && shouldCancel(),
+      progress: onProgress,
+      sleep,
+    });
   }
 
   /**
@@ -11953,47 +11925,11 @@ body{padding:48px 20px 80px}
           ? `手动·${TYPE_LABEL[ctx.type]}`
           : `自动·${TYPE_LABEL[ctx.type]}`;
       const sourceLabel = String(meta.name || meta.title || meta.keyword || modeTag);
-      const existingByKey = new Map(
-        state.items.map((item) => [routeVideoKey(item.bvid, item.page || 1), item]),
+      const { added, existed } = appCall(
+        "libraryScan.mergeItems",
+        state.items, items, sourceLabel,
+        (item) => routeVideoKey(item.bvid, item.page || 1),
       );
-      let added = 0;
-      let existed = 0;
-      for (const raw of items) {
-        const key = routeVideoKey(raw.bvid, raw.page || 1);
-        const previous = existingByKey.get(key);
-        if (previous) {
-          existed += 1;
-          // 更新标题等轻量元数据，但绝不抹掉已抓取字幕与用户选择状态。
-          previous.title = raw.title || previous.title;
-          previous.author = raw.author || previous.author;
-          previous.aid = raw.aid ?? previous.aid;
-          previous.part = raw.part ?? previous.part;
-          previous.videoTitle = raw.videoTitle || previous.videoTitle;
-          previous.groupType = raw.groupType || previous.groupType;
-          previous.groupKey = raw.groupKey || previous.groupKey;
-          previous.groupFolder = raw.groupFolder || previous.groupFolder;
-          previous.parentFolder = raw.parentFolder || previous.parentFolder;
-          previous.spaceMid = raw.spaceMid || previous.spaceMid;
-          previous.collectionName = raw.collectionName || previous.collectionName;
-          previous.collectionMid = raw.collectionMid || previous.collectionMid;
-          previous.collectionSid = raw.collectionSid || previous.collectionSid;
-          previous.collectionShortUrl = raw.collectionShortUrl || previous.collectionShortUrl;
-          previous.sources = Array.from(new Set([...(previous.sources || []), sourceLabel].filter(Boolean)));
-          continue;
-        }
-        const next = {
-          ...raw,
-          selected: true,
-          subStatus: "wait",
-          cue_count: 0,
-          data: null,
-          error: "",
-          sources: sourceLabel ? [sourceLabel] : [],
-        };
-        state.items.push(next);
-        existingByKey.set(key, next);
-        added += 1;
-      }
       state.meta = meta;
       state.captureDrawerOpen = false;
       const drawer = ensurePanel().querySelector('[data-role="capture-drawer"]');

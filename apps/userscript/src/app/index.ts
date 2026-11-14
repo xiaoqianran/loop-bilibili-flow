@@ -1,3 +1,4 @@
+import * as libraryScanController from "./library-scan-controller";
 import * as libraryJobController from "./library-job-controller";
 import * as batchCoordinator from "./ai-batch-coordinator";
 import * as preprocessController from "./preprocess-controller";
@@ -11,6 +12,12 @@ import { acquire as acquireTranscript, acquireDetailed as acquireTranscriptDetai
 import { resolve as resolveVideo } from "./current-video";
 import { observe } from "./navigation";
 import { start } from "./video-carrier";
+
+export const libraryScan = {
+  collectPages: libraryScanController.collectPages,
+  mergeItems: libraryScanController.mergeScanItems,
+  assertActive: libraryScanController.assertScanActive,
+} as const;
 
 export const libraryJob = {
   currentKind: libraryJobController.currentKind,

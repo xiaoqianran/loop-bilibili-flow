@@ -3522,6 +3522,90 @@ ${prompt2.userPromptTemplate}`
     videoDetails,
     videoWatchUrl
   }, Symbol.toStringTag, { value: "Module" }));
+  function assertScanActive(cancelled) {
+    if (!cancelled()) return;
+    const error = new Error("扫描已取消");
+    error.name = "AbortError";
+    throw error;
+  }
+  async function collectPages(config, ports) {
+    const all = [];
+    const seen = /* @__PURE__ */ new Set();
+    let page = 1;
+    let hasMore = true;
+    const meta = {};
+    while (hasMore && page <= config.maxPages) {
+      assertScanActive(ports.cancelled);
+      await ports.waitIfPaused();
+      assertScanActive(ports.cancelled);
+      ports.progress?.("拉取列表 " + page + "/" + config.maxPages + "…（已 " + all.length + "）");
+      const result = await ports.fetchPage(page, config.pageSize);
+      assertScanActive(ports.cancelled);
+      Object.assign(meta, result.meta || {});
+      for (const item of result.items) {
+        const key = item.bvid + "#" + (item.page || 1);
+        if (!item.bvid || seen.has(key)) continue;
+        seen.add(key);
+        all.push(item);
+      }
+      hasMore = result.hasMore;
+      if (!hasMore) break;
+      page++;
+      if (hasMore && page <= config.maxPages) {
+        await ports.sleep(config.delayMs || 300);
+        assertScanActive(ports.cancelled);
+      }
+    }
+    return { items: all, meta, pagesFetched: Math.min(page, config.maxPages), truncated: hasMore };
+  }
+  const REFRESH_KEYS = [
+    "title",
+    "author",
+    "videoTitle",
+    "groupType",
+    "groupKey",
+    "groupFolder",
+    "parentFolder",
+    "spaceMid",
+    "collectionName",
+    "collectionMid",
+    "collectionSid",
+    "collectionShortUrl"
+  ];
+  function mergeScanItems(existing, incoming, sourceLabel, keyOf) {
+    const byKey = new Map(existing.map((item) => [keyOf(item), item]));
+    let added = 0;
+    let existed = 0;
+    for (const raw of incoming) {
+      const key = keyOf(raw);
+      const previous = byKey.get(key);
+      if (previous) {
+        existed++;
+        const target = previous;
+        for (const field of REFRESH_KEYS) {
+          target[field] = raw[field] || previous[field];
+        }
+        target.aid = raw.aid ?? previous.aid;
+        target.part = raw.part ?? previous.part;
+        const sources = Array.isArray(previous.sources) ? previous.sources : [];
+        target.sources = Array.from(new Set([...sources, sourceLabel].filter(Boolean)));
+        continue;
+      }
+      const next = {
+        ...raw,
+        selected: true,
+        subStatus: "wait",
+        cue_count: 0,
+        data: null,
+        error: "",
+        sources: sourceLabel ? [sourceLabel] : []
+      };
+      existing.push(next);
+      byKey.set(key, next);
+      added++;
+    }
+    return { added, existed };
+  }
   function currentKind(s) {
     return s.batchBusy ? "fetch" : s.scanBusy ? "scan" : "";
   }
@@ -4945,6 +5029,11 @@ ${prompt2.userPromptTemplate}`
     return cleanup;
   }
   const startUserscriptLifecycle = start;
+  const libraryScan = {
+    collectPages,
+    mergeItems: mergeScanItems,
+    assertActive: assertScanActive
+  };
   const libraryJob = {
     currentKind,
     isPaused,
@@ -5033,6 +5122,7 @@ ${prompt2.userPromptTemplate}`
     installNavigationLifecycle,
     knowledge,
     libraryJob,
+    libraryScan,
     navigation,
     observe,
     preprocess,
@@ -11853,41 +11943,13 @@ ${prompt2.userPromptTemplate}`
       throw new Error(`unsupported list type: ${ctx.type}`);
     }
     async function loadAllListItems(ctx, { maxPages, pageSize, onProgress, delayMs, shouldCancel }) {
-      const all = [];
-      const seen = /* @__PURE__ */ new Set();
-      const canceled = () => typeof shouldCancel === "function" && shouldCancel();
-      const throwIfCanceled = () => {
-        if (!canceled()) return;
-        const error = new Error("扫描已取消");
-        error.name = "AbortError";
-        throw error;
-      };
-      let page = 1;
-      let hasMore = true;
-      let meta = {};
-      while (hasMore && page <= maxPages) {
-        throwIfCanceled();
-        await waitIfJobPaused();
-        throwIfCanceled();
-        if (onProgress) onProgress(`拉取列表 ${page}/${maxPages}…（已 ${all.length}）`);
-        const res = await fetchListPage(ctx, page, pageSize);
-        throwIfCanceled();
-        meta = Object.assign(meta, res.meta || {});
-        for (const it of res.items) {
-          const key = it.bvid + "#" + (it.page || 1);
-          if (!it.bvid || seen.has(key)) continue;
-          seen.add(key);
-          all.push(it);
-        }
-        hasMore = res.hasMore;
-        if (!hasMore) break;
-        page += 1;
-        if (hasMore && page <= maxPages) {
-          await sleep(delayMs || 300);
-          throwIfCanceled();
-        }
-      }
-      return { items: all, meta, pagesFetched: Math.min(page, maxPages), truncated: hasMore };
+      return appCall("libraryScan.collectPages", { maxPages, pageSize, delayMs }, {
+        fetchPage: (page, size) => fetchListPage(ctx, page, size),
+        waitIfPaused: () => waitIfJobPaused(),
+        cancelled: () => typeof shouldCancel === "function" && shouldCancel(),
+        progress: onProgress,
+        sleep
+      });
     }
     async function loadUserSpaceSeasons(mid, {
       maxPages = 30,
@@ -20998,46 +21060,13 @@ ${latest}`;
         }
         const modeTag = ctx.source === "manual" ? `手动·${TYPE_LABEL[ctx.type]}` : `自动·${TYPE_LABEL[ctx.type]}`;
         const sourceLabel = String(meta.name || meta.title || meta.keyword || modeTag);
-        const existingByKey = new Map(
-          state2.items.map((item) => [routeVideoKey2(item.bvid, item.page || 1), item])
+        const { added, existed } = appCall(
+          "libraryScan.mergeItems",
+          state2.items,
+          items,
+          sourceLabel,
+          (item) => routeVideoKey2(item.bvid, item.page || 1)
         );
-        let added = 0;
-        let existed = 0;
-        for (const raw of items) {
-          const key = routeVideoKey2(raw.bvid, raw.page || 1);
-          const previous = existingByKey.get(key);
-          if (previous) {
-            existed += 1;
-            previous.title = raw.title || previous.title;
-            previous.author = raw.author || previous.author;
-            previous.aid = raw.aid ?? previous.aid;
-            previous.part = raw.part ?? previous.part;
-            previous.videoTitle = raw.videoTitle || previous.videoTitle;
-            previous.groupType = raw.groupType || previous.groupType;
-            previous.groupKey = raw.groupKey || previous.groupKey;
-            previous.groupFolder = raw.groupFolder || previous.groupFolder;
-            previous.parentFolder = raw.parentFolder || previous.parentFolder;
-            previous.spaceMid = raw.spaceMid || previous.spaceMid;
-            previous.collectionName = raw.collectionName || previous.collectionName;
-            previous.collectionMid = raw.collectionMid || previous.collectionMid;
-            previous.collectionSid = raw.collectionSid || previous.collectionSid;
-            previous.collectionShortUrl = raw.collectionShortUrl || previous.collectionShortUrl;
-            previous.sources = Array.from(new Set([...previous.sources || [], sourceLabel].filter(Boolean)));
-            continue;
-          }
-          const next = {
-            ...raw,
-            selected: true,
-            subStatus: "wait",
-            cue_count: 0,
-            data: null,
-            error: "",
-            sources: sourceLabel ? [sourceLabel] : []
-          };
-          state2.items.push(next);
-          existingByKey.set(key, next);
-          added += 1;
-        }
         state2.meta = meta;
         state2.captureDrawerOpen = false;
         const drawer = ensurePanel().querySelector('[data-role="capture-drawer"]');

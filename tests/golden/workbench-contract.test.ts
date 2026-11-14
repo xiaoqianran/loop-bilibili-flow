@@ -181,6 +181,12 @@ describe("Bundled full-feature workbench source", () => {
     expect(maintainedSource).toContain("function updateLibraryJobBar()");
   });
 
+  it("delegates scan pagination and library merge policy to Application", () => {
+    expect(maintainedSource).toContain('appCall("libraryScan.collectPages"');
+    expect(maintainedSource).toContain('"libraryScan.mergeItems"');
+    expect(maintainedSource).not.toContain("const existingByKey = new Map(");
+  });
+
   it("delegates migrated acquisition rules to grouped Bilibili APIs", () => {
     expect(maintainedSource).toContain("function bilibiliCall(");
     expect(maintainedSource).toContain('bilibiliCall("video.runtimeView"');
