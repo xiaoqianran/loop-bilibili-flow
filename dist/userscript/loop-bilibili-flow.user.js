@@ -3597,6 +3597,52 @@ ${prompt2.userPromptTemplate}`
     const stopped = results.some((result) => result.status === "fulfilled" && result.value.status === "stopped");
     return { results, status: failed ? "error" : stopped ? "stopped" : "done" };
   }
+  function cloneSessionInput(input, sessionId) {
+    if (!input?.vars?.subtitle) return null;
+    return {
+      sessionId: Number(sessionId ?? input.sessionId),
+      routeKey: String(input.routeKey || ""),
+      vars: { ...input.vars },
+      promptProfile: input.promptProfile ? { ...input.promptProfile } : null,
+      taskSnapshots: Array.isArray(input.taskSnapshots) ? input.taskSnapshots.map((entry) => ({
+        task: entry.task ? { ...entry.task, modelIds: [...entry.task.modelIds || []] } : null,
+        prompt: entry.prompt ? { ...entry.prompt } : null
+      })) : [],
+      preprocessPrompt: input.preprocessPrompt ? { ...input.preprocessPrompt } : null,
+      preprocessConfig: input.preprocessConfig ? { ...input.preprocessConfig } : null,
+      preprocessEnabled: !!input.preprocessEnabled,
+      commonMeta: {
+        ...input.commonMeta || {},
+        sourceBvids: [...input.commonMeta?.sourceBvids || []]
+      }
+    };
+  }
+  function summarizeRuns(runs) {
+    if (!runs.length) return null;
+    return {
+      done: runs.filter((run) => run.status === "done").length,
+      failed: runs.filter((run) => run.status === "error").length,
+      stopped: runs.filter((run) => run.status === "stopped").length
+    };
+  }
+  async function ensureSubtitles(targets, delayMs, ports) {
+    for (let i = 0; i < targets.length; i++) {
+      if (ports.cancelled()) throw new Error("用户停止");
+      const item = targets[i];
+      if (item.subStatus === "ok" && item.data?.length) continue;
+      ports.onFetching(item, i, targets.length);
+      const result = await ports.fetchSubtitle(item.bvid, item.page || 1);
+      item.subStatus = result.status;
+      item.cue_count = result.cue_count || 0;
+      item.data = result.data || null;
+      item.error = result.error || "";
+      if (!item.title && result.title) item.title = result.title;
+      if (!item.author && result.author) item.author = result.author;
+      ports.onUpdated(item);
+      if (i < targets.length - 1) await ports.sleep(delayMs);
+    }
+    return targets.filter((item) => item.subStatus === "ok" && !!item.data?.length);
+  }
   function settings(value) {
     return {
       concurrency: Math.min(8, Math.max(1, Number(value.preprocessConcurrency) || 6)),
@@ -4808,6 +4854,9 @@ ${prompt2.userPromptTemplate}`
     planTasks,
     partitionRuns,
     executeTasks,
+    cloneSessionInput,
+    summarizeRuns,
+    ensureSubtitles,
     request,
     runPool
   };
@@ -18495,39 +18544,19 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
     return false;
   }
 
-  function cloneAiSessionInput(input, sessionId) {
-    if (!input?.vars?.subtitle) return null;
-    return {
-      sessionId: Number(sessionId ?? input.sessionId),
-      routeKey: String(input.routeKey || ""),
-      vars: { ...input.vars },
-      promptProfile: input.promptProfile ? { ...input.promptProfile } : null, // legacy
-      taskSnapshots: Array.isArray(input.taskSnapshots) ? input.taskSnapshots.map((x) => ({ task: x.task ? { ...x.task, modelIds: [...(x.task.modelIds || [])] } : null, prompt: x.prompt ? { ...x.prompt } : null })) : [],
-      preprocessPrompt: input.preprocessPrompt ? { ...input.preprocessPrompt } : null,
-      preprocessConfig: input.preprocessConfig ? { ...input.preprocessConfig } : null,
-      preprocessEnabled: !!input.preprocessEnabled,
-      commonMeta: {
-        ...(input.commonMeta || {}),
-        sourceBvids: [...(input.commonMeta?.sourceBvids || [])],
-      },
-    };
-  }
-
   function summarizeAiRuns(prefix = "全部产物生成结束") {
     setAiBusy(anyAiRunBusy());
     if (anyAiRunBusy()) return;
     const runs = state.aiRunOrder.map((id) => state.aiRuns.get(id)).filter(Boolean);
     if (!runs.length) return;
-    const done = runs.filter((run) => run.status === "done").length;
-    const failed = runs.filter((run) => run.status === "error").length;
-    const stopped = runs.filter((run) => run.status === "stopped").length;
+    const { done, failed, stopped } = appCall("ai.summarizeRuns", runs);
     persistAiSessionCache().catch(() => {});
     setStatus(`${prefix} · 成功 ${done} · 失败 ${failed} · 停止 ${stopped}`, failed ? "err" : "ok");
   }
 
   async function regenerateActiveAiRun() {
     const oldRun = getActiveAiRun();
-    const input = cloneAiSessionInput(state.aiSessionInput);
+    const input = appCall("ai.cloneSessionInput", state.aiSessionInput);
     if (!oldRun || !input) {
       setStatus("当前没有可重新生成的模型结果，请先完成一次分析", "err");
       return;
@@ -18561,7 +18590,7 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
   }
 
   async function regenerateAllAiRuns() {
-    const input = cloneAiSessionInput(state.aiSessionInput);
+    const input = appCall("ai.cloneSessionInput", state.aiSessionInput);
     const oldRuns = state.aiRunOrder.map((id) => state.aiRuns.get(id)).filter(Boolean);
     if (!input || !oldRuns.length) {
       setStatus("当前没有可重新生成的批次，请先完成一次分析", "err");
@@ -18594,7 +18623,7 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
       return run?.profileId === activeOld?.profileId && run?.taskId === activeOld?.taskId;
     }) || state.aiRunOrder[0] || "";
     state.aiActiveTaskId = getActiveAiRun()?.taskId || state.aiActiveTaskId;
-    state.aiSessionInput = cloneAiSessionInput(input, sessionId);
+    state.aiSessionInput = appCall("ai.cloneSessionInput", input, sessionId);
     syncActiveRunBridge(getActiveAiRun());
     renderAiResultTabs();
     setAiBusy(true);
@@ -19288,7 +19317,7 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
     if (!key) return false;
     const payload = buildFn({
       routeKey,
-      sessionInput: cloneAiSessionInput(state.aiSessionInput, state.aiSessionInput?.sessionId),
+      sessionInput: appCall("ai.cloneSessionInput", state.aiSessionInput, state.aiSessionInput?.sessionId),
       preprocessRun: state.preprocessRun,
       runs: state.aiRunOrder.map((id) => state.aiRuns.get(id)).filter(Boolean),
       activeRunId: state.aiActiveRunId,
@@ -19328,7 +19357,7 @@ if (typeof location !== "undefined" && /(^|\.)bilibili\.com$/i.test(location.hos
       savedActive,
       state.aiActiveTaskId,
     );
-    state.aiSessionInput = cloneAiSessionInput(payload.sessionInput, sessionId);
+    state.aiSessionInput = appCall("ai.cloneSessionInput", payload.sessionInput, sessionId);
     if (state.aiSessionInput) state.aiSessionInput.routeKey = routeKey;
     const preprocess = coreCall("draftHydratedPreprocessRun", payload.preprocessRun);
     state.preprocessRun = preprocess
@@ -20970,26 +20999,6 @@ body{padding:48px 20px 80px}
     return xhrHandle;
   }
 
-  async function ensureSubtitlesForAi(targets) {
-    const delay = state.delayMs;
-    for (let i = 0; i < targets.length; i++) {
-      if (state.aiAbort) throw new Error("用户停止");
-      const it = targets[i];
-      if (it.subStatus === "ok" && it.data?.length) continue;
-      setStatus(`AI 准备字幕 ${i + 1}/${targets.length} · ${it.bvid}…`);
-      const r = await fetchSubtitle(it.bvid, it.page || 1);
-      it.subStatus = r.status;
-      it.cue_count = r.cue_count || 0;
-      it.data = r.data || null;
-      it.error = r.error || "";
-      if (!it.title && r.title) it.title = r.title;
-      if (!it.author && r.author) it.author = r.author;
-      renderList();
-      if (i < targets.length - 1) await sleep(delay);
-    }
-    return targets.filter((it) => it.subStatus === "ok" && it.data?.length);
-  }
-
   function abortPreprocessChildRuntime(runtime) {
     if (!runtime) return;
     runtime.abort = true;
@@ -21349,7 +21358,13 @@ body{padding:48px 20px 80px}
     }
 
     try {
-      const ready = await batch.stage(() => ensureSubtitlesForAi(targets));
+      const ready = await batch.stage(() => appCall("ai.ensureSubtitles", targets, state.delayMs, {
+        cancelled: () => !!state.aiAbort,
+        onFetching: (item, index, total) => setStatus("AI 准备字幕 " + (index + 1) + "/" + total + " · " + item.bvid + "…"),
+        fetchSubtitle: (bvid, page) => fetchSubtitle(bvid, page),
+        onUpdated: () => renderList(),
+        sleep,
+      }));
       if (options.expectedRouteKey && currentRouteVideoKey() !== options.expectedRouteKey) throw new Error("页面已切换到其他视频");
       if (!ready.length) {
         batch.finish("error");
@@ -21390,7 +21405,7 @@ body{padding:48px 20px 80px}
       };
       const sessionRouteKey = options.expectedRouteKey || currentRouteVideoKey();
       state.aiSessionRouteKey = sessionRouteKey;
-      state.aiSessionInput = cloneAiSessionInput({
+      state.aiSessionInput = appCall("ai.cloneSessionInput", {
         sessionId,
         routeKey: sessionRouteKey,
         vars,

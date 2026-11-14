@@ -80,3 +80,102 @@ export async function executeTasks<T extends { status?: string }>(jobs: readonly
   const stopped = results.some(result => result.status === "fulfilled" && result.value.status === "stopped");
   return { results, status: failed ? "error" as const : stopped ? "stopped" as const : "done" as const };
 }
+
+
+export interface AiSessionInput {
+  sessionId?: number;
+  routeKey?: string;
+  vars?: { subtitle?: string; [key: string]: unknown };
+  promptProfile?: Record<string, unknown> | null;
+  taskSnapshots?: Array<{
+    task?: (Record<string, unknown> & { modelIds?: string[] }) | null;
+    prompt?: Record<string, unknown> | null;
+  }>;
+  preprocessPrompt?: Record<string, unknown> | null;
+  preprocessConfig?: Record<string, unknown> | null;
+  preprocessEnabled?: boolean;
+  commonMeta?: Record<string, unknown> & { sourceBvids?: string[] };
+  [key: string]: unknown;
+}
+
+/** Preserve the v1 AI session persistence contract while detaching editable input. */
+export function cloneSessionInput(input: AiSessionInput | null | undefined, sessionId?: number) {
+  if (!input?.vars?.subtitle) return null;
+  return {
+    sessionId: Number(sessionId ?? input.sessionId),
+    routeKey: String(input.routeKey || ""),
+    vars: { ...input.vars },
+    promptProfile: input.promptProfile ? { ...input.promptProfile } : null,
+    taskSnapshots: Array.isArray(input.taskSnapshots)
+      ? input.taskSnapshots.map(entry => ({
+        task: entry.task ? { ...entry.task, modelIds: [...(entry.task.modelIds || [])] } : null,
+        prompt: entry.prompt ? { ...entry.prompt } : null,
+      }))
+      : [],
+    preprocessPrompt: input.preprocessPrompt ? { ...input.preprocessPrompt } : null,
+    preprocessConfig: input.preprocessConfig ? { ...input.preprocessConfig } : null,
+    preprocessEnabled: !!input.preprocessEnabled,
+    commonMeta: {
+      ...(input.commonMeta || {}),
+      sourceBvids: [...(input.commonMeta?.sourceBvids || [])],
+    },
+  };
+}
+
+export function summarizeRuns(runs: readonly { status?: string }[]) {
+  if (!runs.length) return null;
+  return {
+    done: runs.filter(run => run.status === "done").length,
+    failed: runs.filter(run => run.status === "error").length,
+    stopped: runs.filter(run => run.status === "stopped").length,
+  };
+}
+
+export interface SubtitleCandidate {
+  bvid: string;
+  page?: number;
+  subStatus?: string;
+  data?: unknown[] | null;
+  cue_count?: number;
+  error?: string;
+  title?: string;
+  author?: string;
+}
+export interface SubtitleFetchResult {
+  status: string;
+  cue_count?: number;
+  data?: unknown[] | null;
+  error?: string;
+  title?: string;
+  author?: string;
+}
+
+/** Batch subtitle acquisition policy. Browser transport/UI remain caller-supplied ports. */
+export async function ensureSubtitles<T extends SubtitleCandidate>(
+  targets: T[],
+  delayMs: number,
+  ports: {
+    cancelled: () => boolean;
+    onFetching: (item: T, index: number, total: number) => void;
+    fetchSubtitle: (bvid: string, page: number) => Promise<SubtitleFetchResult>;
+    onUpdated: (item: T) => void;
+    sleep: (ms: number) => Promise<unknown>;
+  },
+): Promise<T[]> {
+  for (let i = 0; i < targets.length; i++) {
+    if (ports.cancelled()) throw new Error("用户停止");
+    const item = targets[i]!;
+    if (item.subStatus === "ok" && item.data?.length) continue;
+    ports.onFetching(item, i, targets.length);
+    const result = await ports.fetchSubtitle(item.bvid, item.page || 1);
+    item.subStatus = result.status;
+    item.cue_count = result.cue_count || 0;
+    item.data = result.data || null;
+    item.error = result.error || "";
+    if (!item.title && result.title) item.title = result.title;
+    if (!item.author && result.author) item.author = result.author;
+    ports.onUpdated(item);
+    if (i < targets.length - 1) await ports.sleep(delayMs);
+  }
+  return targets.filter(item => item.subStatus === "ok" && !!item.data?.length);
+}

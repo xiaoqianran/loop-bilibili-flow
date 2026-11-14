@@ -29,6 +29,9 @@ export const ai = {
   planTasks: batchCoordinator.planTasks,
   partitionRuns: batchCoordinator.partitionRuns,
   executeTasks: batchCoordinator.executeTasks,
+  cloneSessionInput: batchCoordinator.cloneSessionInput,
+  summarizeRuns: batchCoordinator.summarizeRuns,
+  ensureSubtitles: batchCoordinator.ensureSubtitles,
   request: aiController.request,
   runPool: aiController.runPool,
 } as const;
