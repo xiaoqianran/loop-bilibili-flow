@@ -89,3 +89,38 @@ export function branchContext<T extends {
       + "\n   回答摘要：" + (answer || "（尚无回答）");
   }).join("\n");
 }
+
+export interface StoredKnowledgeNode {
+  id: string; status?: string; answer?: string; preview?: string;
+  updatedAt?: number; createdAt?: number; [key: string]: unknown;
+}
+/** Recover interrupted persistent answers without overwriting live streams. */
+export function reconcileNodes<T extends StoredKnowledgeNode>(
+  stored: readonly T[] | null | undefined,
+  current: readonly T[] | null | undefined,
+  busy: boolean,
+  visibleAnswer: (text: string) => string,
+  now = Date.now(),
+): { nodes: T[]; recovered: T[] } {
+  const recovered: T[] = [];
+  const live = busy
+    ? new Map((current || []).filter(node => node?.status === "running").map(node => [node.id, node]))
+    : new Map<string, T>();
+  const nodes = (stored || []).map(node => {
+    const active = live.get(node?.id);
+    if (active) return active;
+    if (!busy && node?.status === "running") {
+      const fixed = { ...node, answer: visibleAnswer(node.answer || node.preview || ""),
+        preview: "", status: "stopped", error: "", updatedAt: now } as T;
+      recovered.push(fixed);
+      return fixed;
+    }
+    return node;
+  }).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+  return { nodes, recovered };
+}
+export function sortAnchors<T extends { updatedAt?: number }>(
+  anchors: readonly T[] | null | undefined,
+): T[] {
+  return [...(anchors || [])].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+}

@@ -5509,21 +5509,11 @@ export function mountWorkbench(SubBatch) {
         knowledgeStoreRequest(KNOWLEDGE_ANCHOR_STORE, "readonly", (s) => s.getAll()),
         knowledgeStoreRequest(KNOWLEDGE_NODE_STORE, "readonly", (s) => s.getAll()),
       ]);
-      state.knowledgeAnchors = (anchors || []).sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
-      const recovered = [];
-      const liveRunning = state.knowledgeBusy
-        ? new Map((state.knowledgeNodes || []).filter((node) => node?.status === "running").map((node) => [node.id, node]))
-        : new Map();
-      state.knowledgeNodes = (nodes || []).map((node) => {
-        const live = liveRunning.get(node?.id);
-        if (live) return live;
-        if (!state.knowledgeBusy && node?.status === "running") {
-          const fixed = { ...node, answer: knowledgeVisibleAnswer(node.answer || node.preview || ""), preview: "", status: "stopped", error: "", updatedAt: Date.now() };
-          recovered.push(fixed);
-          return fixed;
-        }
-        return node;
-      }).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+      state.knowledgeAnchors = appCall("knowledge.sortAnchors", anchors);
+      const { nodes: reconciledNodes, recovered } = appCall(
+        "knowledge.reconcileNodes", nodes, state.knowledgeNodes, !!state.knowledgeBusy, knowledgeVisibleAnswer,
+      );
+      state.knowledgeNodes = reconciledNodes;
       if (recovered.length) Promise.all(recovered.map((node) => knowledgeStoreRequest(KNOWLEDGE_NODE_STORE, "readwrite", (s) => s.put(node)))).catch(() => {});
     } catch (error) {
       state.knowledgeAnchors = state.knowledgeAnchors || [];
@@ -7672,11 +7662,7 @@ export function mountWorkbench(SubBatch) {
     abortStudioRequest();
     state.studioBusy = false;
     state.studioRuntime = null;
-    state.studioMessages = [];
-    state.studioMemory = "";
-    state.studioMemoryUntilId = "";
-    state.studioMemoryTurns = 0;
-    state.studioLastContextMeta = null;
+    appCall("studio.clearTurnHistory", state);
     persistStudioChat();
     renderStudioCanvas();
     refreshStudioStopUi();
@@ -7846,9 +7832,7 @@ export function mountWorkbench(SubBatch) {
       return;
     }
     const route = currentRouteVideoRef();
-    const userMsg = { id: `u-${Date.now()}`, role: "user", content: text, status: "done" };
-    const botMsg = { id: `a-${Date.now()}`, role: "assistant", content: "", status: "running" };
-    state.studioMessages = [...(state.studioMessages || []), userMsg, botMsg];
+    const { user: userMsg, assistant: botMsg } = appCall("studio.beginTurn", state, text);
     persistStudioChat();
     renderStudioCanvas();
     refreshStudioMemory();
@@ -7891,8 +7875,7 @@ export function mountWorkbench(SubBatch) {
           onStatus() {},
           onDelta(_delta, full) {
             if (state.studioRuntime !== runtime) return;
-            latest = String(full || "");
-            botMsg.content = latest;
+            latest = appCall("studio.updateTurn", botMsg, full);
             if (!paintStudioAnswer(botMsg.id, latest, true)) renderStudioCanvas();
           },
           onDone(full) { if (state.studioRuntime === runtime) latest = String(full || latest || ""); resolve(); },
@@ -7900,14 +7883,12 @@ export function mountWorkbench(SubBatch) {
         });
       });
       if (state.studioRuntime !== runtime) return;
-      botMsg.content = latest.trim();
-      botMsg.status = runtime.abort ? "stopped" : "done";
+      appCall("studio.finishTurn", botMsg, latest, !!runtime.abort);
       setStatus(runtime.abort ? "对话已停止" : "对话已回复", runtime.abort ? "" : "ok");
     } catch (error) {
       if (state.studioRuntime !== runtime) return;
       const stopped = !!runtime.abort;
-      botMsg.content = latest.trim() || (stopped ? "已停止" : String(error?.message || error));
-      botMsg.status = stopped ? "stopped" : "error";
+      appCall("studio.failTurn", botMsg, latest, error, stopped);
       setStatus(stopped ? "对话已停止" : `对话失败：${error?.message || error}`, stopped ? "" : "err");
     } finally {
       if (state.studioRuntime === runtime) {

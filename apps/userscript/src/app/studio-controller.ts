@@ -224,3 +224,32 @@ export function lastAssistantText(messages: readonly StudioMessage[]): string {
   }
   return "";
 }
+
+/** Pure Studio turn state; transport and DOM rendering remain in workbench. */
+export function beginTurn(state: StudioState, text: string, now = Date.now()) {
+  const user: StudioMessage = { id: "u-" + now, role: "user", content: text, status: "done" };
+  const assistant: StudioMessage = { id: "a-" + now, role: "assistant", content: "", status: "running" };
+  state.studioMessages = [...(state.studioMessages || []), user, assistant];
+  return { user, assistant };
+}
+export function updateTurn(assistant: StudioMessage, full: unknown): string {
+  const text = String(full || "");
+  assistant.content = text;
+  return text;
+}
+export function finishTurn(assistant: StudioMessage, latest: string, stopped: boolean): void {
+  assistant.content = latest.trim();
+  assistant.status = stopped ? "stopped" : "done";
+}
+export function failTurn(assistant: StudioMessage, latest: string, error: unknown, stopped: boolean): void {
+  const message = error instanceof Error ? error.message : String(error || "");
+  assistant.content = latest.trim() || (stopped ? "已停止" : message);
+  assistant.status = stopped ? "stopped" : "error";
+}
+export function clearTurnHistory(state: StudioState & { studioLastContextMeta?: unknown }): void {
+  state.studioMessages = [];
+  state.studioMemory = "";
+  state.studioMemoryUntilId = "";
+  state.studioMemoryTurns = 0;
+  state.studioLastContextMeta = null;
+}

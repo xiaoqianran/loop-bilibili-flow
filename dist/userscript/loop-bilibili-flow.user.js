@@ -4263,6 +4263,31 @@ ${prompt2.userPromptTemplate}`
       return index + 1 + ". 问题：" + node.question + "\n   回答摘要：" + (answer || "（尚无回答）");
     }).join("\n");
   }
+  function reconcileNodes(stored, current, busy, visibleAnswer, now = Date.now()) {
+    const recovered = [];
+    const live = busy ? new Map((current || []).filter((node) => node?.status === "running").map((node) => [node.id, node])) : /* @__PURE__ */ new Map();
+    const nodes = (stored || []).map((node) => {
+      const active = live.get(node?.id);
+      if (active) return active;
+      if (!busy && node?.status === "running") {
+        const fixed = {
+          ...node,
+          answer: visibleAnswer(node.answer || node.preview || ""),
+          preview: "",
+          status: "stopped",
+          error: "",
+          updatedAt: now
+        };
+        recovered.push(fixed);
+        return fixed;
+      }
+      return node;
+    }).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+    return { nodes, recovered };
+  }
+  function sortAnchors(anchors) {
+    return [...anchors || []].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+  }
   const WBI_TTL_MS = 6e5;
   const wbiCache = /* @__PURE__ */ new WeakMap();
   const JSON_REQUEST = {
@@ -4743,6 +4768,33 @@ ${prompt2.userPromptTemplate}`
       if (message.role === "assistant" && message.content) return String(message.content);
     }
     return "";
+  }
+  function beginTurn(state2, text, now = Date.now()) {
+    const user = { id: "u-" + now, role: "user", content: text, status: "done" };
+    const assistant = { id: "a-" + now, role: "assistant", content: "", status: "running" };
+    state2.studioMessages = [...state2.studioMessages || [], user, assistant];
+    return { user, assistant };
+  }
+  function updateTurn(assistant, full) {
+    const text = String(full || "");
+    assistant.content = text;
+    return text;
+  }
+  function finishTurn(assistant, latest, stopped) {
+    assistant.content = latest.trim();
+    assistant.status = stopped ? "stopped" : "done";
+  }
+  function failTurn(assistant, latest, error, stopped) {
+    const message = error instanceof Error ? error.message : String(error || "");
+    assistant.content = latest.trim() || (stopped ? "已停止" : message);
+    assistant.status = stopped ? "stopped" : "error";
+  }
+  function clearTurnHistory(state2) {
+    state2.studioMessages = [];
+    state2.studioMemory = "";
+    state2.studioMemoryUntilId = "";
+    state2.studioMemoryTurns = 0;
+    state2.studioLastContextMeta = null;
   }
   const V6_KNOWLEDGE_DB = {
     name: "bili-subbatch-knowledge-v1",
@@ -5374,13 +5426,20 @@ ${prompt2.userPromptTemplate}`
     compressTranscript,
     compactMemoryText,
     refreshMemory,
-    lastAssistantText
+    lastAssistantText,
+    beginTurn,
+    updateTurn,
+    finishTurn,
+    failTurn,
+    clearTurnHistory
   };
   const knowledge = {
     createController,
     selectAnchor,
     ancestorNodes,
     branchContext,
+    reconcileNodes,
+    sortAnchors,
     runAnswer,
     completeAnswer,
     failAnswer,
@@ -15418,19 +15477,15 @@ ${addition}`.trim() };
           knowledgeStoreRequest(KNOWLEDGE_ANCHOR_STORE, "readonly", (s) => s.getAll()),
           knowledgeStoreRequest(KNOWLEDGE_NODE_STORE, "readonly", (s) => s.getAll())
         ]);
-        state2.knowledgeAnchors = (anchors || []).sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
-        const recovered = [];
-        const liveRunning = state2.knowledgeBusy ? new Map((state2.knowledgeNodes || []).filter((node) => node?.status === "running").map((node) => [node.id, node])) : /* @__PURE__ */ new Map();
-        state2.knowledgeNodes = (nodes || []).map((node) => {
-          const live = liveRunning.get(node?.id);
-          if (live) return live;
-          if (!state2.knowledgeBusy && node?.status === "running") {
-            const fixed = { ...node, answer: knowledgeVisibleAnswer(node.answer || node.preview || ""), preview: "", status: "stopped", error: "", updatedAt: Date.now() };
-            recovered.push(fixed);
-            return fixed;
-          }
-          return node;
-        }).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+        state2.knowledgeAnchors = appCall("knowledge.sortAnchors", anchors);
+        const { nodes: reconciledNodes, recovered } = appCall(
+          "knowledge.reconcileNodes",
+          nodes,
+          state2.knowledgeNodes,
+          !!state2.knowledgeBusy,
+          knowledgeVisibleAnswer
+        );
+        state2.knowledgeNodes = reconciledNodes;
         if (recovered.length) Promise.all(recovered.map((node) => knowledgeStoreRequest(KNOWLEDGE_NODE_STORE, "readwrite", (s) => s.put(node)))).catch(() => {
         });
       } catch (error) {
@@ -17369,11 +17424,7 @@ ${p.baseUrl}`.toLocaleLowerCase().includes(q)) : profiles;
       abortStudioRequest();
       state2.studioBusy = false;
       state2.studioRuntime = null;
-      state2.studioMessages = [];
-      state2.studioMemory = "";
-      state2.studioMemoryUntilId = "";
-      state2.studioMemoryTurns = 0;
-      state2.studioLastContextMeta = null;
+      appCall("studio.clearTurnHistory", state2);
       persistStudioChat();
       renderStudioCanvas();
       refreshStudioStopUi();
@@ -17550,9 +17601,7 @@ ${memory}`
         return;
       }
       const route2 = currentRouteVideoRef();
-      const userMsg = { id: `u-${Date.now()}`, role: "user", content: text, status: "done" };
-      const botMsg = { id: `a-${Date.now()}`, role: "assistant", content: "", status: "running" };
-      state2.studioMessages = [...state2.studioMessages || [], userMsg, botMsg];
+      const { user: userMsg, assistant: botMsg } = appCall("studio.beginTurn", state2, text);
       persistStudioChat();
       renderStudioCanvas();
       refreshStudioMemory();
@@ -17605,8 +17654,7 @@ ${memory}
             },
             onDelta(_delta, full) {
               if (state2.studioRuntime !== runtime2) return;
-              latest = String(full || "");
-              botMsg.content = latest;
+              latest = appCall("studio.updateTurn", botMsg, full);
               if (!paintStudioAnswer(botMsg.id, latest, true)) renderStudioCanvas();
             },
             onDone(full) {
@@ -17619,14 +17667,12 @@ ${memory}
           });
         });
         if (state2.studioRuntime !== runtime2) return;
-        botMsg.content = latest.trim();
-        botMsg.status = runtime2.abort ? "stopped" : "done";
+        appCall("studio.finishTurn", botMsg, latest, !!runtime2.abort);
         setStatus(runtime2.abort ? "对话已停止" : "对话已回复", runtime2.abort ? "" : "ok");
       } catch (error) {
         if (state2.studioRuntime !== runtime2) return;
         const stopped = !!runtime2.abort;
-        botMsg.content = latest.trim() || (stopped ? "已停止" : String(error?.message || error));
-        botMsg.status = stopped ? "stopped" : "error";
+        appCall("studio.failTurn", botMsg, latest, error, stopped);
         setStatus(stopped ? "对话已停止" : `对话失败：${error?.message || error}`, stopped ? "" : "err");
       } finally {
         if (state2.studioRuntime === runtime2) {

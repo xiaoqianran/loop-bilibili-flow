@@ -225,6 +225,17 @@ describe("Bundled full-feature workbench source", () => {
     }
   });
 
+  it("delegates Studio turn lifecycle and Knowledge recovery to Application", () => {
+    for (const name of ["beginTurn", "updateTurn", "finishTurn", "failTurn", "clearTurnHistory"]) {
+      expect(maintainedSource).toContain('appCall("studio.' + name + '"');
+    }
+    for (const name of ["sortAnchors", "reconcileNodes"]) {
+      expect(maintainedSource).toContain('"knowledge.' + name + '"');
+    }
+    expect(maintainedSource).not.toContain('const liveRunning = state.knowledgeBusy');
+    expect(maintainedSource).not.toContain('botMsg.status = runtime.abort ?');
+  });
+
   it("delegates migrated acquisition rules to grouped Bilibili APIs", () => {
     expect(maintainedSource).toContain("function bilibiliCall(");
     expect(maintainedSource).toContain('bilibiliCall("video.runtimeView"');

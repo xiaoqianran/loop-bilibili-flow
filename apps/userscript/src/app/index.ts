@@ -82,6 +82,11 @@ export const studio = {
   compactMemoryText: studioController.compactMemoryText,
   refreshMemory: studioController.refreshMemory,
   lastAssistantText: studioController.lastAssistantText,
+  beginTurn: studioController.beginTurn,
+  updateTurn: studioController.updateTurn,
+  finishTurn: studioController.finishTurn,
+  failTurn: studioController.failTurn,
+  clearTurnHistory: studioController.clearTurnHistory,
 } as const;
 
 export const knowledge = {
@@ -89,6 +94,8 @@ export const knowledge = {
   selectAnchor: knowledgeController.selectAnchor,
   ancestorNodes: knowledgeController.ancestorNodes,
   branchContext: knowledgeController.branchContext,
+  reconcileNodes: knowledgeController.reconcileNodes,
+  sortAnchors: knowledgeController.sortAnchors,
   runAnswer: knowledgeController.runAnswer,
   completeAnswer: knowledgeController.completeAnswer,
   failAnswer: knowledgeController.failAnswer,
