@@ -1,4 +1,5 @@
 import * as batchCoordinator from "./ai-batch-coordinator";
+import * as preprocessController from "./preprocess-controller";
 import * as knowledgeController from "./knowledge-controller";
 import * as acquisitionApi from "./acquisition";
 import * as aiController from "./ai-controller";
@@ -30,6 +31,15 @@ export const ai = {
   executeTasks: batchCoordinator.executeTasks,
   request: aiController.request,
   runPool: aiController.runPool,
+} as const;
+
+export const preprocess = {
+  settings: preprocessController.settings,
+  parseTimestamp: preprocessController.parseTimestamp,
+  readingBlocks: preprocessController.readingBlocks,
+  buildPayload: preprocessController.buildPayload,
+  prepareJobs: preprocessController.prepareJobs,
+  runChunkWithRetry: preprocessController.runChunkWithRetry,
 } as const;
 
 export const studio = {

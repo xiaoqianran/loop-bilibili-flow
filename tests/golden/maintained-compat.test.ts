@@ -61,6 +61,13 @@ describe("Maintained full-feature compatibility source", () => {
     const migrated = [
       "scheduleAutoHide",
       "aiSubtitleStat",
+      "buildProcessedSubtitlePayload",
+      "currentPreprocessSettings",
+      "parseProcessedTimestampToken",
+      "processedTranscriptReadingBlocks",
+      "runPreprocessWorkerPool",
+      "requestPreprocessChunkWithRetry",
+      "worker",
       "collectTracks",
       "dmViewSubs",
       "endDrag",

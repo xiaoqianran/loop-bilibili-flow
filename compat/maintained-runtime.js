@@ -8569,52 +8569,6 @@
     refreshStudioStopUi();
   }
 
-  function parseProcessedTimestampToken(token) {
-    const match = String(token || "").match(/^\[(BV[\w]+)\s+P(\d+)\s+(\d{1,2}:\d{2}(?::\d{2})?)\]$/i);
-    if (!match) return null;
-    const parts = match[3].split(":").map(Number);
-    const seconds = parts.length === 3
-      ? parts[0] * 3600 + parts[1] * 60 + parts[2]
-      : parts[0] * 60 + parts[1];
-    return { token: match[0], bvid: match[1], page: Number(match[2]) || 1, clock: match[3], seconds };
-  }
-
-  function processedTranscriptReadingBlocks(text) {
-    const source = String(text || "").replace(/\r\n?/g, "\n").trim();
-    if (!source) return [];
-    const blocks = [];
-    let paragraph = [];
-    let topic = "";
-    const flush = () => {
-      const value = paragraph.join("\n").trim();
-      paragraph = [];
-      if (!value) return;
-      blocks.push({ type: "paragraph", text: value, topic });
-    };
-    for (const rawLine of source.split("\n")) {
-      const line = rawLine.trimEnd();
-      const trimmed = line.trim();
-      if (!trimmed) { flush(); continue; }
-      const sourceMatch = trimmed.match(/^===\s*(.*?)\s*===$/);
-      if (sourceMatch) {
-        flush();
-        blocks.push({ type: "source", text: sourceMatch[1].trim() });
-        topic = "";
-        continue;
-      }
-      const heading = trimmed.match(/^#{1,4}\s+(.+)$/);
-      if (heading) {
-        flush();
-        topic = heading[1].replace(/[*_`]+/g, "").trim();
-        blocks.push({ type: "heading", text: topic });
-        continue;
-      }
-      paragraph.push(line);
-    }
-    flush();
-    return blocks;
-  }
-
   /** Render one preprocess paragraph with the same MD/math/highlight stack as Knowledge. */
   function renderProcessedTranscriptBodyHtml(plain) {
     const source = String(plain || "").trim();
@@ -8624,7 +8578,7 @@
   }
 
   function renderProcessedTranscriptCards(text) {
-    const blocks = processedTranscriptReadingBlocks(text);
+    const blocks = appCall("preprocess.readingBlocks", text);
     if (!blocks.length) return `<pre class="bsb-main-input-preview">${escapeHtml(text)}</pre>`;
     let paragraphIndex = 0;
     let sourceCount = 0;
@@ -8648,7 +8602,7 @@
       let m;
       timestampRe.lastIndex = 0;
       while ((m = timestampRe.exec(block.text))) {
-        const parsed = parseProcessedTimestampToken(m[0]);
+        const parsed = appCall("preprocess.parseTimestamp", m[0]);
         if (parsed) timestamps.push(parsed);
       }
       const clean = block.text.replace(timestampRe, "").replace(/[ \t]+\n/g, "\n").replace(/\n[ \t]+/g, "\n").trim();
@@ -11546,16 +11500,6 @@ body{padding:48px 20px 80px}
     return targets.filter((it) => it.subStatus === "ok" && it.data?.length);
   }
 
-  function currentPreprocessSettings() {
-    return {
-      concurrency: Math.min(8, Math.max(1, Number(state.preprocessConcurrency) || PREPROCESS_DEFAULT_CONCURRENCY)),
-      targetMinutes: Math.min(30, Math.max(2, Number(state.preprocessTargetMinutes) || PREPROCESS_DEFAULT_TARGET_MINUTES)),
-      overlapSeconds: Math.min(120, Math.max(0, Number(state.preprocessOverlapSeconds) || 0)),
-      maxChars: Math.min(60000, Math.max(8000, Number(state.preprocessMaxChars) || PREPROCESS_DEFAULT_MAX_CHARS)),
-      retries: Math.min(4, Math.max(0, Number(state.preprocessRetries) || 0)),
-    };
-  }
-
   function abortPreprocessChildRuntime(runtime) {
     if (!runtime) return;
     runtime.abort = true;
@@ -11596,70 +11540,8 @@ body{padding:48px 20px 80px}
     });
   }
 
-  async function requestPreprocessChunkWithRetry(job, cfg, prompt, settings, workerId) {
-    let lastError = null;
-    for (let attempt = 0; attempt <= settings.retries; attempt++) {
-      if (state.aiAbort || state.preprocessRun?.runtime?.abort) throw new Error("用户停止");
-      const runtime = createAiRuntime(`PRE W${workerId} ${job.item.bvid} ${job.chunkIndex + 1}/${job.chunkCount}`);
-      state.preprocessRun?.childRuntimes?.add(runtime);
-      const vars = {
-        title: job.item.title || "",
-        bvid: `${job.item.bvid || ""}${(job.item.page || 1) > 1 ? ` P${job.item.page}` : ""}`,
-        author: job.item.author || "",
-        subtitle: job.chunk.text,
-        rawSubtitle: job.raw,
-        chunkIndex: job.chunkIndex + 1,
-        chunkCount: job.chunkCount,
-        chunkStart: coreCall("formatClock", job.chunk.chunkStartSec),
-        coreStart: coreCall("formatClock", job.chunk.coreStartSec),
-        chunkEnd: coreCall("formatClock", job.chunk.endSec),
-      };
-      const attemptSuffix = attempt ? ` · 重试 ${attempt}/${settings.retries}` : "";
-      const label = `${job.itemIndex + 1}/${job.itemCount} ${job.item.bvid}${(job.item.page || 1) > 1 ? ` P${job.item.page}` : ""} · 块 ${job.chunkIndex + 1}/${job.chunkCount} · W${workerId}${attemptSuffix}`;
-      try {
-        return await requestPreprocessChunk(runtime, cfg, prompt, vars, label);
-      } catch (error) {
-        lastError = error;
-        if (state.aiAbort || state.preprocessRun?.runtime?.abort || runtime.abort) throw error;
-        if (attempt >= settings.retries) break;
-        if (state.preprocessRun) state.preprocessRun.statusText = `${label} · 失败，准备重试`;
-        await sleep(Math.min(2500, 600 * (attempt + 1)));
-      } finally {
-        state.preprocessRun?.childRuntimes?.delete(runtime);
-        abortPreprocessChildRuntime(runtime);
-      }
-    }
-    throw lastError || new Error("预处理分块失败");
-  }
-
-  async function runPreprocessWorkerPool(jobs, workerCount, handler) {
-    const pool = appFn("ai.runPool");
-    if (pool) {
-      return pool(jobs, workerCount, handler, () =>
-        !!state.aiAbort || !!state.preprocessRun?.runtime?.abort);
-    }
-    let cursor = 0;
-    async function worker(workerId) {
-      while (true) {
-        if (state.aiAbort || state.preprocessRun?.runtime?.abort) throw new Error("用户停止");
-        const index = cursor++;
-        if (index >= jobs.length) return;
-        await handler(jobs[index], workerId);
-      }
-    }
-    const count = Math.min(Math.max(1, workerCount), Math.max(1, jobs.length));
-    await Promise.all(Array.from({ length: count }, (_, i) => worker(i + 1)));
-  }
-
-  function buildProcessedSubtitlePayload(items) {
-    return items.map((it) => {
-      const head = `=== ${it.bvid}${it.page > 1 ? " P" + it.page : ""} ${it.title || ""} ===`;
-      return `${head}\n${String(it.preprocessedText || "").trim()}`;
-    }).join("\n\n");
-  }
-
   async function preprocessItemsForAi(items, prompt, cfg) {
-    const settings = currentPreprocessSettings();
+    const settings = appCall("preprocess.settings", state);
     const runtime = createAiRuntime(`字幕预处理 · ${cfg.name || cfg.model}`); // parent runtime: logical cancel token only
     state.preprocessRun = {
       runtime,
@@ -11681,36 +11563,14 @@ body{padding:48px 20px 80px}
     renderAiResultTabs();
     setAiBusy(true);
 
-    const prepared = [];
-    const jobs = [];
-    let hits = 0;
     try {
-      for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
-        const item = items[itemIndex];
-        const raw = coreCall("cuesToAiText", item.data || [], item.bvid, item.page || 1);
-        const cacheKey = coreCall("preprocessCacheKey", item, raw, prompt, cfg, settings);
-        const cached = state.forcePreprocessOnce ? null : await persistentCacheRead(cacheKey);
-        if (cached?.value?.text) {
-          item.preprocessedText = String(cached.value.text);
-          item.preprocessCacheKey = cacheKey;
-          hits += 1;
-          prepared.push({ item, raw, cacheKey, cached: true, chunks: [], outputs: [] });
-          continue;
-        }
-        const chunks = coreCall("splitCuesForPreprocess", item, settings);
-        const record = { item, raw, cacheKey, cached: false, chunks, outputs: new Array(chunks.length) };
-        prepared.push(record);
-        chunks.forEach((chunk, chunkIndex) => jobs.push({
-          record,
-          item,
-          raw,
-          chunk,
-          chunkIndex,
-          chunkCount: chunks.length,
-          itemIndex,
-          itemCount: items.length,
-        }));
-      }
+      const { prepared, jobs, hits } = await appCall("preprocess.prepareJobs", items, {
+        getRaw: (item) => coreCall("cuesToAiText", item.data || [], item.bvid, item.page || 1),
+        cacheKey: (item, raw) => coreCall("preprocessCacheKey", item, raw, prompt, cfg, settings),
+        readCache: (key) => persistentCacheRead(key),
+        split: (item) => coreCall("splitCuesForPreprocess", item, settings),
+        forceRefresh: state.forcePreprocessOnce,
+      });
 
       state.preprocessRun.cacheHits = hits;
       state.preprocessRun.totalChunks = jobs.length;
@@ -11720,8 +11580,20 @@ body{padding:48px 20px 80px}
       renderAiResultTabs();
 
       if (jobs.length) {
-        await runPreprocessWorkerPool(jobs, settings.concurrency, async (job, workerId) => {
-          const text = await requestPreprocessChunkWithRetry(job, cfg, prompt, settings, workerId);
+        await appCall("ai.runPool", jobs, settings.concurrency, async (job, workerId) => {
+          const text = await appCall("preprocess.runChunkWithRetry", job, settings.retries, workerId, {
+            isCancelled: () => !!state.aiAbort || !!state.preprocessRun?.runtime?.abort,
+            createRuntime: (label) => createAiRuntime(label),
+            register: (child) => state.preprocessRun?.childRuntimes?.add(child),
+            unregister: (child) => state.preprocessRun?.childRuntimes?.delete(child),
+            abort: (child) => abortPreprocessChildRuntime(child),
+            formatClock: (seconds) => coreCall("formatClock", seconds),
+            execute: (child, vars, label) => requestPreprocessChunk(child, cfg, prompt, vars, label),
+            onRetry: (label) => {
+              if (state.preprocessRun) state.preprocessRun.statusText = label + " · 失败，准备重试";
+            },
+            sleep,
+          });
           job.record.outputs[job.chunkIndex] = text;
           if (state.preprocessRun) {
             state.preprocessRun.completedChunks += 1;
@@ -11729,7 +11601,7 @@ body{padding:48px 20px 80px}
             state.preprocessRun.statusText = `分块 ${state.preprocessRun.completedChunks}/${state.preprocessRun.totalChunks} · 并发 ${settings.concurrency}`;
             renderAiResultTabs();
           }
-        });
+        }, () => !!state.aiAbort || !!state.preprocessRun?.runtime?.abort);
       }
 
       for (const record of prepared) {
@@ -11747,7 +11619,7 @@ body{padding:48px 20px 80px}
         }, PREPROCESS_CACHE_TTL_MS).catch(() => {});
       }
 
-      state.preprocessRun.raw = buildProcessedSubtitlePayload(items);
+      state.preprocessRun.raw = appCall("preprocess.buildPayload", items);
       state.preprocessRun.text = state.preprocessRun.raw;
       state.preprocessRun.cacheHits = hits;
       state.preprocessRun.status = "done";
