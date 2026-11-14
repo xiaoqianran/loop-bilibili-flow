@@ -45,36 +45,36 @@ var SubBatch = (function(exports) {
   function videoViewUrl(bvid) {
     return `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`;
   }
-  function record$1(value) {
+  function record$2(value) {
     return value && typeof value === "object" ? value : null;
   }
   function parseRecord(value) {
     if (typeof value === "string") {
       try {
-        return record$1(JSON.parse(value));
+        return record$2(JSON.parse(value));
       } catch {
         return null;
       }
     }
-    return record$1(value);
+    return record$2(value);
   }
   function nested(root, ...keys) {
     let current = root;
     for (const key of keys) {
-      const item = record$1(current);
+      const item = record$2(current);
       if (!item) return void 0;
       current = item[key];
     }
     return current;
   }
   function runtimeVideoView(runtime2, bvid) {
-    const root = record$1(runtime2);
-    const initial = record$1(root?.__INITIAL_STATE__);
+    const root = record$2(runtime2);
+    const initial = record$2(root?.__INITIAL_STATE__);
     const key = String(bvid || "").toUpperCase();
     const candidates = [
-      record$1(initial?.videoData),
-      record$1(initial?.videoInfo),
-      record$1(initial?.epInfo)
+      record$2(initial?.videoData),
+      record$2(initial?.videoInfo),
+      record$2(initial?.epInfo)
     ];
     for (const candidate of candidates) {
       if (!candidate) continue;
@@ -122,7 +122,7 @@ var SubBatch = (function(exports) {
   function normalizeTracks(value) {
     if (!Array.isArray(value)) return [];
     return value.map((track) => {
-      const item = record$1(track) ?? {};
+      const item = record$2(track) ?? {};
       return {
         ...item,
         subtitle_url: normalizeSubtitleUrl(item.subtitle_url)
@@ -130,9 +130,9 @@ var SubBatch = (function(exports) {
     });
   }
   function runtimeSubtitleTracks(runtime2, meta) {
-    const root = record$1(runtime2);
-    const initial = record$1(root?.__INITIAL_STATE__);
-    const initialVideo = record$1(initial?.videoData);
+    const root = record$2(runtime2);
+    const initial = record$2(root?.__INITIAL_STATE__);
+    const initialVideo = record$2(initial?.videoData);
     const roots = [
       root?.__playinfo__,
       root?.__PLAYINFO__,
@@ -401,7 +401,7 @@ var SubBatch = (function(exports) {
       if (/^\/(all|video)\/?$/i.test(path)) {
         const keyword = (url.searchParams.get("keyword") || "").trim() || merged.keyword;
         if (keyword) {
-          const allowed = /* @__PURE__ */ new Set([
+          const allowed2 = /* @__PURE__ */ new Set([
             "totalrank",
             "click",
             "pubdate",
@@ -414,7 +414,7 @@ var SubBatch = (function(exports) {
             type: "search",
             source: "auto",
             keyword,
-            order: allowed.has(order) ? order : "totalrank",
+            order: allowed2.has(order) ? order : "totalrank",
             page: Math.max(
               1,
               Number.parseInt(url.searchParams.get("page") || "1", 10) || 1
@@ -3308,21 +3308,21 @@ ${prompt2.userPromptTemplate}`
     const id = validVideoId(videoId);
     return id ? `https://www.youtube.com/watch?v=${id}` : "";
   }
-  function record(value) {
+  function record$1(value) {
     return value && typeof value === "object" ? value : null;
   }
   function textOf$1(value) {
-    const root = record(value);
+    const root = record$1(value);
     if (!root) return String(value || "").trim();
     const simple = String(root.simpleText || "").trim();
     if (simple) return simple;
     const runs = Array.isArray(root.runs) ? root.runs : [];
-    return runs.map((run) => String(record(run)?.text || "")).join("").trim();
+    return runs.map((run) => String(record$1(run)?.text || "")).join("").trim();
   }
   function videoDetails(response) {
-    const root = record(response);
-    const nested2 = record(root?.playerResponse);
-    const details = record(root?.videoDetails) ?? record(nested2?.videoDetails);
+    const root = record$1(response);
+    const nested2 = record$1(root?.playerResponse);
+    const details = record$1(root?.videoDetails) ?? record$1(nested2?.videoDetails);
     const videoId = String(details?.videoId || "").trim();
     if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return null;
     const title = String(details?.title || "").trim();
@@ -3334,12 +3334,12 @@ ${prompt2.userPromptTemplate}`
     };
   }
   function runtimePlayerResponse(runtime2, expectedVideoId) {
-    const root = record(runtime2);
+    const root = record$1(runtime2);
     if (!root) return null;
     const direct = root.ytInitialPlayerResponse;
-    const ytplayer = record(root.ytplayer);
-    const config = record(ytplayer?.config);
-    const args = record(config?.args);
+    const ytplayer = record$1(root.ytplayer);
+    const config = record$1(ytplayer?.config);
+    const args = record$1(config?.args);
     const candidates = [direct];
     const serialized = args?.player_response;
     if (typeof serialized === "string" && serialized.trim()) {
@@ -3424,13 +3424,13 @@ ${prompt2.userPromptTemplate}`
     return null;
   }
   function captionTracks(response) {
-    const root = record(response);
-    const nested2 = record(root?.playerResponse);
-    const captions = record(root?.captions) ?? record(nested2?.captions);
-    const renderer = record(captions?.playerCaptionsTracklistRenderer);
+    const root = record$1(response);
+    const nested2 = record$1(root?.playerResponse);
+    const captions = record$1(root?.captions) ?? record$1(nested2?.captions);
+    const renderer = record$1(captions?.playerCaptionsTracklistRenderer);
     const tracks = Array.isArray(renderer?.captionTracks) ? renderer.captionTracks : [];
     return tracks.flatMap((value) => {
-      const track = record(value);
+      const track = record$1(value);
       const baseUrl = String(track?.baseUrl || "").trim();
       const languageCode = String(track?.languageCode || "").trim();
       if (!baseUrl || !languageCode) return [];
@@ -3483,14 +3483,14 @@ ${prompt2.userPromptTemplate}`
     }
   }
   function parseJson3Transcript(payload) {
-    const root = record(payload);
+    const root = record$1(payload);
     const events = Array.isArray(root?.events) ? root.events : [];
     const segments = [];
     for (let index = 0; index < events.length; index += 1) {
-      const event = record(events[index]);
+      const event = record$1(events[index]);
       if (!event) continue;
       const pieces = Array.isArray(event.segs) ? event.segs : [];
-      const text = pieces.map((piece) => String(record(piece)?.utf8 || "")).join("").replace(/\s+/g, " ").trim();
+      const text = pieces.map((piece) => String(record$1(piece)?.utf8 || "")).join("").replace(/\s+/g, " ").trim();
       if (!text) continue;
       const startMs = Number(event.tStartMs);
       if (!Number.isFinite(startMs)) continue;
@@ -9848,9 +9848,9 @@ ${prompt2.userPromptTemplate}`
     applyWorkbenchStageUi,
     stageOf
   }, Symbol.toStringTag, { value: "Module" }));
-  const bindings$2 = /* @__PURE__ */ new WeakMap();
-  function bind$2(root, ports) {
-    bindings$2.get(root)?.();
+  const bindings$3 = /* @__PURE__ */ new WeakMap();
+  function bind$3(root, ports) {
+    bindings$3.get(root)?.();
     const input = root.querySelector('[data-role="studio-input"]');
     if (!input) return () => {
     };
@@ -9917,14 +9917,14 @@ ${prompt2.userPromptTemplate}`
       root.removeEventListener("click", onClick, true);
       input.removeEventListener("input", onInput);
       input.removeEventListener("keydown", onKey);
-      if (bindings$2.get(root) === dispose) bindings$2.delete(root);
+      if (bindings$3.get(root) === dispose) bindings$3.delete(root);
     };
-    bindings$2.set(root, dispose);
+    bindings$3.set(root, dispose);
     return dispose;
   }
   const studioInteractionController = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
-    bind: bind$2
+    bind: bind$3
   }, Symbol.toStringTag, { value: "Module" }));
   function formatTime(seconds, withHours = false) {
     const total = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -10282,7 +10282,7 @@ ${prompt2.userPromptTemplate}`
   const CONFIG_LIST = '[data-role="prompt-list"], [data-role="ai-list"]';
   const FLOW_CARD = "[data-flow-task-id]";
   const ACTIVE = ".bsb-config-list-item.dragging, .bsb-config-list-item.drag-over, .bsb-model-rank.dragging, .bsb-model-rank.drag-over";
-  const bindings$1 = /* @__PURE__ */ new WeakMap();
+  const bindings$2 = /* @__PURE__ */ new WeakMap();
   function element(event) {
     const target = event.target;
     return target && typeof target.closest === "function" ? target : null;
@@ -10290,8 +10290,8 @@ ${prompt2.userPromptTemplate}`
   function attr(el, key) {
     return el.dataset[key] || "";
   }
-  function bind$1(root, ports) {
-    bindings$1.get(root)?.();
+  function bind$2(root, ports) {
+    bindings$2.get(root)?.();
     let dragging = null;
     const clear = () => {
       root.querySelectorAll(ACTIVE).forEach((item) => item.classList.remove("dragging", "drag-over"));
@@ -10400,16 +10400,16 @@ ${prompt2.userPromptTemplate}`
       root.removeEventListener("drop", onDrop);
       root.removeEventListener("dragend", onEnd);
       onEnd();
-      if (bindings$1.get(root) === dispose) bindings$1.delete(root);
+      if (bindings$2.get(root) === dispose) bindings$2.delete(root);
     };
-    bindings$1.set(root, dispose);
+    bindings$2.set(root, dispose);
     return dispose;
   }
   const reorderInteraction = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
-    bind: bind$1
+    bind: bind$2
   }, Symbol.toStringTag, { value: "Module" }));
-  const bindings = /* @__PURE__ */ new WeakMap();
+  const bindings$1 = /* @__PURE__ */ new WeakMap();
   function closest(event, selector) {
     const target = event.target;
     return typeof target?.closest === "function" ? target.closest(selector) : null;
@@ -10433,8 +10433,8 @@ ${prompt2.userPromptTemplate}`
       if (timer !== null) clearTimeout(timer);
     };
   }
-  function bind(root, ports) {
-    bindings.get(root)?.();
+  function bind$1(root, ports) {
+    bindings$1.get(root)?.();
     const disposers = [];
     const listen = (target, name, fn, passive = false) => {
       if (!target) return;
@@ -10494,12 +10494,194 @@ ${prompt2.userPromptTemplate}`
     listen(transcript2, "touchmove", () => ports.recordUserScroll(), true);
     const dispose = () => {
       disposers.splice(0).forEach((fn) => fn());
+      if (bindings$1.get(root) === dispose) bindings$1.delete(root);
+    };
+    bindings$1.set(root, dispose);
+    return dispose;
+  }
+  const resourceInteraction = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    bind: bind$1
+  }, Symbol.toStringTag, { value: "Module" }));
+  function record(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+  }
+  function numberOrDefault(value, fallback) {
+    return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  }
+  function allowed(value, options, fallback) {
+    return typeof value === "string" && options.includes(value) ? value : fallback;
+  }
+  function normalizeNoteFont(value, savedDefault, options) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return options.noteFontDefault;
+    const clamped = Math.max(options.noteFontMin, Math.min(options.noteFontMax, n));
+    if (Number(savedDefault) !== options.noteFontDefault && clamped === 17) return options.noteFontDefault;
+    return clamped;
+  }
+  function clampKnowledgeRailWidth(value, panelWidth = 520) {
+    const max = Math.max(300, Math.floor(Number(panelWidth) || 520) - 40);
+    return Math.min(max, Math.max(280, Number(value) || 400));
+  }
+  function clampKnowledgeNavWidth(value, panelWidth = 520, sizePreset = "") {
+    const def = sizePreset === "small" || sizePreset === "medium" ? 240 : 280;
+    const max = Math.max(200, Math.floor((Number(panelWidth) || 520) * 0.48));
+    return Math.min(max, Math.max(200, Number(value) || def));
+  }
+  function defaultUiGeometry(options) {
+    const sizePreset = options.defaultSizePreset;
+    const w = options.presetWidth(sizePreset, options.viewportWidth);
+    const h = options.highHeight(options.viewportHeight);
+    return {
+      x: Math.max(8, options.viewportWidth - w - 16),
+      y: Math.max(8, Math.floor((options.viewportHeight - h) / 2)),
+      w,
+      h,
+      sizePreset,
+      heightMode: "high",
+      dock: null,
+      dockExpanded: false,
+      view: "ai",
+      aiStage: "preprocess",
+      settingsTab: "prompt",
+      promptStage: "preprocess",
+      noteFont: options.noteFontDefault,
+      ctpFlavor: options.defaultFlavor,
+      knowledgeRailW: 400,
+      knowledgeNavW: 280,
+      knowledgeContextOpen: false
+    };
+  }
+  function loadUiGeometry(raw, options) {
+    const defaults = defaultUiGeometry(options);
+    if (!raw) return defaults;
+    try {
+      const saved = record(JSON.parse(raw));
+      const hasPreset = options.isPreset(saved.sizePreset) || saved.sizePreset === "custom";
+      const sizePreset = hasPreset ? String(saved.sizePreset) : options.defaultSizePreset;
+      const heightMode = hasPreset && saved.heightMode === "custom" ? "custom" : "high";
+      const w = options.isPreset(sizePreset) ? options.presetWidth(sizePreset, options.viewportWidth) : Math.max(options.minWidth, Number(saved.w) || defaults.w);
+      const h = heightMode === "high" ? options.highHeight(options.viewportHeight) : Math.max(options.minHeight, Number(saved.h) || defaults.h);
+      return {
+        x: numberOrDefault(saved.x, defaults.x),
+        y: numberOrDefault(saved.y, defaults.y),
+        w,
+        h,
+        sizePreset,
+        heightMode,
+        dock: saved.dock === "left" || saved.dock === "right" ? saved.dock : null,
+        dockExpanded: false,
+        view: allowed(saved.view, ["ai", "subs", "knowledge", "settings"], "ai"),
+        aiStage: allowed(saved.aiStage, ["preprocess", "chat", "postprocess"], "preprocess"),
+        settingsTab: allowed(saved.settingsTab, ["prompt", "llm", "shortcuts", "appearance"], "prompt"),
+        promptStage: allowed(saved.promptStage, ["preprocess", "postprocess", "knowledge"], "preprocess"),
+        noteFont: normalizeNoteFont(saved.noteFont, saved.noteFontDefault, options),
+        ctpFlavor: options.normalizeFlavor(saved.ctpFlavor ?? defaults.ctpFlavor),
+        knowledgeRailW: clampKnowledgeRailWidth(saved.knowledgeRailW ?? defaults.knowledgeRailW, w),
+        // Keep historical width migration. Initial load does not yet have state.ui.
+        knowledgeNavW: clampKnowledgeNavWidth(
+          saved.knowledgeNavW ?? saved.knowledgeListW ?? defaults.knowledgeNavW,
+          w,
+          options.currentSizePreset
+        ),
+        knowledgeContextOpen: saved.knowledgeContextOpen === true
+      };
+    } catch {
+      return defaults;
+    }
+  }
+  function serializeUiGeometry(ui2, options) {
+    return JSON.stringify({
+      x: ui2.x,
+      y: ui2.y,
+      w: ui2.w,
+      h: ui2.h,
+      sizePreset: ui2.sizePreset || options.defaultSizePreset,
+      heightMode: ui2.heightMode === "custom" ? "custom" : "high",
+      dock: ui2.dock,
+      view: ui2.view || "ai",
+      aiStage: ui2.aiStage || "preprocess",
+      settingsTab: ui2.settingsTab || "prompt",
+      promptStage: ui2.promptStage || "preprocess",
+      noteFont: normalizeNoteFont(ui2.noteFont, options.noteFontDefault, options),
+      noteFontDefault: options.noteFontDefault,
+      ctpFlavor: options.normalizeFlavor(ui2.ctpFlavor),
+      knowledgeRailW: clampKnowledgeRailWidth(ui2.knowledgeRailW, ui2.w),
+      knowledgeNavW: clampKnowledgeNavWidth(ui2.knowledgeNavW, ui2.w, options.currentSizePreset),
+      knowledgeContextOpen: ui2.knowledgeContextOpen === true
+    });
+  }
+  const persistence = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    clampKnowledgeNavWidth,
+    clampKnowledgeRailWidth,
+    defaultUiGeometry,
+    loadUiGeometry,
+    normalizeNoteFont,
+    serializeUiGeometry
+  }, Symbol.toStringTag, { value: "Module" }));
+  const bindings = /* @__PURE__ */ new WeakMap();
+  function bind(root, ports, defaults) {
+    bindings.get(root)?.();
+    const disposers = [];
+    const listen = (element2, name, action) => {
+      if (!element2) return;
+      element2.addEventListener(name, action);
+      disposers.push(() => element2.removeEventListener(name, action));
+    };
+    const onValue = (selector, action) => {
+      listen(root.querySelector(selector), "change", (event) => {
+        action(String(event.target?.value || ""));
+      });
+    };
+    const onCheck = (selector, initial, action) => {
+      const input = root.querySelector(selector);
+      if (input) input.checked = initial;
+      listen(input, "change", (event) => {
+        action(Boolean(event.target?.checked));
+      });
+    };
+    const debounceInput2 = (selector, delayMs, action) => {
+      const element2 = root.querySelector(selector);
+      if (!element2) return;
+      let timer = null;
+      const handler = (event) => {
+        const value = String(event.target?.value || "");
+        if (timer !== null) clearTimeout(timer);
+        timer = setTimeout(() => {
+          timer = null;
+          action(value);
+        }, delayMs);
+      };
+      listen(element2, "input", handler);
+      disposers.push(() => {
+        if (timer !== null) clearTimeout(timer);
+      });
+    };
+    root.querySelectorAll("[data-view]").forEach((button) => {
+      listen(button, "click", () => ports.selectWorkspace(button.getAttribute("data-view") || ""));
+    });
+    onValue('[data-role="max-pages"]', (value) => ports.maxPages(Math.max(1, Math.min(100, Number(value) || defaults.maxPages))));
+    onValue('[data-role="delay"]', (value) => ports.delayMs(Math.max(0, Math.min(5e3, Number(value) || defaults.delayMs))));
+    onCheck('[data-role="auto-capture"]', defaults.autoCapture, ports.autoCapture);
+    onCheck('[data-role="auto-analyze"]', defaults.autoAnalyze, ports.autoAnalyze);
+    onCheck('[data-role="player-subtitle"]', defaults.playerSubtitle, ports.playerSubtitle);
+    onValue('[data-role="mode"]', (value) => ports.mode(value || "auto"));
+    onValue('[data-role="prompt-select"]', ports.promptSelect);
+    onCheck('[data-role="preprocess-enabled"]', defaults.preprocessEnabled, ports.preprocessEnabled);
+    onValue('[data-role="preprocess-prompt-select"]', ports.preprocessPrompt);
+    onValue('[data-role="preprocess-model-select"]', ports.preprocessModel);
+    debounceInput2('[data-role="prompt-search"]', 60, ports.promptSearch);
+    debounceInput2('[data-role="ai-search"]', 60, ports.aiSearch);
+    debounceInput2('[data-role="knowledge-search"]', 70, ports.knowledgeSearch);
+    const dispose = () => {
+      disposers.splice(0).forEach((remove) => remove());
       if (bindings.get(root) === dispose) bindings.delete(root);
     };
     bindings.set(root, dispose);
     return dispose;
   }
-  const resourceInteraction = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  const settingsInteraction = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
     bind
   }, Symbol.toStringTag, { value: "Module" }));
@@ -10519,12 +10701,14 @@ ${prompt2.userPromptTemplate}`
     panelGeometry: geometry,
     panelInteraction: interaction,
     panelMarkup: markup$1,
+    panelPersistence: persistence,
     panelPointer: pointerController,
     panelState: state,
     panelStyles: styles,
     readingStyles,
     reorderInteraction,
     resourceInteraction,
+    settingsInteraction,
     settingsStyles,
     studioController,
     studioInteractionController,
@@ -10891,6 +11075,195 @@ ${prompt2.userPromptTemplate}`
       }
     }
     return { read, write, remove, initChannel };
+  }
+  function createWorkbenchState(defaults) {
+    return {
+      open: false,
+      // busy 仅作旧状态栏兼容；真实互斥由 scanBusy / batchBusy 分别管理。
+      busy: false,
+      scanBusy: false,
+      batchBusy: false,
+      scanSeq: 0,
+      batchSeq: 0,
+      cancel: false,
+      // legacy bridge
+      cancelScan: false,
+      cancelBatch: false,
+      scanPaused: false,
+      batchPaused: false,
+      libraryJob: { kind: "", index: 0, total: 0, label: "" },
+      pendingRescan: false,
+      pendingAiSend: false,
+      mode: "auto",
+      // auto | video | selection | user | favorite | collection | search
+      autoCtx: null,
+      ctx: null,
+      items: [],
+      // { bvid, title, author, page, selected, groupType?, groupKey?, … }
+      /** groupKey -> true when folder is collapsed */
+      libraryFolderCollapsed: {},
+      meta: {},
+      delayMs: defaults.delayMs,
+      maxPages: defaults.maxPages,
+      ui: null,
+      // geometry + dock
+      aiFocus: false,
+      // AI 专注阅读：铺满视口并隐藏非阅读控件
+      ai: null,
+      // active/legacy-compatible config
+      aiProfiles: [],
+      // persisted model configurations
+      promptProfiles: [],
+      // user-editable prompt templates (preprocess + postprocess)
+      activePromptId: "",
+      // active postprocess prompt
+      activePrePromptId: "",
+      // active preprocess prompt
+      activeKnowledgePromptId: "",
+      // Knowledge Drill-down prompt
+      preprocessEnabled: defaults.preprocessEnabled,
+      preprocessModelId: defaults.preprocessModelId,
+      preprocessConcurrency: defaults.preprocessConcurrency,
+      preprocessTargetMinutes: defaults.preprocessTargetMinutes,
+      preprocessOverlapSeconds: defaults.preprocessOverlapSeconds,
+      preprocessMaxChars: defaults.preprocessMaxChars,
+      preprocessRetries: defaults.preprocessRetries,
+      preprocessRun: null,
+      // shared subtitle normalization stage for current session
+      studioBusy: false,
+      studioRuntime: null,
+      studioMessages: [],
+      studioMemory: "",
+      studioMemoryUntilId: "",
+      studioMemoryTurns: 0,
+      studioLastContextMeta: null,
+      studioContextPref: "auto",
+      // auto | raw | processed
+      studioModelId: defaults.studioModelId,
+      studioSlashIndex: 0,
+      forcePreprocessOnce: false,
+      aiViewingPreprocess: false,
+      // legacy bridge; v5.8 input preview lives in drawer
+      postTasks: [],
+      // output artifacts: each POST Prompt + selected LLMs
+      aiActiveTaskId: "",
+      // first-level result navigation: output artifact
+      aiDrawer: "",
+      // "flow" | "input" | ""
+      aiInputView: "raw",
+      // raw | processed
+      promptEditorId: "",
+      // settings master-detail current prompt editor
+      aiEditorId: "",
+      // settings master-detail current LLM editor
+      promptSearch: "",
+      aiSearch: "",
+      aiRuns: /* @__PURE__ */ new Map(),
+      // current analysis session: runId -> independent runtime/result
+      aiRunOrder: [],
+      aiActiveRunId: "",
+      aiSessionSeq: 0,
+      // 当前批次已经组装好的共享输入。单模型/全部重新生成直接复用，不重新抓字幕。
+      aiSessionInput: null,
+      aiBusy: false,
+      // true while any model run is active
+      aiAbort: false,
+      // stop-all / subtitle preparation flag
+      aiRaw: "",
+      // active result markdown buffer (legacy rendering bridge)
+      aiXhr: null,
+      // legacy field; model requests use per-run handles
+      aiAbortController: null,
+      // legacy field; model requests use per-run handles
+      aiStickBottom: true,
+      // 仅「跟随模式」时 paint 才改 scrollTop
+      aiUserReading: false,
+      // 用户主动离开底部后锁住，禁止自动回粘
+      aiProgScroll: false,
+      // 程序化滚动中，忽略 scroll 事件回写
+      aiPaintRaf: 0,
+      aiPaintTimer: 0,
+      aiPendingText: "",
+      aiRenderedText: "",
+      aiStreamTextNode: null,
+      renderEpoch: 0,
+      renderLibs: { core: false, highlight: false, mermaid: false, katex: false },
+      mermaidObserver: null,
+      mermaidRenderSeq: 0,
+      mermaidQueue: Promise.resolve(),
+      mermaidRepairing: false,
+      aiSourceBvids: [],
+      autoCaptureEnabled: defaults.autoCaptureEnabled,
+      autoCaptureKey: "",
+      autoCaptureEpoch: 0,
+      autoCaptureTimer: 0,
+      autoCaptureAbortController: null,
+      autoAnalyzeEnabled: defaults.autoAnalyzeEnabled,
+      autoAnalyzeKey: "",
+      autoAnalyzePendingKey: "",
+      autoAnalyzeTimer: 0,
+      aiSessionRouteKey: "",
+      aiSessionRestorePromise: null,
+      aiSessionRestoreKey: "",
+      fastViewCache: /* @__PURE__ */ new Map(),
+      fastTrackCache: /* @__PURE__ */ new Map(),
+      fastSubtitleCache: /* @__PURE__ */ new Map(),
+      fastTrackBodyCache: /* @__PURE__ */ new Map(),
+      transcriptItemKey: "",
+      transcriptItem: null,
+      // 当前阅读字幕独立于扫描列表，扫描合集时不会被覆盖
+      transcriptQuery: "",
+      transcriptFilteredIndexes: null,
+      transcriptActiveCueIndex: -1,
+      transcriptTrackIndex: -1,
+      transcriptAutoFollow: defaults.transcriptAutoFollow,
+      autoEnablePlayerSubtitle: defaults.autoEnablePlayerSubtitle,
+      playerSubtitleOperation: null,
+      transcriptUserScrollUntil: 0,
+      transcriptVideoAbort: null,
+      transcriptSwitchAbort: null,
+      transcriptRenderEpoch: 0,
+      libraryQuery: "",
+      libraryFilter: "all",
+      // all | ok | wait | error | empty
+      captureDrawerOpen: false,
+      knowledgeAnchors: [],
+      knowledgeNodes: [],
+      knowledgeSearch: "",
+      knowledgeActiveAnchorId: "",
+      knowledgeActiveNodeId: "",
+      knowledgeRailOpen: false,
+      knowledgeTreeOpen: false,
+      knowledgeSelection: null,
+      knowledgeBusy: false,
+      knowledgeResetScroll: false,
+      knowledgeRuntime: null,
+      knowledgePaintRaf: 0,
+      knowledgeModelId: defaults.knowledgeModelId,
+      shortcutConfig: defaults.shortcutConfig,
+      shortcutRecordingId: ""
+    };
+  }
+  function isRecord(value) {
+    return value !== null && (typeof value === "object" || typeof value === "function");
+  }
+  function resolveAppMethod(registry, path) {
+    if (!isRecord(registry) || !path) return null;
+    const parts = path.split(".");
+    if (parts.some((part) => !part || part === "__proto__" || part === "constructor" || part === "prototype")) {
+      return null;
+    }
+    let cursor = registry;
+    for (const part of parts) {
+      if (!isRecord(cursor) || !Object.hasOwn(cursor, part)) return null;
+      cursor = cursor[part];
+    }
+    return typeof cursor === "function" ? cursor : null;
+  }
+  function callApp(registry, path, ...args) {
+    const fn = resolveAppMethod(registry, path);
+    if (!fn) throw new Error("Application capability missing: " + path);
+    return fn(...args);
   }
   function mountWorkbench(SubBatch2) {
     const SCRIPT_VERSION = typeof GM_info !== "undefined" && GM_info?.script?.version || "6.10.1";
@@ -11367,13 +11740,6 @@ ${prompt2.userPromptTemplate}`
       const raw = storageGet(PLAYER_SUBTITLE_STORE_KEY, true);
       return ![false, 0, "0", "false", "off"].includes(raw);
     }
-    function debounce(fn, wait = 100) {
-      let timer = 0;
-      return function(...args) {
-        clearTimeout(timer);
-        timer = window.setTimeout(() => fn.apply(this, args), wait);
-      };
-    }
     function lruGet(map, key) {
       if (!map.has(key)) return null;
       const value = map.get(key);
@@ -11787,23 +12153,10 @@ ${prompt2.userPromptTemplate}`
       return fn(...args);
     }
     function appFn(path) {
-      try {
-        const mono = typeof SubBatch2 !== "undefined" ? SubBatch2?.SubBatchMonorepo : null;
-        let value = mono?.app;
-        for (const segment of String(path || "").split(".").filter(Boolean)) {
-          value = value?.[segment];
-        }
-        return typeof value === "function" ? value : null;
-      } catch (_) {
-        return null;
-      }
+      return resolveAppMethod(SubBatch2?.SubBatchMonorepo?.app, path);
     }
     function appCall(path, ...args) {
-      const fn = appFn(path);
-      if (!fn) {
-        throw new Error(`[bili-subbatch] monorepo app API missing "${path}"`);
-      }
-      return fn(...args);
+      return callApp(SubBatch2?.SubBatchMonorepo?.app, path, ...args);
     }
     function runtimeNetwork() {
       try {
@@ -12148,7 +12501,7 @@ ${prompt2.userPromptTemplate}`
         if (/^\/(all|video)\/?$/i.test(path)) {
           const keyword = (u.searchParams.get("keyword") || "").trim() || hints.keyword;
           if (keyword) {
-            const allowed = /* @__PURE__ */ new Set([
+            const allowed2 = /* @__PURE__ */ new Set([
               "totalrank",
               "click",
               "pubdate",
@@ -12165,7 +12518,7 @@ ${prompt2.userPromptTemplate}`
               type: "search",
               source: "auto",
               keyword,
-              order: allowed.has(order) ? order : "totalrank",
+              order: allowed2.has(order) ? order : "totalrank",
               page
             };
           }
@@ -12982,50 +13335,9 @@ ${prompt2.userPromptTemplate}`
         pages
       };
     }
-    const state2 = {
-      open: false,
-      // busy 仅作旧状态栏兼容；真实互斥由 scanBusy / batchBusy 分别管理。
-      busy: false,
-      scanBusy: false,
-      batchBusy: false,
-      scanSeq: 0,
-      batchSeq: 0,
-      cancel: false,
-      // legacy bridge
-      cancelScan: false,
-      cancelBatch: false,
-      scanPaused: false,
-      batchPaused: false,
-      libraryJob: { kind: "", index: 0, total: 0, label: "" },
-      pendingRescan: false,
-      pendingAiSend: false,
-      mode: "auto",
-      // auto | video | selection | user | favorite | collection | search
-      autoCtx: null,
-      ctx: null,
-      items: [],
-      // { bvid, title, author, page, selected, groupType?, groupKey?, … }
-      /** groupKey -> true when folder is collapsed */
-      libraryFolderCollapsed: {},
-      meta: {},
+    const state2 = createWorkbenchState({
       delayMs: DEFAULT_DELAY_MS,
       maxPages: DEFAULT_MAX_PAGES,
-      ui: null,
-      // geometry + dock
-      aiFocus: false,
-      // AI 专注阅读：铺满视口并隐藏非阅读控件
-      ai: null,
-      // active/legacy-compatible config
-      aiProfiles: [],
-      // persisted model configurations
-      promptProfiles: [],
-      // user-editable prompt templates (preprocess + postprocess)
-      activePromptId: "",
-      // active postprocess prompt
-      activePrePromptId: "",
-      // active preprocess prompt
-      activeKnowledgePromptId: "",
-      // Knowledge Drill-down prompt
       preprocessEnabled: loadPreprocessEnabledSetting(),
       preprocessModelId: String(storageGet(PREPROCESS_MODEL_STORE_KEY, "") || ""),
       preprocessConcurrency: loadBoundedNumberSetting(PREPROCESS_CONCURRENCY_STORE_KEY, PREPROCESS_DEFAULT_CONCURRENCY, 1, 8),
@@ -13033,121 +13345,14 @@ ${prompt2.userPromptTemplate}`
       preprocessOverlapSeconds: loadBoundedNumberSetting(PREPROCESS_OVERLAP_SECONDS_STORE_KEY, PREPROCESS_DEFAULT_OVERLAP_SECONDS, 0, 120),
       preprocessMaxChars: loadBoundedNumberSetting(PREPROCESS_MAX_CHARS_STORE_KEY, PREPROCESS_DEFAULT_MAX_CHARS, 8e3, 6e4),
       preprocessRetries: loadBoundedNumberSetting(PREPROCESS_RETRIES_STORE_KEY, PREPROCESS_DEFAULT_RETRIES, 0, 4),
-      preprocessRun: null,
-      // shared subtitle normalization stage for current session
-      studioBusy: false,
-      studioRuntime: null,
-      studioMessages: [],
-      studioMemory: "",
-      studioMemoryUntilId: "",
-      studioMemoryTurns: 0,
-      studioLastContextMeta: null,
-      studioContextPref: "auto",
-      // auto | raw | processed
       studioModelId: String(storageGet(STUDIO_MODEL_STORE_KEY, "") || ""),
-      studioSlashIndex: 0,
-      forcePreprocessOnce: false,
-      aiViewingPreprocess: false,
-      // legacy bridge; v5.8 input preview lives in drawer
-      postTasks: [],
-      // output artifacts: each POST Prompt + selected LLMs
-      aiActiveTaskId: "",
-      // first-level result navigation: output artifact
-      aiDrawer: "",
-      // "flow" | "input" | ""
-      aiInputView: "raw",
-      // raw | processed
-      promptEditorId: "",
-      // settings master-detail current prompt editor
-      aiEditorId: "",
-      // settings master-detail current LLM editor
-      promptSearch: "",
-      aiSearch: "",
-      aiRuns: /* @__PURE__ */ new Map(),
-      // current analysis session: runId -> independent runtime/result
-      aiRunOrder: [],
-      aiActiveRunId: "",
-      aiSessionSeq: 0,
-      // 当前批次已经组装好的共享输入。单模型/全部重新生成直接复用，不重新抓字幕。
-      aiSessionInput: null,
-      aiBusy: false,
-      // true while any model run is active
-      aiAbort: false,
-      // stop-all / subtitle preparation flag
-      aiRaw: "",
-      // active result markdown buffer (legacy rendering bridge)
-      aiXhr: null,
-      // legacy field; model requests use per-run handles
-      aiAbortController: null,
-      // legacy field; model requests use per-run handles
-      aiStickBottom: true,
-      // 仅「跟随模式」时 paint 才改 scrollTop
-      aiUserReading: false,
-      // 用户主动离开底部后锁住，禁止自动回粘
-      aiProgScroll: false,
-      // 程序化滚动中，忽略 scroll 事件回写
-      aiPaintRaf: 0,
-      aiPaintTimer: 0,
-      aiPendingText: "",
-      aiRenderedText: "",
-      aiStreamTextNode: null,
-      renderEpoch: 0,
-      renderLibs: { core: false, highlight: false, mermaid: false, katex: false },
-      mermaidObserver: null,
-      mermaidRenderSeq: 0,
-      mermaidQueue: Promise.resolve(),
-      mermaidRepairing: false,
-      aiSourceBvids: [],
       autoCaptureEnabled: loadAutoCaptureSetting(),
-      autoCaptureKey: "",
-      autoCaptureEpoch: 0,
-      autoCaptureTimer: 0,
-      autoCaptureAbortController: null,
       autoAnalyzeEnabled: loadAutoAnalyzeSetting(),
-      autoAnalyzeKey: "",
-      autoAnalyzePendingKey: "",
-      autoAnalyzeTimer: 0,
-      aiSessionRouteKey: "",
-      aiSessionRestorePromise: null,
-      aiSessionRestoreKey: "",
-      fastViewCache: /* @__PURE__ */ new Map(),
-      fastTrackCache: /* @__PURE__ */ new Map(),
-      fastSubtitleCache: /* @__PURE__ */ new Map(),
-      fastTrackBodyCache: /* @__PURE__ */ new Map(),
-      transcriptItemKey: "",
-      transcriptItem: null,
-      // 当前阅读字幕独立于扫描列表，扫描合集时不会被覆盖
-      transcriptQuery: "",
-      transcriptFilteredIndexes: null,
-      transcriptActiveCueIndex: -1,
-      transcriptTrackIndex: -1,
       transcriptAutoFollow: loadTranscriptFollowSetting(),
       autoEnablePlayerSubtitle: loadPlayerSubtitleSetting(),
-      playerSubtitleOperation: null,
-      transcriptUserScrollUntil: 0,
-      transcriptVideoAbort: null,
-      transcriptSwitchAbort: null,
-      transcriptRenderEpoch: 0,
-      libraryQuery: "",
-      libraryFilter: "all",
-      // all | ok | wait | error | empty
-      captureDrawerOpen: false,
-      knowledgeAnchors: [],
-      knowledgeNodes: [],
-      knowledgeSearch: "",
-      knowledgeActiveAnchorId: "",
-      knowledgeActiveNodeId: "",
-      knowledgeRailOpen: false,
-      knowledgeTreeOpen: false,
-      knowledgeSelection: null,
-      knowledgeBusy: false,
-      knowledgeResetScroll: false,
-      knowledgeRuntime: null,
-      knowledgePaintRaf: 0,
       knowledgeModelId: String(storageGet(KNOWLEDGE_MODEL_STORE_KEY, "") || ""),
-      shortcutConfig: loadShortcutSettings(),
-      shortcutRecordingId: ""
-    };
+      shortcutConfig: loadShortcutSettings()
+    });
     function isPanelSizePreset2(value) {
       return panelGeometryCall("isPanelSizePreset", value);
     }
@@ -13172,47 +13377,33 @@ ${prompt2.userPromptTemplate}`
     function panelSizeClassFromWidth2(width, viewportWidth = window.innerWidth) {
       return panelGeometryCall("panelSizeClassFromWidth", width, viewportWidth);
     }
-    function defaultUiGeom() {
-      const sizePreset = DEFAULT_PANEL_SIZE2;
-      const w = panelPresetWidth2(sizePreset);
-      const h = highPanelHeight2();
+    function panelPersistenceOptions() {
       return {
-        x: Math.max(8, window.innerWidth - w - 16),
-        y: Math.max(8, Math.floor((window.innerHeight - h) / 2)),
-        w,
-        h,
-        sizePreset,
-        heightMode: "high",
-        // high：随视口保持约 90vh；手动上下拖动后变 custom
-        dock: null,
-        // null | 'left' | 'right'
-        dockExpanded: false,
-        view: "ai",
-        // ai | subs | knowledge | settings
-        aiStage: "preprocess",
-        // preprocess | chat | postprocess
-        settingsTab: "prompt",
-        // prompt | llm | shortcuts | appearance
-        promptStage: "preprocess",
-        // preprocess | postprocess | knowledge
-        noteFont: NOTE_FONT_DEFAULT,
-        ctpFlavor: DEFAULT_CTP_FLAVOR,
-        // latte | frappe | macchiato | mocha
-        // Knowledge layout: AI rail width + workspace Navigator width only.
-        knowledgeRailW: 400,
-        knowledgeNavW: 280,
-        knowledgeContextOpen: false
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        defaultSizePreset: DEFAULT_PANEL_SIZE2,
+        defaultFlavor: DEFAULT_CTP_FLAVOR,
+        noteFontDefault: NOTE_FONT_DEFAULT,
+        noteFontMin: NOTE_FONT_MIN,
+        noteFontMax: NOTE_FONT_MAX,
+        minWidth: MIN_W,
+        minHeight: MIN_H,
+        currentSizePreset: String(state2.ui?.sizePreset || ""),
+        presetWidth: panelPresetWidth2,
+        highHeight: highPanelHeight2,
+        isPreset: isPanelSizePreset2,
+        normalizeFlavor: normalizeCtpFlavor
       };
     }
     function clampKnowledgeRailW(value, panelWidth = state2.ui?.w || 520) {
-      const max = Math.max(300, Math.floor(Number(panelWidth) || 520) - 40);
-      return Math.min(max, Math.max(280, Number(value) || 400));
+      return SubBatch2.SubBatchMonorepo.ui.panelPersistence.clampKnowledgeRailWidth(value, panelWidth);
     }
     function clampKnowledgeNavW(value, panelWidth = state2.ui?.w || 520) {
-      const size = String(state2.ui?.sizePreset || "");
-      const def = size === "small" ? 240 : size === "medium" ? 240 : 280;
-      const max = Math.max(200, Math.floor((Number(panelWidth) || 520) * 0.48));
-      return Math.min(max, Math.max(200, Number(value) || def));
+      return SubBatch2.SubBatchMonorepo.ui.panelPersistence.clampKnowledgeNavWidth(
+        value,
+        panelWidth,
+        String(state2.ui?.sizePreset || "")
+      );
     }
     function applyKnowledgeLayoutVars(root = document.getElementById(PANEL_ID)) {
       if (!root || !state2.ui) return;
@@ -13225,76 +13416,30 @@ ${prompt2.userPromptTemplate}`
       root.style.setProperty("--bsb-knowledge-nav-w", `${navW}px`);
       root.dataset.panelView = state2.ui.view || "ai";
     }
-    function normalizeNoteFont(value, savedDefault) {
-      const n = Number(value);
-      if (!Number.isFinite(n)) return NOTE_FONT_DEFAULT;
-      const clamped = Math.max(NOTE_FONT_MIN, Math.min(NOTE_FONT_MAX, n));
-      if (Number(savedDefault) !== NOTE_FONT_DEFAULT && clamped === 17) return NOTE_FONT_DEFAULT;
-      return clamped;
+    function normalizeNoteFont2(value, savedDefault) {
+      return SubBatch2.SubBatchMonorepo.ui.panelPersistence.normalizeNoteFont(
+        value,
+        savedDefault,
+        panelPersistenceOptions()
+      );
     }
     function loadUiGeom() {
       try {
-        const raw = localStorage.getItem(UI_STORE_KEY);
-        if (!raw) return defaultUiGeom();
-        const o = JSON.parse(raw);
-        const d = defaultUiGeom();
-        const hasPreset = isPanelSizePreset2(o.sizePreset) || o.sizePreset === "custom";
-        const sizePreset = hasPreset ? o.sizePreset : DEFAULT_PANEL_SIZE2;
-        const heightMode = hasPreset && o.heightMode === "custom" ? "custom" : "high";
-        const w = isPanelSizePreset2(sizePreset) ? panelPresetWidth2(sizePreset) : Math.max(MIN_W, Number(o.w) || d.w);
-        const h = heightMode === "high" ? highPanelHeight2() : Math.max(MIN_H, Number(o.h) || d.h);
-        return {
-          x: Number.isFinite(o.x) ? o.x : d.x,
-          y: Number.isFinite(o.y) ? o.y : d.y,
-          w,
-          h,
-          sizePreset,
-          heightMode,
-          dock: o.dock === "left" || o.dock === "right" ? o.dock : null,
-          dockExpanded: false,
-          view: ["ai", "subs", "knowledge", "settings"].includes(o.view) ? o.view : "ai",
-          aiStage: ["preprocess", "chat", "postprocess"].includes(o.aiStage) ? o.aiStage : "preprocess",
-          settingsTab: ["prompt", "llm", "shortcuts", "appearance"].includes(o.settingsTab) ? o.settingsTab : "prompt",
-          promptStage: ["preprocess", "postprocess", "knowledge"].includes(o.promptStage) ? o.promptStage : "preprocess",
-          noteFont: normalizeNoteFont(o.noteFont, o.noteFontDefault),
-          ctpFlavor: normalizeCtpFlavor(o.ctpFlavor ?? d.ctpFlavor),
-          knowledgeRailW: clampKnowledgeRailW(o.knowledgeRailW ?? d.knowledgeRailW, w),
-          // Migrate old list width → navigator width if present.
-          knowledgeNavW: clampKnowledgeNavW(
-            o.knowledgeNavW ?? o.knowledgeListW ?? d.knowledgeNavW,
-            w
-          ),
-          knowledgeContextOpen: o.knowledgeContextOpen === true
-        };
+        return SubBatch2.SubBatchMonorepo.ui.panelPersistence.loadUiGeometry(
+          localStorage.getItem(UI_STORE_KEY),
+          panelPersistenceOptions()
+        );
       } catch (_) {
-        return defaultUiGeom();
+        return SubBatch2.SubBatchMonorepo.ui.panelPersistence.defaultUiGeometry(panelPersistenceOptions());
       }
     }
     function saveUiGeom() {
       if (!state2.ui) return;
       try {
-        localStorage.setItem(
-          UI_STORE_KEY,
-          JSON.stringify({
-            x: state2.ui.x,
-            y: state2.ui.y,
-            w: state2.ui.w,
-            h: state2.ui.h,
-            sizePreset: state2.ui.sizePreset || DEFAULT_PANEL_SIZE2,
-            heightMode: state2.ui.heightMode === "custom" ? "custom" : "high",
-            dock: state2.ui.dock,
-            view: state2.ui.view || "ai",
-            aiStage: state2.ui.aiStage || "preprocess",
-            settingsTab: state2.ui.settingsTab || "prompt",
-            promptStage: state2.ui.promptStage || "preprocess",
-            noteFont: normalizeNoteFont(state2.ui.noteFont, 14),
-            noteFontDefault: NOTE_FONT_DEFAULT,
-            ctpFlavor: normalizeCtpFlavor(state2.ui.ctpFlavor),
-            knowledgeRailW: clampKnowledgeRailW(state2.ui.knowledgeRailW, state2.ui.w),
-            knowledgeNavW: clampKnowledgeNavW(state2.ui.knowledgeNavW, state2.ui.w),
-            knowledgeContextOpen: state2.ui.knowledgeContextOpen === true
-          })
-        );
+        localStorage.setItem(UI_STORE_KEY, SubBatch2.SubBatchMonorepo.ui.panelPersistence.serializeUiGeometry(
+          state2.ui,
+          panelPersistenceOptions()
+        ));
       } catch (_) {
       }
     }
@@ -13328,7 +13473,7 @@ ${prompt2.userPromptTemplate}`
       const ui2 = clampUiToViewport(state2.ui);
       const panelSizeClass = isPanelSizePreset2(ui2.sizePreset) ? ui2.sizePreset : panelSizeClassFromWidth2(ui2.w);
       root.setAttribute("data-panel-size", panelSizeClass);
-      root.style.setProperty("--bsb-note-font", `${normalizeNoteFont(ui2.noteFont, NOTE_FONT_DEFAULT)}px`);
+      root.style.setProperty("--bsb-note-font", `${normalizeNoteFont2(ui2.noteFont, NOTE_FONT_DEFAULT)}px`);
       root.querySelectorAll('[data-act="panel-size"]').forEach((button) => {
         const active = isPanelSizePreset2(ui2.sizePreset) && button.dataset.size === ui2.sizePreset;
         button.classList.toggle("active", active);
@@ -13511,22 +13656,18 @@ ${prompt2.userPromptTemplate}`
       bindPanelChrome(root);
       bindKnowledgeLayoutInteractions(root);
       applyKnowledgeLayoutVars(root);
-      root.querySelectorAll("[data-view]").forEach((btn) => {
-        btn.addEventListener("click", () => setWorkspace(btn.getAttribute("data-view")));
-      });
-      root.querySelector('[data-role="max-pages"]').addEventListener("change", (e) => {
-        state2.maxPages = Math.max(1, Math.min(100, Number(e.target.value) || DEFAULT_MAX_PAGES));
-      });
-      root.querySelector('[data-role="delay"]').addEventListener("change", (e) => {
-        state2.delayMs = Math.max(0, Math.min(5e3, Number(e.target.value) || DEFAULT_DELAY_MS));
-      });
-      const autoCaptureInput = root.querySelector('[data-role="auto-capture"]');
-      if (autoCaptureInput) {
-        autoCaptureInput.checked = state2.autoCaptureEnabled;
-        autoCaptureInput.addEventListener("change", (e) => {
-          state2.autoCaptureEnabled = !!e.target.checked;
-          saveAutoCaptureSetting(state2.autoCaptureEnabled);
-          if (state2.autoCaptureEnabled) {
+      SubBatch2.SubBatchMonorepo.ui.settingsInteraction.bind(root, {
+        selectWorkspace: (view2) => setWorkspace(view2),
+        maxPages: (value) => {
+          state2.maxPages = value;
+        },
+        delayMs: (value) => {
+          state2.delayMs = value;
+        },
+        autoCapture: (enabled) => {
+          state2.autoCaptureEnabled = enabled;
+          saveAutoCaptureSetting(enabled);
+          if (enabled) {
             setStatus("已开启：打开视频自动抓字幕");
             scheduleAutoCapture("setting-enabled", 0);
           } else {
@@ -13534,17 +13675,13 @@ ${prompt2.userPromptTemplate}`
             clearTimeout(state2.autoCaptureTimer);
             setStatus("已关闭自动抓取；仍可手动扫描", "ok");
           }
-        });
-      }
-      const autoAnalyzeInput = root.querySelector('[data-role="auto-analyze"]');
-      if (autoAnalyzeInput) {
-        autoAnalyzeInput.checked = state2.autoAnalyzeEnabled;
-        autoAnalyzeInput.addEventListener("change", (e) => {
-          state2.autoAnalyzeEnabled = !!e.target.checked;
-          saveAutoAnalyzeSetting(state2.autoAnalyzeEnabled);
+        },
+        autoAnalyze: (enabled) => {
+          state2.autoAnalyzeEnabled = enabled;
+          saveAutoAnalyzeSetting(enabled);
           clearTimeout(state2.autoAnalyzeTimer);
           state2.autoAnalyzePendingKey = "";
-          if (state2.autoAnalyzeEnabled) {
+          if (enabled) {
             state2.autoAnalyzeKey = "";
             const item = currentTranscriptItem();
             if (item?.subStatus === "ok" && item.data?.length) {
@@ -13555,65 +13692,62 @@ ${prompt2.userPromptTemplate}`
           } else {
             setStatus("已关闭自动分析；仍可点击“开始分析”", "ok");
           }
-        });
-      }
-      const playerSubtitleInput = root.querySelector('[data-role="player-subtitle"]');
-      if (playerSubtitleInput) {
-        playerSubtitleInput.checked = state2.autoEnablePlayerSubtitle;
-        playerSubtitleInput.addEventListener("change", (e) => {
-          state2.autoEnablePlayerSubtitle = !!e.target.checked;
-          storageSet(PLAYER_SUBTITLE_STORE_KEY, state2.autoEnablePlayerSubtitle ? "true" : "false");
-          if (state2.autoEnablePlayerSubtitle) enablePlayerSubtitle(currentTranscriptItem()).catch(() => {
+        },
+        playerSubtitle: (enabled) => {
+          state2.autoEnablePlayerSubtitle = enabled;
+          storageSet(PLAYER_SUBTITLE_STORE_KEY, enabled ? "true" : "false");
+          if (enabled) enablePlayerSubtitle(currentTranscriptItem()).catch(() => {
           });
-        });
-      }
-      root.querySelector('[data-role="mode"]').addEventListener("change", (e) => {
-        state2.mode = e.target.value || "auto";
-        refreshContextUI();
-        setStatus(
-          state2.mode === "auto" ? "已切回自动识别（默认偏单个视频）" : `已手动指定：${TYPE_LABEL[state2.mode] || state2.mode}`
-        );
-      });
-      const promptSel = root.querySelector('[data-role="prompt-select"]');
-      if (promptSel) {
-        promptSel.addEventListener("change", (e) => {
-          const activeId = String(e.target.value || "");
+        },
+        mode: (value) => {
+          state2.mode = value;
+          refreshContextUI();
+          setStatus(value === "auto" ? "已切回自动识别（默认偏单个视频）" : "已手动指定：" + (TYPE_LABEL[value] || value));
+        },
+        promptSelect: (activeId) => {
           savePromptProfilesFromForm({ activeId });
           updatePromptUi(root, getActivePromptProfile());
-          setStatus(activeId ? `提示词：${getActivePromptProfile()?.name || "未命名"}` : "当前没有提示词", activeId ? "ok" : "err");
-        });
-      }
-      const preprocessToggle = root.querySelector('[data-role="preprocess-enabled"]');
-      if (preprocessToggle) {
-        preprocessToggle.checked = !!state2.preprocessEnabled;
-        preprocessToggle.addEventListener("change", (e) => {
-          state2.preprocessEnabled = !!e.target.checked;
-          savePreprocessEnabledSetting(state2.preprocessEnabled);
+          setStatus(activeId ? "提示词：" + (getActivePromptProfile()?.name || "未命名") : "当前没有提示词", activeId ? "ok" : "err");
+        },
+        preprocessEnabled: (enabled) => {
+          state2.preprocessEnabled = enabled;
+          savePreprocessEnabledSetting(enabled);
           refreshPromptSelector(root);
           refreshPreprocessModelSelector(root);
-          setStatus(state2.preprocessEnabled ? "字幕预处理已开启" : "字幕预处理已关闭：后处理将直接使用原始字幕", "ok");
-        });
-      }
-      root.querySelector('[data-role="preprocess-prompt-select"]')?.addEventListener("change", (e) => {
-        const id = String(e.target.value || "");
-        savePromptProfilesFromForm({ activeId: state2.activePromptId });
-        savePromptProfiles(state2.promptProfiles, state2.activePromptId, id);
-        setStatus(`预处理 Prompt：${getActivePreprocessPromptProfile()?.name || "未命名"}`, "ok");
+          setStatus(enabled ? "字幕预处理已开启" : "字幕预处理已关闭：后处理将直接使用原始字幕", "ok");
+        },
+        preprocessPrompt: (id) => {
+          savePromptProfilesFromForm({ activeId: state2.activePromptId });
+          savePromptProfiles(state2.promptProfiles, state2.activePromptId, id);
+          setStatus("预处理 Prompt：" + (getActivePreprocessPromptProfile()?.name || "未命名"), "ok");
+        },
+        preprocessModel: (id) => {
+          state2.preprocessModelId = id;
+          storageSet(PREPROCESS_MODEL_STORE_KEY, id);
+          const cfg = getPreprocessModelConfig();
+          setStatus("预处理模型：" + (cfg?.name || cfg?.model || "未选择"), cfg ? "ok" : "err");
+        },
+        promptSearch: (value) => {
+          state2.promptSearch = value;
+          renderPromptList(root);
+        },
+        aiSearch: (value) => {
+          state2.aiSearch = value;
+          renderAiList(root);
+        },
+        knowledgeSearch: (value) => {
+          state2.knowledgeSearch = value;
+          renderKnowledgeWorkspace().catch(() => {
+          });
+        }
+      }, {
+        maxPages: DEFAULT_MAX_PAGES,
+        delayMs: DEFAULT_DELAY_MS,
+        autoCapture: !!state2.autoCaptureEnabled,
+        autoAnalyze: !!state2.autoAnalyzeEnabled,
+        playerSubtitle: !!state2.autoEnablePlayerSubtitle,
+        preprocessEnabled: !!state2.preprocessEnabled
       });
-      root.querySelector('[data-role="preprocess-model-select"]')?.addEventListener("change", (e) => {
-        state2.preprocessModelId = String(e.target.value || "");
-        storageSet(PREPROCESS_MODEL_STORE_KEY, state2.preprocessModelId);
-        const cfg = getPreprocessModelConfig();
-        setStatus(`预处理模型：${cfg?.name || cfg?.model || "未选择"}`, cfg ? "ok" : "err");
-      });
-      root.querySelector('[data-role="prompt-search"]')?.addEventListener("input", debounce((e) => {
-        state2.promptSearch = String(e.target.value || "");
-        renderPromptList(root);
-      }, 60));
-      root.querySelector('[data-role="ai-search"]')?.addEventListener("input", debounce((e) => {
-        state2.aiSearch = String(e.target.value || "");
-        renderAiList(root);
-      }, 60));
       SubBatch2.SubBatchMonorepo.ui.reorderInteraction.bind(root, {
         reorderConfig: commitConfigListReorder,
         reorderFlow: commitFlowModelReorder
@@ -13632,11 +13766,6 @@ ${prompt2.userPromptTemplate}`
         exportChat: studioExportChat,
         onError: (error) => setStatus(`对话失败：${error?.message || error}`, "err")
       });
-      root.querySelector('[data-role="knowledge-search"]')?.addEventListener("input", debounce((e) => {
-        state2.knowledgeSearch = String(e.target.value || "");
-        renderKnowledgeWorkspace().catch(() => {
-        });
-      }, 70));
       root.addEventListener("mouseup", (e) => {
         if (e.target.closest?.('[data-role="knowledge-selection-toolbar"], [data-role="knowledge-rail"]')) return;
         setTimeout(captureKnowledgeSelection, 0);
@@ -15397,7 +15526,7 @@ ${prompt2.userPromptTemplate}`
       }
       if (act === "ai-font-dec" || act === "ai-font-inc") {
         const delta = act === "ai-font-inc" ? 1 : -1;
-        const current = normalizeNoteFont(state2.ui?.noteFont, NOTE_FONT_DEFAULT);
+        const current = normalizeNoteFont2(state2.ui?.noteFont, NOTE_FONT_DEFAULT);
         const next = Math.max(NOTE_FONT_MIN, Math.min(NOTE_FONT_MAX, current + delta));
         if (state2.ui) state2.ui.noteFont = next;
         ensurePanel().style.setProperty("--bsb-note-font", `${next}px`);

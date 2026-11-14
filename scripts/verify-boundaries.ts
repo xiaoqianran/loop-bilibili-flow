@@ -1,3 +1,5 @@
+import * as applicationRegistry from "../apps/userscript/src/app";
+import { resolveAppMethod } from "../apps/userscript/src/runtime/app-bridge";
 import { readdir, readFile } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
 
@@ -95,6 +97,17 @@ async function main(): Promise<void> {
       if (source.split("\n").some(line => line.trim().startsWith("// @ts-nocheck"))) {
         violations.push(relative(root, file) + ": disabling TypeScript is forbidden outside workbench/runtime.ts");
       }
+    }
+  }
+
+  // Fail fast when any workbench Application capability has been renamed or deleted.
+  const workbenchSource = await readFile(join(root, "apps", "userscript", "src", "workbench", "runtime.ts"), "utf8");
+  const literalAppMethods = [...workbenchSource.matchAll(/\b(?:appCall|appFn)\(\s*["']([^"']+)["']/g)]
+    .map(match => match[1])
+    .filter((path): path is string => Boolean(path));
+  for (const path of new Set(literalAppMethods)) {
+    if (!resolveAppMethod(applicationRegistry, path)) {
+      violations.push("workbench Application API path does not exist: " + path);
     }
   }
 

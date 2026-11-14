@@ -29,3 +29,5 @@ export * as knowledgeReader from "./workspaces/knowledge-reader-controller";
 export * as knowledgeAnswerView from "./workspaces/knowledge-answer-view";
 export * as reorderInteraction from "./workspaces/reorder-interaction";
 export * as resourceInteraction from "./workspaces/resource-interaction";
+export * as panelPersistence from "./shell/persistence";
+export * as settingsInteraction from "./workspaces/settings-interaction";

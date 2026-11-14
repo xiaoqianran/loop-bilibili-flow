@@ -74,6 +74,9 @@
 
 import { readSessionCache, writeSessionCache } from "../runtime/session-cache";
 import { createPersistentCache } from "../runtime/persistent-cache";
+import { createWorkbenchState } from "../runtime/workbench-state";
+import { callApp, resolveAppMethod } from "../runtime/app-bridge";
+import type { AppMethodPath, AppMethodArgs, AppMethodResult } from "../runtime/app-bridge";
 
 export function mountWorkbench(SubBatch) {
   "use strict";
@@ -1049,24 +1052,11 @@ export function mountWorkbench(SubBatch) {
     return fn(...args);
   }
   function appFn(path) {
-    try {
-      const mono = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo : null;
-      let value = mono?.app;
-      for (const segment of String(path || "").split(".").filter(Boolean)) {
-        value = value?.[segment];
-      }
-      return typeof value === "function" ? value : null;
-    } catch (_) {
-      return null;
-    }
+    return resolveAppMethod(SubBatch?.SubBatchMonorepo?.app, path);
   }
 
-  function appCall(path, ...args) {
-    const fn = appFn(path);
-    if (!fn) {
-      throw new Error(`[bili-subbatch] monorepo app API missing "${path}"`);
-    }
-    return fn(...args);
+  function appCall<P extends AppMethodPath>(path: P, ...args: AppMethodArgs<P>): AppMethodResult<P> {
+    return callApp(SubBatch?.SubBatchMonorepo?.app, path, ...args);
   }
 
   function runtimeNetwork() {
@@ -2432,39 +2422,9 @@ export function mountWorkbench(SubBatch) {
   }
 
   // ─── state ──────────────────────────────────────────────────────────────
-  const state = {
-    open: false,
-    // busy 仅作旧状态栏兼容；真实互斥由 scanBusy / batchBusy 分别管理。
-    busy: false,
-    scanBusy: false,
-    batchBusy: false,
-    scanSeq: 0,
-    batchSeq: 0,
-    cancel: false, // legacy bridge
-    cancelScan: false,
-    cancelBatch: false,
-    scanPaused: false,
-    batchPaused: false,
-    libraryJob: { kind: "", index: 0, total: 0, label: "" },
-    pendingRescan: false,
-    pendingAiSend: false,
-    mode: "auto", // auto | video | selection | user | favorite | collection | search
-    autoCtx: null,
-    ctx: null,
-    items: [], // { bvid, title, author, page, selected, groupType?, groupKey?, … }
-    /** groupKey -> true when folder is collapsed */
-    libraryFolderCollapsed: {},
-    meta: {},
+  const state = createWorkbenchState({
     delayMs: DEFAULT_DELAY_MS,
     maxPages: DEFAULT_MAX_PAGES,
-    ui: null, // geometry + dock
-    aiFocus: false, // AI 专注阅读：铺满视口并隐藏非阅读控件
-    ai: null, // active/legacy-compatible config
-    aiProfiles: [], // persisted model configurations
-    promptProfiles: [], // user-editable prompt templates (preprocess + postprocess)
-    activePromptId: "", // active postprocess prompt
-    activePrePromptId: "", // active preprocess prompt
-    activeKnowledgePromptId: "", // Knowledge Drill-down prompt
     preprocessEnabled: loadPreprocessEnabledSetting(),
     preprocessModelId: String(storageGet(PREPROCESS_MODEL_STORE_KEY, "") || ""),
     preprocessConcurrency: loadBoundedNumberSetting(PREPROCESS_CONCURRENCY_STORE_KEY, PREPROCESS_DEFAULT_CONCURRENCY, 1, 8),
@@ -2472,101 +2432,14 @@ export function mountWorkbench(SubBatch) {
     preprocessOverlapSeconds: loadBoundedNumberSetting(PREPROCESS_OVERLAP_SECONDS_STORE_KEY, PREPROCESS_DEFAULT_OVERLAP_SECONDS, 0, 120),
     preprocessMaxChars: loadBoundedNumberSetting(PREPROCESS_MAX_CHARS_STORE_KEY, PREPROCESS_DEFAULT_MAX_CHARS, 8000, 60000),
     preprocessRetries: loadBoundedNumberSetting(PREPROCESS_RETRIES_STORE_KEY, PREPROCESS_DEFAULT_RETRIES, 0, 4),
-    preprocessRun: null, // shared subtitle normalization stage for current session
-    studioBusy: false,
-    studioRuntime: null,
-    studioMessages: [],
-    studioMemory: "",
-    studioMemoryUntilId: "",
-    studioMemoryTurns: 0,
-    studioLastContextMeta: null,
-    studioContextPref: "auto", // auto | raw | processed
     studioModelId: String(storageGet(STUDIO_MODEL_STORE_KEY, "") || ""),
-    studioSlashIndex: 0,
-    forcePreprocessOnce: false,
-    aiViewingPreprocess: false, // legacy bridge; v5.8 input preview lives in drawer
-    postTasks: [], // output artifacts: each POST Prompt + selected LLMs
-    aiActiveTaskId: "", // first-level result navigation: output artifact
-    aiDrawer: "", // "flow" | "input" | ""
-    aiInputView: "raw", // raw | processed
-    promptEditorId: "", // settings master-detail current prompt editor
-    aiEditorId: "", // settings master-detail current LLM editor
-    promptSearch: "",
-    aiSearch: "",
-    aiRuns: new Map(), // current analysis session: runId -> independent runtime/result
-    aiRunOrder: [],
-    aiActiveRunId: "",
-    aiSessionSeq: 0,
-    // 当前批次已经组装好的共享输入。单模型/全部重新生成直接复用，不重新抓字幕。
-    aiSessionInput: null,
-    aiBusy: false, // true while any model run is active
-    aiAbort: false, // stop-all / subtitle preparation flag
-    aiRaw: "", // active result markdown buffer (legacy rendering bridge)
-    aiXhr: null, // legacy field; model requests use per-run handles
-    aiAbortController: null, // legacy field; model requests use per-run handles
-    aiStickBottom: true, // 仅「跟随模式」时 paint 才改 scrollTop
-    aiUserReading: false, // 用户主动离开底部后锁住，禁止自动回粘
-    aiProgScroll: false, // 程序化滚动中，忽略 scroll 事件回写
-    aiPaintRaf: 0,
-    aiPaintTimer: 0,
-    aiPendingText: "",
-    aiRenderedText: "",
-    aiStreamTextNode: null,
-    renderEpoch: 0,
-    renderLibs: { core: false, highlight: false, mermaid: false, katex: false },
-    mermaidObserver: null,
-    mermaidRenderSeq: 0,
-    mermaidQueue: Promise.resolve(),
-    mermaidRepairing: false,
-    aiSourceBvids: [],
     autoCaptureEnabled: loadAutoCaptureSetting(),
-    autoCaptureKey: "",
-    autoCaptureEpoch: 0,
-    autoCaptureTimer: 0,
-    autoCaptureAbortController: null,
     autoAnalyzeEnabled: loadAutoAnalyzeSetting(),
-    autoAnalyzeKey: "",
-    autoAnalyzePendingKey: "",
-    autoAnalyzeTimer: 0,
-    aiSessionRouteKey: "",
-    aiSessionRestorePromise: null,
-    aiSessionRestoreKey: "",
-    fastViewCache: new Map(),
-    fastTrackCache: new Map(),
-    fastSubtitleCache: new Map(),
-    fastTrackBodyCache: new Map(),
-    transcriptItemKey: "",
-    transcriptItem: null, // 当前阅读字幕独立于扫描列表，扫描合集时不会被覆盖
-    transcriptQuery: "",
-    transcriptFilteredIndexes: null,
-    transcriptActiveCueIndex: -1,
-    transcriptTrackIndex: -1,
     transcriptAutoFollow: loadTranscriptFollowSetting(),
     autoEnablePlayerSubtitle: loadPlayerSubtitleSetting(),
-    playerSubtitleOperation: null,
-    transcriptUserScrollUntil: 0,
-    transcriptVideoAbort: null,
-    transcriptSwitchAbort: null,
-    transcriptRenderEpoch: 0,
-    libraryQuery: "",
-    libraryFilter: "all", // all | ok | wait | error | empty
-    captureDrawerOpen: false,
-    knowledgeAnchors: [],
-    knowledgeNodes: [],
-    knowledgeSearch: "",
-    knowledgeActiveAnchorId: "",
-    knowledgeActiveNodeId: "",
-    knowledgeRailOpen: false,
-    knowledgeTreeOpen: false,
-    knowledgeSelection: null,
-    knowledgeBusy: false,
-    knowledgeResetScroll: false,
-    knowledgeRuntime: null,
-    knowledgePaintRaf: 0,
     knowledgeModelId: String(storageGet(KNOWLEDGE_MODEL_STORE_KEY, "") || ""),
     shortcutConfig: loadShortcutSettings(),
-    shortcutRecordingId: "",
-  };
+  });
 
   // ─── UI geometry persistence ────────────────────────────────────────────
   function isPanelSizePreset(value) {
@@ -2611,42 +2484,33 @@ export function mountWorkbench(SubBatch) {
     return panelGeometryCall("panelSizeClassFromWidth", width, viewportWidth);
   }
 
-  function defaultUiGeom() {
-    const sizePreset = DEFAULT_PANEL_SIZE;
-    const w = panelPresetWidth(sizePreset);
-    const h = highPanelHeight();
+  function panelPersistenceOptions() {
     return {
-      x: Math.max(8, window.innerWidth - w - 16),
-      y: Math.max(8, Math.floor((window.innerHeight - h) / 2)),
-      w,
-      h,
-      sizePreset,
-      heightMode: "high", // high：随视口保持约 90vh；手动上下拖动后变 custom
-      dock: null, // null | 'left' | 'right'
-      dockExpanded: false,
-      view: "ai", // ai | subs | knowledge | settings
-      aiStage: "preprocess", // preprocess | chat | postprocess
-      settingsTab: "prompt", // prompt | llm | shortcuts | appearance
-      promptStage: "preprocess", // preprocess | postprocess | knowledge
-      noteFont: NOTE_FONT_DEFAULT,
-      ctpFlavor: DEFAULT_CTP_FLAVOR, // latte | frappe | macchiato | mocha
-      // Knowledge layout: AI rail width + workspace Navigator width only.
-      knowledgeRailW: 400,
-      knowledgeNavW: 280,
-      knowledgeContextOpen: false,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      defaultSizePreset: DEFAULT_PANEL_SIZE,
+      defaultFlavor: DEFAULT_CTP_FLAVOR,
+      noteFontDefault: NOTE_FONT_DEFAULT,
+      noteFontMin: NOTE_FONT_MIN,
+      noteFontMax: NOTE_FONT_MAX,
+      minWidth: MIN_W,
+      minHeight: MIN_H,
+      currentSizePreset: String(state.ui?.sizePreset || ""),
+      presetWidth: panelPresetWidth,
+      highHeight: highPanelHeight,
+      isPreset: isPanelSizePreset,
+      normalizeFlavor: normalizeCtpFlavor,
     };
   }
 
   function clampKnowledgeRailW(value, panelWidth = state.ui?.w || 520) {
-    const max = Math.max(300, Math.floor(Number(panelWidth) || 520) - 40);
-    return Math.min(max, Math.max(280, Number(value) || 400));
+    return SubBatch.SubBatchMonorepo.ui.panelPersistence.clampKnowledgeRailWidth(value, panelWidth);
   }
 
   function clampKnowledgeNavW(value, panelWidth = state.ui?.w || 520) {
-    const size = String(state.ui?.sizePreset || "");
-    const def = size === "small" ? 240 : size === "medium" ? 240 : 280;
-    const max = Math.max(200, Math.floor((Number(panelWidth) || 520) * 0.48));
-    return Math.min(max, Math.max(200, Number(value) || def));
+    return SubBatch.SubBatchMonorepo.ui.panelPersistence.clampKnowledgeNavWidth(
+      value, panelWidth, String(state.ui?.sizePreset || ""),
+    );
   }
 
   function applyKnowledgeLayoutVars(root = document.getElementById(PANEL_ID)) {
@@ -2662,85 +2526,29 @@ export function mountWorkbench(SubBatch) {
   }
 
   function normalizeNoteFont(value, savedDefault) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return NOTE_FONT_DEFAULT;
-    const clamped = Math.max(NOTE_FONT_MIN, Math.min(NOTE_FONT_MAX, n));
-    // 6.9.8: 旧默认 17 → 新默认 14。用户已显式改过的字号（并记下 noteFontDefault）保留。
-    if (Number(savedDefault) !== NOTE_FONT_DEFAULT && clamped === 17) return NOTE_FONT_DEFAULT;
-    return clamped;
+    return SubBatch.SubBatchMonorepo.ui.panelPersistence.normalizeNoteFont(
+      value, savedDefault, panelPersistenceOptions(),
+    );
   }
 
   function loadUiGeom() {
     try {
-      const raw = localStorage.getItem(UI_STORE_KEY);
-      if (!raw) return defaultUiGeom();
-      const o = JSON.parse(raw);
-      const d = defaultUiGeom();
-      // v5.3.2 以前没有档位字段：首次升级统一迁移到“中 + 高”，不继承旧的 560×820 上限。
-      const hasPreset = isPanelSizePreset(o.sizePreset) || o.sizePreset === "custom";
-      const sizePreset = hasPreset ? o.sizePreset : DEFAULT_PANEL_SIZE;
-      const heightMode = hasPreset && o.heightMode === "custom" ? "custom" : "high";
-      const w = isPanelSizePreset(sizePreset)
-        ? panelPresetWidth(sizePreset)
-        : Math.max(MIN_W, Number(o.w) || d.w);
-      const h = heightMode === "high"
-        ? highPanelHeight()
-        : Math.max(MIN_H, Number(o.h) || d.h);
-      return {
-        x: Number.isFinite(o.x) ? o.x : d.x,
-        y: Number.isFinite(o.y) ? o.y : d.y,
-        w,
-        h,
-        sizePreset,
-        heightMode,
-        dock: o.dock === "left" || o.dock === "right" ? o.dock : null,
-        dockExpanded: false,
-        view: ["ai", "subs", "knowledge", "settings"].includes(o.view) ? o.view : "ai",
-        aiStage: ["preprocess", "chat", "postprocess"].includes(o.aiStage) ? o.aiStage : "preprocess",
-        settingsTab: ["prompt", "llm", "shortcuts", "appearance"].includes(o.settingsTab) ? o.settingsTab : "prompt",
-        promptStage: ["preprocess", "postprocess", "knowledge"].includes(o.promptStage) ? o.promptStage : "preprocess",
-        noteFont: normalizeNoteFont(o.noteFont, o.noteFontDefault),
-        ctpFlavor: normalizeCtpFlavor(o.ctpFlavor ?? d.ctpFlavor),
-        knowledgeRailW: clampKnowledgeRailW(o.knowledgeRailW ?? d.knowledgeRailW, w),
-        // Migrate old list width → navigator width if present.
-        knowledgeNavW: clampKnowledgeNavW(
-          o.knowledgeNavW ?? o.knowledgeListW ?? d.knowledgeNavW,
-          w,
-        ),
-        knowledgeContextOpen: o.knowledgeContextOpen === true,
-      };
+      return SubBatch.SubBatchMonorepo.ui.panelPersistence.loadUiGeometry(
+        localStorage.getItem(UI_STORE_KEY), panelPersistenceOptions(),
+      );
     } catch (_) {
-      return defaultUiGeom();
+      return SubBatch.SubBatchMonorepo.ui.panelPersistence.defaultUiGeometry(panelPersistenceOptions());
     }
   }
 
   function saveUiGeom() {
     if (!state.ui) return;
     try {
-      localStorage.setItem(
-        UI_STORE_KEY,
-        JSON.stringify({
-          x: state.ui.x,
-          y: state.ui.y,
-          w: state.ui.w,
-          h: state.ui.h,
-          sizePreset: state.ui.sizePreset || DEFAULT_PANEL_SIZE,
-          heightMode: state.ui.heightMode === "custom" ? "custom" : "high",
-          dock: state.ui.dock,
-          view: state.ui.view || "ai",
-          aiStage: state.ui.aiStage || "preprocess",
-          settingsTab: state.ui.settingsTab || "prompt",
-          promptStage: state.ui.promptStage || "preprocess",
-          noteFont: normalizeNoteFont(state.ui.noteFont, 14),
-          noteFontDefault: NOTE_FONT_DEFAULT,
-          ctpFlavor: normalizeCtpFlavor(state.ui.ctpFlavor),
-          knowledgeRailW: clampKnowledgeRailW(state.ui.knowledgeRailW, state.ui.w),
-          knowledgeNavW: clampKnowledgeNavW(state.ui.knowledgeNavW, state.ui.w),
-          knowledgeContextOpen: state.ui.knowledgeContextOpen === true,
-        }),
-      );
+      localStorage.setItem(UI_STORE_KEY, SubBatch.SubBatchMonorepo.ui.panelPersistence.serializeUiGeometry(
+        state.ui, panelPersistenceOptions(),
+      ));
     } catch (_) {
-      /* ignore quota */
+      /* private mode / storage quota */
     }
   }
 
@@ -2989,23 +2797,14 @@ export function mountWorkbench(SubBatch) {
     bindKnowledgeLayoutInteractions(root);
     applyKnowledgeLayoutVars(root);
 
-    root.querySelectorAll("[data-view]").forEach((btn) => {
-      btn.addEventListener("click", () => setWorkspace(btn.getAttribute("data-view")));
-    });
-
-    root.querySelector('[data-role="max-pages"]').addEventListener("change", (e) => {
-      state.maxPages = Math.max(1, Math.min(100, Number(e.target.value) || DEFAULT_MAX_PAGES));
-    });
-    root.querySelector('[data-role="delay"]').addEventListener("change", (e) => {
-      state.delayMs = Math.max(0, Math.min(5000, Number(e.target.value) || DEFAULT_DELAY_MS));
-    });
-    const autoCaptureInput = root.querySelector('[data-role="auto-capture"]');
-    if (autoCaptureInput) {
-      autoCaptureInput.checked = state.autoCaptureEnabled;
-      autoCaptureInput.addEventListener("change", (e) => {
-        state.autoCaptureEnabled = !!e.target.checked;
-        saveAutoCaptureSetting(state.autoCaptureEnabled);
-        if (state.autoCaptureEnabled) {
+    SubBatch.SubBatchMonorepo.ui.settingsInteraction.bind(root, {
+      selectWorkspace: (view) => setWorkspace(view),
+      maxPages: (value) => { state.maxPages = value; },
+      delayMs: (value) => { state.delayMs = value; },
+      autoCapture: (enabled) => {
+        state.autoCaptureEnabled = enabled;
+        saveAutoCaptureSetting(enabled);
+        if (enabled) {
           setStatus("已开启：打开视频自动抓字幕");
           scheduleAutoCapture("setting-enabled", 0);
         } else {
@@ -3013,17 +2812,13 @@ export function mountWorkbench(SubBatch) {
           clearTimeout(state.autoCaptureTimer);
           setStatus("已关闭自动抓取；仍可手动扫描", "ok");
         }
-      });
-    }
-    const autoAnalyzeInput = root.querySelector('[data-role="auto-analyze"]');
-    if (autoAnalyzeInput) {
-      autoAnalyzeInput.checked = state.autoAnalyzeEnabled;
-      autoAnalyzeInput.addEventListener("change", (e) => {
-        state.autoAnalyzeEnabled = !!e.target.checked;
-        saveAutoAnalyzeSetting(state.autoAnalyzeEnabled);
+      },
+      autoAnalyze: (enabled) => {
+        state.autoAnalyzeEnabled = enabled;
+        saveAutoAnalyzeSetting(enabled);
         clearTimeout(state.autoAnalyzeTimer);
         state.autoAnalyzePendingKey = "";
-        if (state.autoAnalyzeEnabled) {
+        if (enabled) {
           state.autoAnalyzeKey = "";
           const item = currentTranscriptItem();
           if (item?.subStatus === "ok" && item.data?.length) {
@@ -3034,70 +2829,62 @@ export function mountWorkbench(SubBatch) {
         } else {
           setStatus("已关闭自动分析；仍可点击“开始分析”", "ok");
         }
-      });
-    }
-    const playerSubtitleInput = root.querySelector('[data-role="player-subtitle"]');
-    if (playerSubtitleInput) {
-      playerSubtitleInput.checked = state.autoEnablePlayerSubtitle;
-      playerSubtitleInput.addEventListener("change", (e) => {
-        state.autoEnablePlayerSubtitle = !!e.target.checked;
-        storageSet(PLAYER_SUBTITLE_STORE_KEY, state.autoEnablePlayerSubtitle ? "true" : "false");
-        if (state.autoEnablePlayerSubtitle) enablePlayerSubtitle(currentTranscriptItem()).catch(() => {});
-      });
-    }
-
-    root.querySelector('[data-role="mode"]').addEventListener("change", (e) => {
-      state.mode = e.target.value || "auto";
-      refreshContextUI();
-      setStatus(
-        state.mode === "auto"
+      },
+      playerSubtitle: (enabled) => {
+        state.autoEnablePlayerSubtitle = enabled;
+        storageSet(PLAYER_SUBTITLE_STORE_KEY, enabled ? "true" : "false");
+        if (enabled) enablePlayerSubtitle(currentTranscriptItem()).catch(() => {});
+      },
+      mode: (value) => {
+        state.mode = value;
+        refreshContextUI();
+        setStatus(value === "auto"
           ? "已切回自动识别（默认偏单个视频）"
-          : `已手动指定：${TYPE_LABEL[state.mode] || state.mode}`,
-      );
-    });
-
-    const promptSel = root.querySelector('[data-role="prompt-select"]');
-    if (promptSel) {
-      promptSel.addEventListener("change", (e) => {
-        const activeId = String(e.target.value || "");
+          : "已手动指定：" + (TYPE_LABEL[value] || value));
+      },
+      promptSelect: (activeId) => {
         savePromptProfilesFromForm({ activeId });
         updatePromptUi(root, getActivePromptProfile());
-        setStatus(activeId ? `提示词：${getActivePromptProfile()?.name || "未命名"}` : "当前没有提示词", activeId ? "ok" : "err");
-      });
-    }
-
-    const preprocessToggle = root.querySelector('[data-role="preprocess-enabled"]');
-    if (preprocessToggle) {
-      preprocessToggle.checked = !!state.preprocessEnabled;
-      preprocessToggle.addEventListener("change", (e) => {
-        state.preprocessEnabled = !!e.target.checked;
-        savePreprocessEnabledSetting(state.preprocessEnabled);
+        setStatus(activeId ? "提示词：" + (getActivePromptProfile()?.name || "未命名") : "当前没有提示词", activeId ? "ok" : "err");
+      },
+      preprocessEnabled: (enabled) => {
+        state.preprocessEnabled = enabled;
+        savePreprocessEnabledSetting(enabled);
         refreshPromptSelector(root);
         refreshPreprocessModelSelector(root);
-        setStatus(state.preprocessEnabled ? "字幕预处理已开启" : "字幕预处理已关闭：后处理将直接使用原始字幕", "ok");
-      });
-    }
-    root.querySelector('[data-role="preprocess-prompt-select"]')?.addEventListener("change", (e) => {
-      const id = String(e.target.value || "");
-      savePromptProfilesFromForm({ activeId: state.activePromptId });
-      savePromptProfiles(state.promptProfiles, state.activePromptId, id);
-      setStatus(`预处理 Prompt：${getActivePreprocessPromptProfile()?.name || "未命名"}`, "ok");
+        setStatus(enabled ? "字幕预处理已开启" : "字幕预处理已关闭：后处理将直接使用原始字幕", "ok");
+      },
+      preprocessPrompt: (id) => {
+        savePromptProfilesFromForm({ activeId: state.activePromptId });
+        savePromptProfiles(state.promptProfiles, state.activePromptId, id);
+        setStatus("预处理 Prompt：" + (getActivePreprocessPromptProfile()?.name || "未命名"), "ok");
+      },
+      preprocessModel: (id) => {
+        state.preprocessModelId = id;
+        storageSet(PREPROCESS_MODEL_STORE_KEY, id);
+        const cfg = getPreprocessModelConfig();
+        setStatus("预处理模型：" + (cfg?.name || cfg?.model || "未选择"), cfg ? "ok" : "err");
+      },
+      promptSearch: (value) => {
+        state.promptSearch = value;
+        renderPromptList(root);
+      },
+      aiSearch: (value) => {
+        state.aiSearch = value;
+        renderAiList(root);
+      },
+      knowledgeSearch: (value) => {
+        state.knowledgeSearch = value;
+        renderKnowledgeWorkspace().catch(() => {});
+      },
+    }, {
+      maxPages: DEFAULT_MAX_PAGES,
+      delayMs: DEFAULT_DELAY_MS,
+      autoCapture: !!state.autoCaptureEnabled,
+      autoAnalyze: !!state.autoAnalyzeEnabled,
+      playerSubtitle: !!state.autoEnablePlayerSubtitle,
+      preprocessEnabled: !!state.preprocessEnabled,
     });
-    root.querySelector('[data-role="preprocess-model-select"]')?.addEventListener("change", (e) => {
-      state.preprocessModelId = String(e.target.value || "");
-      storageSet(PREPROCESS_MODEL_STORE_KEY, state.preprocessModelId);
-      const cfg = getPreprocessModelConfig();
-      setStatus(`预处理模型：${cfg?.name || cfg?.model || "未选择"}`, cfg ? "ok" : "err");
-    });
-
-    root.querySelector('[data-role="prompt-search"]')?.addEventListener("input", debounce((e) => {
-      state.promptSearch = String(e.target.value || "");
-      renderPromptList(root);
-    }, 60));
-    root.querySelector('[data-role="ai-search"]')?.addEventListener("input", debounce((e) => {
-      state.aiSearch = String(e.target.value || "");
-      renderAiList(root);
-    }, 60));
     SubBatch.SubBatchMonorepo.ui.reorderInteraction.bind(root, {
       reorderConfig: commitConfigListReorder,
       reorderFlow: commitFlowModelReorder,
@@ -3114,10 +2901,6 @@ export function mountWorkbench(SubBatch) {
       exportChat: studioExportChat,
       onError: (error) => setStatus(`对话失败：${error?.message || error}`, "err"),
     });
-    root.querySelector('[data-role="knowledge-search"]')?.addEventListener("input", debounce((e) => {
-      state.knowledgeSearch = String(e.target.value || "");
-      renderKnowledgeWorkspace().catch(() => {});
-    }, 70));
     root.addEventListener("mouseup", (e) => {
       if (e.target.closest?.('[data-role="knowledge-selection-toolbar"], [data-role="knowledge-rail"]')) return;
       setTimeout(captureKnowledgeSelection, 0);

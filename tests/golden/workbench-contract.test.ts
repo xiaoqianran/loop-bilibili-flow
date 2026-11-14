@@ -124,6 +124,7 @@ describe("Bundled full-feature workbench source", () => {
       "parseEvidenceTimestampSeconds",
       "trimProcessedOverlap",
       "dedupeExactBlocks",
+      "defaultUiGeom",
       "stitchPreprocessChunks",
       "preprocessCacheKey",
       "makePromptProfileId",
@@ -164,6 +165,23 @@ describe("Bundled full-feature workbench source", () => {
     expect(maintainedSource).not.toContain('root.querySelector(\'[data-role="library-filters"]\')?.addEventListener');
     expect(maintainedSource).toContain("selectGroup: (key, checked) =>");
     expect(maintainedSource).toContain("recordUserScroll: () =>");
+  });
+
+  it("uses strict initial state, typed UI persistence and validated Application method calls", () => {
+    expect(maintainedSource).toContain("const state = createWorkbenchState({");
+    expect(maintainedSource).toContain("panelPersistence.loadUiGeometry(");
+    expect(maintainedSource).toContain("panelPersistence.serializeUiGeometry(");
+    expect(maintainedSource).toContain("return callApp(SubBatch?.SubBatchMonorepo?.app, path, ...args)");
+    expect(maintainedSource).not.toContain("const state = {");
+    expect(maintainedSource).not.toContain("const o = JSON.parse(raw)");
+    expect(maintainedSource).not.toContain("let value = mono?.app");
+  });
+
+  it("delegates panel Settings form and workspace DOM handlers to strict UI ownership", () => {
+    expect(maintainedSource).toContain("ui.settingsInteraction.bind(root,");
+    expect(maintainedSource).not.toContain('root.querySelectorAll("[data-view]").forEach((btn)');
+    expect(maintainedSource).not.toContain('root.querySelector(\'[data-role="max-pages"]\').addEventListener');
+    expect(maintainedSource).not.toContain('root.querySelector(\'[data-role="knowledge-search"]\')?.addEventListener');
   });
 
   it("has exactly one lifecycle owner for startup and SPA navigation", () => {
@@ -402,6 +420,7 @@ describe("Bundled full-feature workbench source", () => {
       "parseEvidenceTimestampSeconds",
       "trimProcessedOverlap",
       "dedupeExactBlocks",
+      "defaultUiGeom",
       "stitchPreprocessChunks",
       "preprocessCacheKey",
       "makePromptProfileId",
