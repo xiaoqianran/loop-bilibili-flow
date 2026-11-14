@@ -86,25 +86,25 @@ var SubBatch = (function(exports) {
     }
     return null;
   }
-  function isChargeBlocked(view) {
-    return Boolean(view?.is_upower_exclusive && !view?.is_upower_play);
+  function isChargeBlocked(view2) {
+    return Boolean(view2?.is_upower_exclusive && !view2?.is_upower_play);
   }
-  function pageMeta(view, requestedBvid, requestedPage = 1) {
-    const pages = Array.isArray(view.pages) ? view.pages : [];
+  function pageMeta(view2, requestedBvid, requestedPage = 1) {
+    const pages = Array.isArray(view2.pages) ? view2.pages : [];
     const page = Math.max(
       1,
       Math.min(Number(requestedPage) || 1, Math.max(1, pages.length))
     );
     const part = pages[page - 1] ?? null;
-    const cid = Number(part?.cid || view.cid) || null;
-    const aid = Number(view.aid) || null;
-    const title = part?.part && pages.length > 1 ? `${view.title || requestedBvid} - P${page}【${part.part}】` : String(view.title || requestedBvid);
+    const cid = Number(part?.cid || view2.cid) || null;
+    const aid = Number(view2.aid) || null;
+    const title = part?.part && pages.length > 1 ? `${view2.title || requestedBvid} - P${page}【${part.part}】` : String(view2.title || requestedBvid);
     return {
-      bvid: String(view.bvid || requestedBvid),
+      bvid: String(view2.bvid || requestedBvid),
       aid,
       cid,
       title,
-      author: String(view.owner?.name || ""),
+      author: String(view2.owner?.name || ""),
       pages,
       page
     };
@@ -930,10 +930,10 @@ ${source.slice(-tailLen).replace(/^[^\n]*\n?/, "")}`
     const padded = new Uint8Array(paddedLength);
     padded.set(bytes);
     padded[bytes.length] = 128;
-    const view = new DataView(padded.buffer);
+    const view2 = new DataView(padded.buffer);
     const bitLength = BigInt(bytes.length) * 8n;
-    view.setUint32(paddedLength - 8, Number(bitLength & 0xffffffffn), true);
-    view.setUint32(paddedLength - 4, Number(bitLength >> 32n), true);
+    view2.setUint32(paddedLength - 8, Number(bitLength & 0xffffffffn), true);
+    view2.setUint32(paddedLength - 4, Number(bitLength >> 32n), true);
     let a0 = 1732584193;
     let b0 = 4023233417;
     let c0 = 2562383102;
@@ -941,7 +941,7 @@ ${source.slice(-tailLen).replace(/^[^\n]*\n?/, "")}`
     for (let offset = 0; offset < paddedLength; offset += 64) {
       const words = Array.from(
         { length: 16 },
-        (_, index) => view.getUint32(offset + index * 4, true)
+        (_, index) => view2.getUint32(offset + index * 4, true)
       );
       let a = a0;
       let b = b0;
@@ -1994,14 +1994,14 @@ ${prompt2.userPromptTemplate || ""}`);
       spaceMid: it.spaceMid
     }));
   }
-  function applyUgcSeasonToItem(item, view) {
+  function applyUgcSeasonToItem(item, view2) {
     if (!item) return item;
-    if (!view?.ugc_season?.id) return item;
-    const season = view.ugc_season;
-    const mid = season.mid || view.owner?.mid;
+    if (!view2?.ugc_season?.id) return item;
+    const season = view2.ugc_season;
+    const mid = season.mid || view2.owner?.mid;
     const sid = season.id;
     if (!mid || !sid) return item;
-    const author = String(item.author || view.owner?.name || "").trim();
+    const author = String(item.author || view2.owner?.name || "").trim();
     const collectionName = String(season.title || item.collectionName || "未命名合集").trim();
     const shortUrl = buildCollectionShortUrl(mid, sid);
     const groupKey = `collection:${mid}/${sid}`;
@@ -2020,8 +2020,8 @@ ${prompt2.userPromptTemplate || ""}`);
       parentFolder: parentFolder || item.parentFolder
     };
   }
-  function applyUgcSeasonToItems(items, view) {
-    return (items || []).map((it) => applyUgcSeasonToItem(it, view));
+  function applyUgcSeasonToItems(items, view2) {
+    return (items || []).map((it) => applyUgcSeasonToItem(it, view2));
   }
   function normalizeBvidKey(bvid) {
     const id = String(bvid || "").trim();
@@ -3522,6 +3522,74 @@ ${prompt2.userPromptTemplate}`
     videoDetails,
     videoWatchUrl
   }, Symbol.toStringTag, { value: "Module" }));
+  function currentKind(s) {
+    return s.batchBusy ? "fetch" : s.scanBusy ? "scan" : "";
+  }
+  function isPaused(s) {
+    return s.batchBusy ? !!s.batchPaused : s.scanBusy ? !!s.scanPaused : false;
+  }
+  function setBusy(s, kind, busy) {
+    if (kind === "scan") {
+      s.scanBusy = !!busy;
+      if (!busy) s.scanPaused = false;
+    } else {
+      s.batchBusy = !!busy;
+      if (!busy) s.batchPaused = false;
+    }
+  }
+  function setProgress(s, patch = {}) {
+    const job = s.libraryJob || (s.libraryJob = { kind: "", index: 0, total: 0, label: "" });
+    if (patch.kind != null) job.kind = patch.kind;
+    if (patch.index != null) job.index = Math.max(0, Number(patch.index) || 0);
+    if (patch.total != null) job.total = Math.max(0, Number(patch.total) || 0);
+    if (patch.label != null) job.label = String(patch.label || "");
+  }
+  function clearProgress(s) {
+    s.libraryJob = { kind: "", index: 0, total: 0, label: "" };
+  }
+  function togglePause(s) {
+    if (s.batchBusy) {
+      s.batchPaused = !s.batchPaused;
+      return { changed: true, text: s.batchPaused ? "已暂停字幕抓取 · 点「继续」恢复" : "继续抓取字幕…", css: s.batchPaused ? "ok" : "" };
+    }
+    if (s.scanBusy) {
+      s.scanPaused = !s.scanPaused;
+      return { changed: true, text: s.scanPaused ? "已暂停扫描 · 点「继续」恢复" : "继续扫描…", css: s.scanPaused ? "ok" : "" };
+    }
+    return { changed: false, text: "当前没有可暂停的扫描或抓取任务", css: "ok" };
+  }
+  function stop(s) {
+    s.cancel = true;
+    s.cancelScan = true;
+    s.cancelBatch = true;
+    s.scanPaused = false;
+    s.batchPaused = false;
+  }
+  async function waitWhilePaused(s, sleep) {
+    while (isPaused(s) && !s.cancel && !s.cancelScan && !s.cancelBatch) await sleep(140);
+  }
+  function view(s) {
+    const kind = currentKind(s);
+    const busy = !!kind;
+    const paused = isPaused(s);
+    const job = s.libraryJob || { index: 0, total: 0, label: "" };
+    const index = Number(job.index) || 0;
+    const total = Number(job.total) || 0;
+    const label = kind === "fetch" ? "抓取字幕" : kind === "scan" ? "扫描视频" : "任务";
+    const parts = [];
+    if (total > 0) parts.push(String(Math.min(index, total)) + " / " + total);
+    if (job.label) parts.push(job.label);
+    return {
+      kind,
+      busy,
+      paused,
+      title: paused ? label + "已暂停" : label,
+      meta: parts.join(" · ") || (busy ? "进行中" : "空闲"),
+      percent: total > 0 ? Math.max(0, Math.min(100, index / total * 100)) : busy ? 8 : 0,
+      pauseLabel: paused ? "继续" : "暂停",
+      pauseTitle: paused ? "从暂停处继续" : "暂停当前任务，已完成的条目会保留"
+    };
+  }
   function createCoordinator() {
     let sequence = 0;
     let active = null;
@@ -4400,9 +4468,9 @@ ${prompt2.userPromptTemplate}`
       let cid = Number(native.cid) || 0;
       let aid = Number(native.aid) || 0;
       if (!cid) {
-        const view = await fetchVideoView(context.network, bvid, context.signal);
-        if (video$1.isChargeBlocked(view)) return null;
-        const meta2 = video$1.pageMeta(view, bvid, native.page || 1);
+        const view2 = await fetchVideoView(context.network, bvid, context.signal);
+        if (video$1.isChargeBlocked(view2)) return null;
+        const meta2 = video$1.pageMeta(view2, bvid, native.page || 1);
         cid = Number(meta2.cid) || 0;
         aid = Number(meta2.aid) || aid;
       }
@@ -4877,6 +4945,17 @@ ${prompt2.userPromptTemplate}`
     return cleanup;
   }
   const startUserscriptLifecycle = start;
+  const libraryJob = {
+    currentKind,
+    isPaused,
+    setBusy,
+    setProgress,
+    clearProgress,
+    togglePause,
+    stop,
+    waitWhilePaused,
+    view
+  };
   const content = {
     resolve: resolve$1
   };
@@ -4953,6 +5032,7 @@ ${prompt2.userPromptTemplate}`
     fetchVideoView,
     installNavigationLifecycle,
     knowledge,
+    libraryJob,
     navigation,
     observe,
     preprocess,
@@ -10636,14 +10716,14 @@ ${prompt2.userPromptTemplate}`
       const m = text.match(/BV(?!id\b)[A-Za-z0-9]+/i);
       return m ? "BV" + m[0].slice(2) : "";
     }
-    function resolveCid(view, page = 1) {
-      const pages = view.pages || [];
+    function resolveCid(view2, page = 1) {
+      const pages = view2.pages || [];
       if (Array.isArray(pages) && pages.length && page >= 1 && page <= pages.length) {
         const cid = pages[page - 1].cid;
         return cid != null ? Number(cid) : null;
       }
-      if (view.cid == null) return null;
-      const n = Number(view.cid);
+      if (view2.cid == null) return null;
+      const n = Number(view2.cid);
       return Number.isFinite(n) ? n : null;
     }
     function dedupeCues(cues) {
@@ -10789,10 +10869,10 @@ ${prompt2.userPromptTemplate}`
       countSpaceCollectionMatches() {
         return 0;
       },
-      applyUgcSeasonToItem(item, view) {
-        if (!item || !view?.ugc_season?.id) return item;
-        const season = view.ugc_season;
-        const mid = season.mid || view.owner?.mid;
+      applyUgcSeasonToItem(item, view2) {
+        if (!item || !view2?.ugc_season?.id) return item;
+        const season = view2.ugc_season;
+        const mid = season.mid || view2.owner?.mid;
         const sid = season.id;
         if (!mid || !sid) return item;
         return {
@@ -10804,8 +10884,8 @@ ${prompt2.userPromptTemplate}`
           collectionSid: String(sid)
         };
       },
-      applyUgcSeasonToItems(items, view) {
-        return (items || []).map((it) => CORE_LOCAL_FALLBACKS.applyUgcSeasonToItem(it, view));
+      applyUgcSeasonToItems(items, view2) {
+        return (items || []).map((it) => CORE_LOCAL_FALLBACKS.applyUgcSeasonToItem(it, view2));
       },
       suggestCaptureMode(item) {
         if (!item) return "auto";
@@ -10929,8 +11009,8 @@ ${prompt2.userPromptTemplate}`
     function buildLibraryRenderNodes2(entries, collapsedMap) {
       return coreCall("buildLibraryRenderNodes", entries, collapsedMap || {});
     }
-    function applyUgcSeasonToItems2(items, view) {
-      return coreCall("applyUgcSeasonToItems", items, view);
+    function applyUgcSeasonToItems2(items, view2) {
+      return coreCall("applyUgcSeasonToItems", items, view2);
     }
     function buildGroupMetaPatches2(normalized) {
       return coreCall("buildGroupMetaPatches", normalized);
@@ -11527,11 +11607,11 @@ ${prompt2.userPromptTemplate}`
       bvid = extractBvid2(bvid) || String(bvid || "").trim();
       if (!bvid) throw new Error("empty bvid");
       const viewHit = await fetchVideoViewFast(bvid, signal, { forceNetwork });
-      const view = viewHit.value;
-      if (bilibiliCall("video.isChargeBlocked", view)) {
+      const view2 = viewHit.value;
+      if (bilibiliCall("video.isChargeBlocked", view2)) {
         return { bvid, status: "empty", error: "charge_exclusive_blocked", source: viewHit.cacheLevel };
       }
-      const base = bilibiliCall("video.pageMeta", view, bvid, page);
+      const base = bilibiliCall("video.pageMeta", view2, bvid, page);
       const { cid } = base;
       if (!cid) return { ...base, status: "error", error: "no cid", source: viewHit.cacheLevel };
       const preferredKey = `${base.bvid}:${cid}`;
@@ -11582,16 +11662,16 @@ ${prompt2.userPromptTemplate}`
           error: `view/detail code=${detail.code} ${detail.message || ""}`
         };
       }
-      const view = detail.data && detail.data.View || {};
-      if (bilibiliCall("video.isChargeBlocked", view)) {
+      const view2 = detail.data && detail.data.View || {};
+      if (bilibiliCall("video.isChargeBlocked", view2)) {
         return { bvid, status: "empty", error: "charge_exclusive_blocked" };
       }
-      let aid = view.aid || 0;
+      let aid = view2.aid || 0;
       aid = Number(aid) || null;
-      const cid = resolveCid(view, page);
-      const title = String(view.title || "");
-      const author = String(view.owner && view.owner.name || "");
-      const pages = Array.isArray(view.pages) ? view.pages : [];
+      const cid = resolveCid(view2, page);
+      const title = String(view2.title || "");
+      const author = String(view2.owner && view2.owner.name || "");
+      const pages = Array.isArray(view2.pages) ? view2.pages : [];
       const base = { bvid, aid, cid, title, author, pages, page };
       if (cid == null) return { ...base, status: "error", error: "no cid" };
       const { subs, source: src0 } = await appCall(
@@ -11944,11 +12024,11 @@ ${prompt2.userPromptTemplate}`
         if (!pages || pages.length <= 1) {
           try {
             const hit = await fetchVideoViewFast(bvid);
-            const view = hit?.value || {};
-            pages = Array.isArray(view.pages) ? view.pages : [];
-            title = String(view.title || title || bvid).trim();
-            author = String(view.owner?.name || author).trim();
-            aid = view.aid || aid;
+            const view2 = hit?.value || {};
+            pages = Array.isArray(view2.pages) ? view2.pages : [];
+            title = String(view2.title || title || bvid).trim();
+            author = String(view2.owner?.name || author).trim();
+            aid = view2.aid || aid;
           } catch (error) {
             if (error?.name === "AbortError") throw error;
             console.warn("[bili-subbatch] expand collection parts", bvid, error?.message || error);
@@ -13360,8 +13440,8 @@ ${prompt2.userPromptTemplate}`
       refreshAiChips();
       return root;
     }
-    function setWorkspace(view, opts) {
-      const v = ["ai", "subs", "knowledge", "settings"].includes(view) ? view : "ai";
+    function setWorkspace(view2, opts) {
+      const v = ["ai", "subs", "knowledge", "settings"].includes(view2) ? view2 : "ai";
       const root = ensurePanel();
       if (state2.ui) state2.ui.view = v;
       root.dataset.panelView = v;
@@ -13768,104 +13848,56 @@ ${prompt2.userPromptTemplate}`
       refreshActionDisabledState();
     }
     function setScanBusy(busy) {
-      state2.scanBusy = !!busy;
-      if (!busy) state2.scanPaused = false;
+      appCall("libraryJob.setBusy", state2, "scan", busy);
       syncOperationBusy();
       updateLibraryJobBar();
     }
     function setBatchBusy(busy) {
-      state2.batchBusy = !!busy;
-      if (!busy) state2.batchPaused = false;
+      appCall("libraryJob.setBusy", state2, "fetch", busy);
       syncOperationBusy();
       updateLibraryJobBar();
     }
-    function currentLibraryJobKind() {
-      if (state2.batchBusy) return "fetch";
-      if (state2.scanBusy) return "scan";
-      return "";
-    }
-    function isLibraryJobPaused() {
-      if (state2.batchBusy) return !!state2.batchPaused;
-      if (state2.scanBusy) return !!state2.scanPaused;
-      return false;
-    }
-    function setLibraryJob({ kind, index, total, label } = {}) {
-      const job = state2.libraryJob || (state2.libraryJob = { kind: "", index: 0, total: 0, label: "" });
-      if (kind != null) job.kind = kind;
-      if (index != null) job.index = Math.max(0, Number(index) || 0);
-      if (total != null) job.total = Math.max(0, Number(total) || 0);
-      if (label != null) job.label = String(label || "");
+    function setLibraryJob(patch = {}) {
+      appCall("libraryJob.setProgress", state2, patch);
       updateLibraryJobBar();
     }
     function clearLibraryJob() {
-      state2.libraryJob = { kind: "", index: 0, total: 0, label: "" };
+      appCall("libraryJob.clearProgress", state2);
       updateLibraryJobBar();
     }
     function updateLibraryJobBar() {
       const root = document.getElementById(PANEL_ID);
       const bar = root?.querySelector?.('[data-role="library-jobbar"]');
       if (!bar) return;
-      const kind = currentLibraryJobKind();
-      const busy = !!kind;
-      bar.hidden = !busy;
-      bar.classList.toggle("is-on", busy);
-      bar.classList.toggle("is-paused", busy && isLibraryJobPaused());
-      const job = state2.libraryJob || {};
+      const job = appCall("libraryJob.view", state2);
+      bar.hidden = !job.busy;
+      bar.classList.toggle("is-on", job.busy);
+      bar.classList.toggle("is-paused", job.busy && job.paused);
       const title = bar.querySelector('[data-role="job-title"]');
       const meta = bar.querySelector('[data-role="job-meta"]');
       const meter = bar.querySelector('[data-role="job-meter"]');
       const pauseBtn = bar.querySelector('[data-act="job-pause"]');
-      const kindLabel = kind === "fetch" ? "抓取字幕" : kind === "scan" ? "扫描视频" : "任务";
-      const paused = isLibraryJobPaused();
-      if (title) title.textContent = paused ? `${kindLabel}已暂停` : kindLabel;
-      const index = Number(job.index) || 0;
-      const total = Number(job.total) || 0;
-      const parts = [];
-      if (total > 0) parts.push(`${Math.min(index, total)} / ${total}`);
-      if (job.label) parts.push(job.label);
-      if (meta) meta.textContent = parts.join(" · ") || (busy ? "进行中" : "空闲");
-      if (meter) {
-        const pct = total > 0 ? Math.max(0, Math.min(100, index / total * 100)) : busy ? 8 : 0;
-        meter.style.width = `${pct}%`;
-      }
+      if (title) title.textContent = job.title;
+      if (meta) meta.textContent = job.meta;
+      if (meter) meter.style.width = String(job.percent) + "%";
       if (pauseBtn) {
-        pauseBtn.textContent = paused ? "继续" : "暂停";
-        pauseBtn.setAttribute("aria-pressed", paused ? "true" : "false");
-        pauseBtn.title = paused ? "从暂停处继续" : "暂停当前任务，已完成的条目会保留";
+        pauseBtn.textContent = job.pauseLabel;
+        pauseBtn.setAttribute("aria-pressed", job.paused ? "true" : "false");
+        pauseBtn.title = job.pauseTitle;
       }
     }
     async function waitIfJobPaused() {
-      if (!isLibraryJobPaused()) return;
+      if (!appCall("libraryJob.isPaused", state2)) return;
       updateLibraryJobBar();
-      while (isLibraryJobPaused() && !state2.cancel && !state2.cancelScan && !state2.cancelBatch) {
-        await sleep(140);
-      }
+      await appCall("libraryJob.waitWhilePaused", state2, sleep);
     }
     function toggleLibraryJobPause() {
-      if (state2.batchBusy) {
-        state2.batchPaused = !state2.batchPaused;
-        setStatus(
-          state2.batchPaused ? "已暂停字幕抓取 · 点「继续」恢复" : "继续抓取字幕…",
-          state2.batchPaused ? "ok" : ""
-        );
-      } else if (state2.scanBusy) {
-        state2.scanPaused = !state2.scanPaused;
-        setStatus(
-          state2.scanPaused ? "已暂停扫描 · 点「继续」恢复" : "继续扫描…",
-          state2.scanPaused ? "ok" : ""
-        );
-      } else {
-        setStatus("当前没有可暂停的扫描或抓取任务", "ok");
-        return;
-      }
-      updateLibraryJobBar();
+      const result = appCall("libraryJob.togglePause", state2);
+      setStatus(result.text, result.css);
+      if (result.changed) updateLibraryJobBar();
     }
     function stopLibraryJob() {
-      state2.cancel = true;
-      state2.cancelScan = true;
-      state2.cancelBatch = true;
-      state2.scanPaused = false;
-      state2.batchPaused = false;
+      appCall("libraryJob.stop", state2);
       setStatus("正在停止扫描/字幕任务…已完成的条目会保留");
       updateLibraryJobBar();
     }
@@ -20751,14 +20783,14 @@ ${latest}`;
       if (!bvid) return ctx;
       try {
         const detail = await appCall("acquisition.fetchVideoDetail", runtimeNetwork(), bvid);
-        const view = detail && detail.data && detail.data.View || {};
-        const season = view.ugc_season || {};
-        const mid = season.mid || view.owner?.mid || ctx.mid;
+        const view2 = detail && detail.data && detail.data.View || {};
+        const season = view2.ugc_season || {};
+        const mid = season.mid || view2.owner?.mid || ctx.mid;
         const seasonId = season.id || ctx.season_id;
         if (mid) ctx.mid = String(mid);
         if (seasonId) ctx.season_id = String(seasonId);
         if (season.title && !ctx.collectionTitleHint) ctx.collectionTitleHint = String(season.title);
-        if (view.owner?.name && !ctx.authorHint) ctx.authorHint = String(view.owner.name);
+        if (view2.owner?.name && !ctx.authorHint) ctx.authorHint = String(view2.owner.name);
       } catch (error) {
         console.warn("[bili-subbatch] ensureCollectionContext", error?.message || error);
       }
@@ -20771,9 +20803,9 @@ ${latest}`;
       if (!id) return list;
       try {
         const detail = await appCall("acquisition.fetchVideoDetail", runtimeNetwork(), id);
-        const view = detail && detail.data && detail.data.View || {};
-        if (!view.ugc_season?.id) return list;
-        return applyUgcSeasonToItems2(list, view);
+        const view2 = detail && detail.data && detail.data.View || {};
+        if (!view2.ugc_season?.id) return list;
+        return applyUgcSeasonToItems2(list, view2);
       } catch (error) {
         console.warn("[bili-subbatch] stampUgcSeasonGroupMeta", error?.message || error);
         return list;

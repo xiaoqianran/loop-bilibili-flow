@@ -172,6 +172,15 @@ describe("Bundled full-feature workbench source", () => {
     expect(maintainedSource).not.toContain("function persistentCacheRead(");
   });
 
+  it("delegates library job state transitions to the application controller", () => {
+    for (const name of ["setBusy", "setProgress", "clearProgress", "view", "isPaused", "waitWhilePaused", "togglePause", "stop"]) {
+      expect(maintainedSource).toContain('appCall("libraryJob.' + name + '"');
+    }
+    expect(maintainedSource).not.toContain("function currentLibraryJobKind(");
+    expect(maintainedSource).not.toContain("function isLibraryJobPaused(");
+    expect(maintainedSource).toContain("function updateLibraryJobBar()");
+  });
+
   it("delegates migrated acquisition rules to grouped Bilibili APIs", () => {
     expect(maintainedSource).toContain("function bilibiliCall(");
     expect(maintainedSource).toContain('bilibiliCall("video.runtimeView"');

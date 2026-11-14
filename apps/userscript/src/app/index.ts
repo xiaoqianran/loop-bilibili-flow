@@ -1,3 +1,4 @@
+import * as libraryJobController from "./library-job-controller";
 import * as batchCoordinator from "./ai-batch-coordinator";
 import * as preprocessController from "./preprocess-controller";
 import * as knowledgeController from "./knowledge-controller";
@@ -10,6 +11,18 @@ import { acquire as acquireTranscript, acquireDetailed as acquireTranscriptDetai
 import { resolve as resolveVideo } from "./current-video";
 import { observe } from "./navigation";
 import { start } from "./video-carrier";
+
+export const libraryJob = {
+  currentKind: libraryJobController.currentKind,
+  isPaused: libraryJobController.isPaused,
+  setBusy: libraryJobController.setBusy,
+  setProgress: libraryJobController.setProgress,
+  clearProgress: libraryJobController.clearProgress,
+  togglePause: libraryJobController.togglePause,
+  stop: libraryJobController.stop,
+  waitWhilePaused: libraryJobController.waitWhilePaused,
+  view: libraryJobController.view,
+} as const;
 
 export const content = {
   resolve: resolveContent,

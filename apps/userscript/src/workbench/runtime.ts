@@ -4306,113 +4306,56 @@ export function mountWorkbench(SubBatch) {
   }
 
   function setScanBusy(busy) {
-    state.scanBusy = !!busy;
-    if (!busy) state.scanPaused = false;
+    appCall("libraryJob.setBusy", state, "scan", busy);
     syncOperationBusy();
     updateLibraryJobBar();
   }
-
   function setBatchBusy(busy) {
-    state.batchBusy = !!busy;
-    if (!busy) state.batchPaused = false;
+    appCall("libraryJob.setBusy", state, "fetch", busy);
     syncOperationBusy();
     updateLibraryJobBar();
   }
-
-  function currentLibraryJobKind() {
-    if (state.batchBusy) return "fetch";
-    if (state.scanBusy) return "scan";
-    return "";
-  }
-
-  function isLibraryJobPaused() {
-    if (state.batchBusy) return !!state.batchPaused;
-    if (state.scanBusy) return !!state.scanPaused;
-    return false;
-  }
-
-  function setLibraryJob({ kind, index, total, label } = {}) {
-    const job = state.libraryJob || (state.libraryJob = { kind: "", index: 0, total: 0, label: "" });
-    if (kind != null) job.kind = kind;
-    if (index != null) job.index = Math.max(0, Number(index) || 0);
-    if (total != null) job.total = Math.max(0, Number(total) || 0);
-    if (label != null) job.label = String(label || "");
+  function setLibraryJob(patch = {}) {
+    appCall("libraryJob.setProgress", state, patch);
     updateLibraryJobBar();
   }
-
   function clearLibraryJob() {
-    state.libraryJob = { kind: "", index: 0, total: 0, label: "" };
+    appCall("libraryJob.clearProgress", state);
     updateLibraryJobBar();
   }
-
   function updateLibraryJobBar() {
     const root = document.getElementById(PANEL_ID);
     const bar = root?.querySelector?.('[data-role="library-jobbar"]');
     if (!bar) return;
-    const kind = currentLibraryJobKind();
-    const busy = !!kind;
-    bar.hidden = !busy;
-    bar.classList.toggle("is-on", busy);
-    bar.classList.toggle("is-paused", busy && isLibraryJobPaused());
-    const job = state.libraryJob || {};
+    const job = appCall("libraryJob.view", state);
+    bar.hidden = !job.busy;
+    bar.classList.toggle("is-on", job.busy);
+    bar.classList.toggle("is-paused", job.busy && job.paused);
     const title = bar.querySelector('[data-role="job-title"]');
     const meta = bar.querySelector('[data-role="job-meta"]');
     const meter = bar.querySelector('[data-role="job-meter"]');
     const pauseBtn = bar.querySelector('[data-act="job-pause"]');
-    const kindLabel = kind === "fetch" ? "抓取字幕" : kind === "scan" ? "扫描视频" : "任务";
-    const paused = isLibraryJobPaused();
-    if (title) title.textContent = paused ? `${kindLabel}已暂停` : kindLabel;
-    const index = Number(job.index) || 0;
-    const total = Number(job.total) || 0;
-    const parts = [];
-    if (total > 0) parts.push(`${Math.min(index, total)} / ${total}`);
-    if (job.label) parts.push(job.label);
-    if (meta) meta.textContent = parts.join(" · ") || (busy ? "进行中" : "空闲");
-    if (meter) {
-      const pct = total > 0 ? Math.max(0, Math.min(100, (index / total) * 100)) : (busy ? 8 : 0);
-      meter.style.width = `${pct}%`;
-    }
+    if (title) title.textContent = job.title;
+    if (meta) meta.textContent = job.meta;
+    if (meter) meter.style.width = String(job.percent) + "%";
     if (pauseBtn) {
-      pauseBtn.textContent = paused ? "继续" : "暂停";
-      pauseBtn.setAttribute("aria-pressed", paused ? "true" : "false");
-      pauseBtn.title = paused ? "从暂停处继续" : "暂停当前任务，已完成的条目会保留";
+      pauseBtn.textContent = job.pauseLabel;
+      pauseBtn.setAttribute("aria-pressed", job.paused ? "true" : "false");
+      pauseBtn.title = job.pauseTitle;
     }
   }
-
   async function waitIfJobPaused() {
-    if (!isLibraryJobPaused()) return;
+    if (!appCall("libraryJob.isPaused", state)) return;
     updateLibraryJobBar();
-    while (isLibraryJobPaused() && !state.cancel && !state.cancelScan && !state.cancelBatch) {
-      await sleep(140);
-    }
+    await appCall("libraryJob.waitWhilePaused", state, sleep);
   }
-
   function toggleLibraryJobPause() {
-    if (state.batchBusy) {
-      state.batchPaused = !state.batchPaused;
-      setStatus(
-        state.batchPaused ? "已暂停字幕抓取 · 点「继续」恢复" : "继续抓取字幕…",
-        state.batchPaused ? "ok" : "",
-      );
-    } else if (state.scanBusy) {
-      state.scanPaused = !state.scanPaused;
-      setStatus(
-        state.scanPaused ? "已暂停扫描 · 点「继续」恢复" : "继续扫描…",
-        state.scanPaused ? "ok" : "",
-      );
-    } else {
-      setStatus("当前没有可暂停的扫描或抓取任务", "ok");
-      return;
-    }
-    updateLibraryJobBar();
+    const result = appCall("libraryJob.togglePause", state);
+    setStatus(result.text, result.css);
+    if (result.changed) updateLibraryJobBar();
   }
-
   function stopLibraryJob() {
-    state.cancel = true;
-    state.cancelScan = true;
-    state.cancelBatch = true;
-    state.scanPaused = false;
-    state.batchPaused = false;
+    appCall("libraryJob.stop", state);
     setStatus("正在停止扫描/字幕任务…已完成的条目会保留");
     updateLibraryJobBar();
   }
