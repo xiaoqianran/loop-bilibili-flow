@@ -24,7 +24,7 @@ const counts = new Map<number, number>();
 for (const diag of diagnostics) counts.set(diag.code, (counts.get(diag.code) || 0) + 1);
 const summary = [...counts.entries()].sort((a, b) => b[1] - a[1])
   .slice(0, 8).map(([code, count]) => "TS" + code + "=" + count).join(", ");
-const maxAllowed = 1671;
+const maxAllowed = 1525;
 console.log("Workbench legacy strict diagnostic audit: " + diagnostics.length + " / " + maxAllowed
   + " max (" + summary + ")");
 if (diagnostics.length > maxAllowed) {

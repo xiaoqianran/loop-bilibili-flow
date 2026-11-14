@@ -83,8 +83,8 @@ export function mountWorkbench(SubBatch) {
 
   /**
    * P4.5 monorepo bridge: production bootstrap exposes `var SubBatch`.
-   * Pure cores prefer SubBatch.SubBatchMonorepo.* when present; local bodies
-   * remain as golden-harness fallbacks (typeof SubBatch is ReferenceError-safe).
+   * Production core and Application capabilities must be supplied by the
+   * bundled SubBatch.SubBatchMonorepo. Do not substitute fake business rules.
    */
 
   const SCRIPT_VERSION =
@@ -556,136 +556,7 @@ export function mountWorkbench(SubBatch) {
   ];
 
 
-  // ─── MD5 ────────────────────────────────────────────────────────────────
-  function md5(str) {
-    function cmn(q, a, b, x, s, t) {
-      a = (a + q + x + t) | 0;
-      return (((a << s) | (a >>> (32 - s))) + b) | 0;
-    }
-    function ff(a, b, c, d, x, s, t) {
-      return cmn((b & c) | (~b & d), a, b, x, s, t);
-    }
-    function gg(a, b, c, d, x, s, t) {
-      return cmn((b & d) | (c & ~d), a, b, x, s, t);
-    }
-    function hh(a, b, c, d, x, s, t) {
-      return cmn(b ^ c ^ d, a, b, x, s, t);
-    }
-    function ii(a, b, c, d, x, s, t) {
-      return cmn(c ^ (b | ~d), a, b, x, s, t);
-    }
-    function toUtf8Bytes(input) {
-      const s = unescape(encodeURIComponent(input));
-      const out = new Array(s.length);
-      for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
-      return out;
-    }
-    function bytesToWords(bytes) {
-      const words = [];
-      for (let i = 0; i < bytes.length; i++) {
-        words[i >> 2] |= bytes[i] << ((i % 4) * 8);
-      }
-      return words;
-    }
-    function wordsToHex(words) {
-      const hex = "0123456789abcdef";
-      let out = "";
-      for (let i = 0; i < words.length * 4; i++) {
-        out +=
-          hex.charAt((words[i >> 2] >> ((i % 4) * 8 + 4)) & 0x0f) +
-          hex.charAt((words[i >> 2] >> ((i % 4) * 8)) & 0x0f);
-      }
-      return out;
-    }
-    const bytes = toUtf8Bytes(str);
-    const bitLen = bytes.length * 8;
-    bytes.push(0x80);
-    while (bytes.length % 64 !== 56) bytes.push(0);
-    const words = bytesToWords(bytes);
-    words.push(bitLen >>> 0);
-    words.push(Math.floor(bitLen / 0x100000000));
-    let a0 = 0x67452301,
-      b0 = 0xefcdab89,
-      c0 = 0x98badcfe,
-      d0 = 0x10325476;
-    for (let i = 0; i < words.length; i += 16) {
-      let a = a0,
-        b = b0,
-        c = c0,
-        d = d0;
-      const w = words.slice(i, i + 16);
-      while (w.length < 16) w.push(0);
-      a = ff(a, b, c, d, w[0], 7, 0xd76aa478);
-      d = ff(d, a, b, c, w[1], 12, 0xe8c7b756);
-      c = ff(c, d, a, b, w[2], 17, 0x242070db);
-      b = ff(b, c, d, a, w[3], 22, 0xc1bdceee);
-      a = ff(a, b, c, d, w[4], 7, 0xf57c0faf);
-      d = ff(d, a, b, c, w[5], 12, 0x4787c62a);
-      c = ff(c, d, a, b, w[6], 17, 0xa8304613);
-      b = ff(b, c, d, a, w[7], 22, 0xfd469501);
-      a = ff(a, b, c, d, w[8], 7, 0x698098d8);
-      d = ff(d, a, b, c, w[9], 12, 0x8b44f7af);
-      c = ff(c, d, a, b, w[10], 17, 0xffff5bb1);
-      b = ff(b, c, d, a, w[11], 22, 0x895cd7be);
-      a = ff(a, b, c, d, w[12], 7, 0x6b901122);
-      d = ff(d, a, b, c, w[13], 12, 0xfd987193);
-      c = ff(c, d, a, b, w[14], 17, 0xa679438e);
-      b = ff(b, c, d, a, w[15], 22, 0x49b40821);
-      a = gg(a, b, c, d, w[1], 5, 0xf61e2562);
-      d = gg(d, a, b, c, w[6], 9, 0xc040b340);
-      c = gg(c, d, a, b, w[11], 14, 0x265e5a51);
-      b = gg(b, c, d, a, w[0], 20, 0xe9b6c7aa);
-      a = gg(a, b, c, d, w[5], 5, 0xd62f105d);
-      d = gg(d, a, b, c, w[10], 9, 0x02441453);
-      c = gg(c, d, a, b, w[15], 14, 0xd8a1e681);
-      b = gg(b, c, d, a, w[4], 20, 0xe7d3fbc8);
-      a = gg(a, b, c, d, w[9], 5, 0x21e1cde6);
-      d = gg(d, a, b, c, w[14], 9, 0xc33707d6);
-      c = gg(c, d, a, b, w[3], 14, 0xf4d50d87);
-      b = gg(b, c, d, a, w[8], 20, 0x455a14ed);
-      a = gg(a, b, c, d, w[13], 5, 0xa9e3e905);
-      d = gg(d, a, b, c, w[2], 9, 0xfcefa3f8);
-      c = gg(c, d, a, b, w[7], 14, 0x676f02d9);
-      b = gg(b, c, d, a, w[12], 20, 0x8d2a4c8a);
-      a = hh(a, b, c, d, w[5], 4, 0xfffa3942);
-      d = hh(d, a, b, c, w[8], 11, 0x8771f681);
-      c = hh(c, d, a, b, w[11], 16, 0x6d9d6122);
-      b = hh(b, c, d, a, w[14], 23, 0xfde5380c);
-      a = hh(a, b, c, d, w[1], 4, 0xa4beea44);
-      d = hh(d, a, b, c, w[4], 11, 0x4bdecfa9);
-      c = hh(c, d, a, b, w[7], 16, 0xf6bb4b60);
-      b = hh(b, c, d, a, w[10], 23, 0xbebfbc70);
-      a = hh(a, b, c, d, w[13], 4, 0x289b7ec6);
-      d = hh(d, a, b, c, w[0], 11, 0xeaa127fa);
-      c = hh(c, d, a, b, w[3], 16, 0xd4ef3085);
-      b = hh(b, c, d, a, w[6], 23, 0x04881d05);
-      a = hh(a, b, c, d, w[9], 4, 0xd9d4d039);
-      d = hh(d, a, b, c, w[12], 11, 0xe6db99e5);
-      c = hh(c, d, a, b, w[15], 16, 0x1fa27cf8);
-      b = hh(b, c, d, a, w[2], 23, 0xc4ac5665);
-      a = ii(a, b, c, d, w[0], 6, 0xf4292244);
-      d = ii(d, a, b, c, w[7], 10, 0x432aff97);
-      c = ii(c, d, a, b, w[14], 15, 0xab9423a7);
-      b = ii(b, c, d, a, w[5], 21, 0xfc93a039);
-      a = ii(a, b, c, d, w[12], 6, 0x655b59c3);
-      d = ii(d, a, b, c, w[3], 10, 0x8f0ccc92);
-      c = ii(c, d, a, b, w[10], 15, 0xffeff47d);
-      b = ii(b, c, d, a, w[1], 21, 0x85845dd1);
-      a = ii(a, b, c, d, w[8], 6, 0x6fa87e4f);
-      d = ii(d, a, b, c, w[15], 10, 0xfe2ce6e0);
-      c = ii(c, d, a, b, w[6], 15, 0xa3014314);
-      b = ii(b, c, d, a, w[13], 21, 0x4e0811a1);
-      a = ii(a, b, c, d, w[4], 6, 0xf7537e82);
-      d = ii(d, a, b, c, w[11], 10, 0xbd3af235);
-      c = ii(c, d, a, b, w[2], 15, 0x2ad7d2bb);
-      b = ii(b, c, d, a, w[9], 21, 0xeb86d391);
-      a0 = (a0 + a) | 0;
-      b0 = (b0 + b) | 0;
-      c0 = (c0 + c) | 0;
-      d0 = (d0 + d) | 0;
-    }
-    return wordsToHex([a0, b0, c0, d0]);
-  }
+  // Stable content fingerprints use the canonical browser-safe core MD5.
 
   // ─── pure helpers (offline harness extracts // #region pure-logic) ─────
   // #region pure-logic
@@ -1068,103 +939,10 @@ export function mountWorkbench(SubBatch) {
       return null;
     }
   }
-  /** Standalone install (no SubBatch bootstrap) must still capture subtitles. */
-  const CORE_LOCAL_FALLBACKS = {
-    buildLibraryRenderNodes(entries) {
-      return (entries || []).map((entry) => ({ type: "item", entry, depth: 0 }));
-    },
-    mergeGroupFields(target, source) {
-      if (!source) return target;
-      const next = { ...target };
-      for (const key of [
-        "groupType", "groupKey", "groupFolder", "parentFolder", "spaceMid",
-        "collectionName", "collectionMid", "collectionSid", "collectionShortUrl", "videoTitle",
-      ]) {
-        if (source[key] != null && source[key] !== "") next[key] = source[key];
-      }
-      if (source.author && (!target.author || target.author === "未知UP")) next.author = source.author;
-      return next;
-    },
-    attachCollectionGroupMeta(items, meta = {}, ctx = {}) {
-      const list = items || [];
-      const mid = String(meta.mid || ctx.mid || "").trim();
-      const sid = String(meta.season_id || ctx.season_id || "").trim();
-      const collectionName = String(meta.name || meta.title || ctx.collectionTitleHint || "未命名合集").trim();
-      const author = String(meta.author || ctx.authorHint || list[0]?.author || "").trim();
-      const groupKey = mid && sid ? `collection:${mid}/${sid}` : `collection:${collectionName}`;
-      return list.map((it) => ({
-        ...it,
-        author: String(it.author || "").trim() || author,
-        groupType: "collection",
-        groupKey,
-        groupFolder: collectionName,
-        collectionName,
-        collectionMid: mid,
-        collectionSid: sid,
-      }));
-    },
-    attachSelectionGroupMeta(items) { return items || []; },
-    attachUserSpaceGroupMeta(items) { return items || []; },
-    applySpaceCollectionMembership(items) { return items || []; },
-    attachSpaceLooseVideosMeta(items) { return items || []; },
-    countSpaceCollectionMatches() { return 0; },
-    applyUgcSeasonToItem(item, view) {
-      if (!item || !view?.ugc_season?.id) return item;
-      const season = view.ugc_season;
-      const mid = season.mid || view.owner?.mid;
-      const sid = season.id;
-      if (!mid || !sid) return item;
-      return {
-        ...item,
-        groupType: "collection",
-        groupKey: `collection:${mid}/${sid}`,
-        collectionName: String(season.title || "未命名合集"),
-        collectionMid: String(mid),
-        collectionSid: String(sid),
-      };
-    },
-    applyUgcSeasonToItems(items, view) {
-      return (items || []).map((it) => CORE_LOCAL_FALLBACKS.applyUgcSeasonToItem(it, view));
-    },
-    suggestCaptureMode(item) {
-      if (!item) return "auto";
-      if (item.groupType === "collection" || item.collectionSid) return "collection";
-      if (item.groupType === "selection" || (Array.isArray(item.pages) && item.pages.length > 1)) return "selection";
-      return "auto";
-    },
-    safePathSegment(name, maxLen = 120) {
-      return String(name || "").replace(/[\\/:*?"<>|]/g, "_").slice(0, maxLen) || "untitled";
-    },
-    setGroupSelection(items, groupKey, selected) {
-      return (items || []).map((it) => (it.groupKey === groupKey ? { ...it, selected } : it));
-    },
-    resolveLibraryGroupKey(item) { return item?.groupKey || ""; },
-    normalizeExportItem(item) { return item; },
-    buildGroupMetaPatches() { return null; },
-    applyGroupMetaPatchToItems(items) { return items || []; },
-    upsertIndexForExportItem(map) { return map || {}; },
-    renderExportIndexMd() { return ""; },
-    buildUpFolderLabel(author, name) {
-      return [author, name].filter(Boolean).join(" / ") || name || "";
-    },
-    buildCollectionShortUrl(mid, seasonId) {
-      return mid && seasonId ? `https://space.bilibili.com/${mid}/lists/${seasonId}` : "";
-    },
-    resolveSeriesTitle(item) { return item?.collectionName || item?.title || ""; },
-    buildSubtitleExportRelativePath(item, ext) {
-      const stem = String(item?.title || item?.bvid || "video").replace(/[\\/:*?"<>|]/g, "_");
-      return `${SUBTITLE_EXPORT_ROOT}/${stem}.${String(ext || "srt").replace(/^\./, "")}`;
-    },
-  };
-
   function coreCall(name, ...args) {
     const fn = coreFn(name);
-    if (fn) return fn(...args);
-    const fallback = CORE_LOCAL_FALLBACKS[name];
-    if (typeof fallback === "function") return fallback(...args);
-    throw new Error(
-      `[bili-subbatch] monorepo core missing "${name}" — install/update script so SubBatch.SubBatchMonorepo.core is present`,
-    );
+    if (!fn) throw new Error("[bili-subbatch] monorepo core API missing: " + name);
+    return fn(...args);
   }
 
   function safeFilename(name) {
@@ -2951,94 +2729,67 @@ export function mountWorkbench(SubBatch) {
       recordUserScroll: () => { state.transcriptUserScrollUntil = Date.now() + 3500; },
     });
 
-    root.addEventListener("change", (e) => {
-      const shortcutPref = e.target.closest?.("[data-shortcut-pref]");
-      if (shortcutPref) {
-        const key = String(shortcutPref.dataset.shortcutPref || "");
-        if (key === "enabled") state.shortcutConfig.enabled = !!shortcutPref.checked;
-        else if (["summonLayout", "summonTarget", "preferredDock"].includes(key)) state.shortcutConfig[key] = String(shortcutPref.value || "");
+    SubBatch.SubBatchMonorepo.ui.settingsInteraction.bindFlowChanges(root, {
+      shortcutPreference: (key, value, checked) => {
+        if (key === "enabled") state.shortcutConfig.enabled = checked;
+        else state.shortcutConfig[key] = value;
         saveShortcutSettings();
         renderShortcutSettings(root);
-        setStatus(key === "enabled" ? `快捷键已${state.shortcutConfig.enabled ? "开启" : "关闭"}` : "快捷召唤偏好已保存", "ok");
-        return;
-      }
-      const knowledgeModel = e.target.closest?.('[data-role="knowledge-model"]');
-      if (knowledgeModel) {
-        state.knowledgeModelId = String(knowledgeModel.value || "");
-        storageSet(KNOWLEDGE_MODEL_STORE_KEY, state.knowledgeModelId);
-        return;
-      }
-      const preEnabled = e.target.closest?.("[data-flow-preprocess-enabled]");
-      if (preEnabled) {
-        state.preprocessEnabled = !!preEnabled.checked;
-        savePreprocessEnabledSetting(state.preprocessEnabled);
-        renderAiFlowDrawer(); refreshAiChips();
-        return;
-      }
-      const prePrompt = e.target.closest?.("[data-flow-preprompt]");
-      if (prePrompt) {
-        const id = String(prePrompt.value || "");
-        savePromptProfiles(state.promptProfiles, state.activePromptId, id);
+        setStatus(key === "enabled"
+          ? `快捷键已${state.shortcutConfig.enabled ? "开启" : "关闭"}`
+          : "快捷召唤偏好已保存", "ok");
+      },
+      knowledgeModel: (value) => {
+        state.knowledgeModelId = value;
+        storageSet(KNOWLEDGE_MODEL_STORE_KEY, value);
+      },
+      preprocessEnabled: (value) => {
+        state.preprocessEnabled = value;
+        savePreprocessEnabledSetting(value);
         renderAiFlowDrawer();
-        return;
-      }
-      const preModel = e.target.closest?.("[data-flow-premodel]");
-      if (preModel) {
-        state.preprocessModelId = String(preModel.value || "");
-        storageSet(PREPROCESS_MODEL_STORE_KEY, state.preprocessModelId);
+        refreshAiChips();
+      },
+      preprocessPrompt: (value) => {
+        savePromptProfiles(state.promptProfiles, state.activePromptId, value);
         renderAiFlowDrawer();
-        return;
-      }
-      const preConcurrency = e.target.closest?.("[data-flow-preconcurrency]");
-      if (preConcurrency) {
-        state.preprocessConcurrency = saveBoundedNumberSetting(PREPROCESS_CONCURRENCY_STORE_KEY, preConcurrency.value, PREPROCESS_DEFAULT_CONCURRENCY, 1, 8);
-        return;
-      }
-      const preTargetMinutes = e.target.closest?.("[data-flow-pretarget-minutes]");
-      if (preTargetMinutes) {
-        state.preprocessTargetMinutes = saveBoundedNumberSetting(PREPROCESS_TARGET_MINUTES_STORE_KEY, preTargetMinutes.value, PREPROCESS_DEFAULT_TARGET_MINUTES, 2, 30);
-        return;
-      }
-      const preOverlap = e.target.closest?.("[data-flow-preoverlap-seconds]");
-      if (preOverlap) {
-        state.preprocessOverlapSeconds = saveBoundedNumberSetting(PREPROCESS_OVERLAP_SECONDS_STORE_KEY, preOverlap.value, PREPROCESS_DEFAULT_OVERLAP_SECONDS, 0, 120);
-        return;
-      }
-      const preMaxChars = e.target.closest?.("[data-flow-premax-chars]");
-      if (preMaxChars) {
-        state.preprocessMaxChars = saveBoundedNumberSetting(PREPROCESS_MAX_CHARS_STORE_KEY, preMaxChars.value, PREPROCESS_DEFAULT_MAX_CHARS, 8000, 60000);
-        return;
-      }
-      const preRetries = e.target.closest?.("[data-flow-preretries]");
-      if (preRetries) {
-        state.preprocessRetries = saveBoundedNumberSetting(PREPROCESS_RETRIES_STORE_KEY, preRetries.value, PREPROCESS_DEFAULT_RETRIES, 0, 4);
-        return;
-      }
-      const studioModel = e.target.closest?.("[data-flow-studiomodel]");
-      if (studioModel) {
-        state.studioModelId = String(studioModel.value || "");
-        storageSet(STUDIO_MODEL_STORE_KEY, state.studioModelId);
+      },
+      preprocessModel: (value) => {
+        state.preprocessModelId = value;
+        storageSet(PREPROCESS_MODEL_STORE_KEY, value);
         renderAiFlowDrawer();
-        return;
-      }
-      const studioContext = e.target.closest?.("[data-flow-studiocontext]");
-      if (studioContext) {
-        const next = String(studioContext.value || "auto");
-        state.studioContextPref = ["raw", "processed"].includes(next) ? next : "auto";
+      },
+      preprocessConcurrency: (raw) => {
+        state.preprocessConcurrency = saveBoundedNumberSetting(PREPROCESS_CONCURRENCY_STORE_KEY, raw, PREPROCESS_DEFAULT_CONCURRENCY, 1, 8);
+      },
+      preprocessTargetMinutes: (raw) => {
+        state.preprocessTargetMinutes = saveBoundedNumberSetting(PREPROCESS_TARGET_MINUTES_STORE_KEY, raw, PREPROCESS_DEFAULT_TARGET_MINUTES, 2, 30);
+      },
+      preprocessOverlapSeconds: (raw) => {
+        state.preprocessOverlapSeconds = saveBoundedNumberSetting(PREPROCESS_OVERLAP_SECONDS_STORE_KEY, raw, PREPROCESS_DEFAULT_OVERLAP_SECONDS, 0, 120);
+      },
+      preprocessMaxChars: (raw) => {
+        state.preprocessMaxChars = saveBoundedNumberSetting(PREPROCESS_MAX_CHARS_STORE_KEY, raw, PREPROCESS_DEFAULT_MAX_CHARS, 8000, 60000);
+      },
+      preprocessRetries: (raw) => {
+        state.preprocessRetries = saveBoundedNumberSetting(PREPROCESS_RETRIES_STORE_KEY, raw, PREPROCESS_DEFAULT_RETRIES, 0, 4);
+      },
+      studioModel: (value) => {
+        state.studioModelId = value;
+        storageSet(STUDIO_MODEL_STORE_KEY, value);
+        renderAiFlowDrawer();
+      },
+      studioContext: (value) => {
+        state.studioContextPref = ["raw", "processed"].includes(value) ? value : "auto";
         persistStudioChat();
         if (currentAiWorkbenchStage() === "chat") renderStudioCanvas();
-        return;
-      }
-      const taskCard = e.target.closest?.("[data-flow-task-id]");
-      if (taskCard) {
-        const taskId = String(taskCard.dataset.flowTaskId || "");
-        const tasks = currentPostTasks().map((t) => ({ ...t, modelIds: [...(t.modelIds || [])] }));
-        const task = tasks.find((t) => t.id === taskId);
+      },
+      taskPrompt: (taskId, promptId) => {
+        const tasks = currentPostTasks().map((task) => ({ ...task, modelIds: [...(task.modelIds || [])] }));
+        const task = tasks.find((item) => item.id === taskId);
         if (!task) return;
-        const promptSelect = e.target.closest?.("[data-flow-task-prompt]");
-        if (promptSelect) task.promptId = String(promptSelect.value || "");
+        task.promptId = promptId;
         savePostTasks(tasks);
-      }
+      },
     });
 
     root.addEventListener("click", (e) => {
@@ -5748,7 +5499,7 @@ export function mountWorkbench(SubBatch) {
       timeStart: Number(article.dataset.knowledgeStart || 0),
       timeEnd: Number(article.dataset.knowledgeEnd || article.dataset.knowledgeStart || 0),
       contextText,
-      sourceHash: md5(currentInputPreviewText("processed") || ""),
+      sourceHash: coreCall("md5", currentInputPreviewText("processed") || ""),
     };
     const compactSelection = text.replace(/\s+/g, " ");
     toolbar.querySelector('[data-role="knowledge-selection-text"]').textContent = compactSelection.length > 42 ? `${compactSelection.slice(0, 42)}…` : compactSelection;
@@ -7363,7 +7114,7 @@ export function mountWorkbench(SubBatch) {
       const kpage = first?.page || fallbackSource.page || 1;
       const kstart = first?.seconds ?? 0;
       const kend = last?.seconds ?? kstart;
-      const segmentId = `seg-${kbvid || "local"}-p${kpage}-${Math.round(kstart * 10)}-${md5(clean || block.text).slice(0, 7)}`;
+      const segmentId = `seg-${kbvid || "local"}-p${kpage}-${Math.round(kstart * 10)}-${coreCall("md5", clean || block.text).slice(0, 7)}`;
       const sourceKey = knowledgeSourceKey(kbvid, kpage);
       const bodyHtml = renderProcessedTranscriptBodyHtml(clean || block.text);
       return `<article class="bsb-preprocess-block" data-preprocess-block="${paragraphIndex}" data-knowledge-segment="${escapeAttr(segmentId)}" data-knowledge-source-key="${escapeAttr(sourceKey)}" data-knowledge-bvid="${escapeAttr(kbvid)}" data-knowledge-page="${kpage}" data-knowledge-start="${kstart}" data-knowledge-end="${kend}" data-knowledge-clock="${escapeAttr(first?.clock || "")}" data-knowledge-topic="${escapeAttr(block.topic || "")}" data-knowledge-title="${escapeAttr(fallbackSource.title || "")}" data-knowledge-author="${escapeAttr(fallbackSource.author || "")}"><div class="bsb-preprocess-block-head"><span class="bsb-preprocess-block-index">${String(paragraphIndex).padStart(2, "0")}</span>${block.topic ? `<span class="bsb-preprocess-block-topic">${escapeHtml(block.topic)}</span>` : ""}${warning}${timeHtml}</div><div class="bsb-preprocess-block-body bsb-md-rich" data-knowledge-plain="${escapeAttr(clean || block.text)}">${bodyHtml}</div></article>`;
@@ -9627,583 +9378,17 @@ body{padding:48px 20px 80px}
     state.aiStickBottom = false; state.aiUserReading = true; updateJumpLatestBtn();
   }
 
-  /**
-   * OpenAI-compatible chat.completions.
-   *
-   * 路径优先级（peer + opencli 实测）：
-   * 1) 页面原生 fetch + ReadableStream
-   * 2) GM_xmlhttpRequest 回退（无 timeout；优先 responseType stream + reader）
+  /** The Application controller owns exactly one POST, stream decoding and cancellation.
+   *  No legacy network fallback: a failed or ambiguous POST must never be replayed.
    */
   function requestChatCompletion(opts) {
     const runtime = opts.runtime || createAiRuntime(opts.model || "AI");
-    // Production path: AI Controller owns transport, streaming and cancellation.
-    // A cross-origin POST is sent via GM once, never replayed after fetch errors.
-    const requestFromApp = appFn("ai.request");
-    if (requestFromApp) {
-      return requestFromApp({
-        ...opts,
-        runtime,
-        network: runtimeNetwork(),
-        pageHref: location.href,
-      });
-    }
-    // Historical standalone fallback only (official builds always have the app).
-    const {
-      baseUrl,
-      apiKey,
-      model,
-      temperature,
-      maxTokens,
-      messages,
-      stream,
-      onDelta,
-      onDone,
-      onError,
-      onStatus,
-    } = opts;
-    const url = String(baseUrl || "").trim().replace(/\/+$/, "") + "/chat/completions";
-    const useStream = stream !== false;
-    const effectiveMaxTokens = Math.max(256, Math.min(128000, Math.floor(Number(maxTokens) || AI_DEFAULTS.maxTokens)));
-    const body = {
-      model: String(model || "").trim(),
-      messages,
-      temperature,
-      max_tokens: effectiveMaxTokens,
-      stream: useStream,
-    };
-    onStatus && onStatus(`准备请求 · max_tokens=${effectiveMaxTokens}`);
-
-    // cancel previous
-    try {
-      if (runtime.abortController) runtime.abortController.abort();
-    } catch (_) {
-      /* */
-    }
-    try {
-      if (runtime.xhr && typeof runtime.xhr.abort === "function") {
-        runtime.xhr.abort();
-      }
-    } catch (_) {
-      /* */
-    }
-    runtime.abortController = null;
-    runtime.xhr = null;
-
-    // Prefer page fetch (validated via opencli browser eval)
-    requestChatViaPageFetch({
+    return appCall("ai.request", {
+      ...opts,
       runtime,
-      url,
-      apiKey,
-      body,
-      useStream,
-      onDelta,
-      onDone,
-      onError: (err) => {
-        // CORS / network → fall back to GM
-        const msg = String(err && err.message ? err.message : err);
-        if (
-          /cors|failed to fetch|networkerror|load failed|blocked/i.test(msg) ||
-          err?.name === "TypeError"
-        ) {
-          onStatus && onStatus(`页内 fetch 失败(${msg.slice(0, 60)})，改用 GM…`);
-          requestChatViaGm({
-            runtime,
-            url,
-            apiKey,
-            body,
-            useStream,
-            onDelta,
-            onDone,
-            onError,
-            onStatus,
-          });
-        } else {
-          onError && onError(err);
-        }
-      },
-      onStatus,
+      network: runtimeNetwork(),
+      pageHref: location.href,
     });
-    return runtime;
-  }
-
-  function requestChatViaPageFetch({
-    runtime,
-    url,
-    apiKey,
-    body,
-    useStream,
-    onDelta,
-    onDone,
-    onError,
-    onStatus,
-  }) {
-    let assembledContent = "";
-    let assembledReasoning = "";
-    let settled = false;
-    let lineBuf = "";
-    let lastStatusAt = 0;
-    let sawDone = false;
-    let finishReason = "";
-    const ac = new AbortController();
-    runtime.abortController = ac;
-
-    const finish = (err) => {
-      if (settled) return;
-      settled = true;
-      if (runtime.abortController === ac) runtime.abortController = null;
-      if (err) onError && onError(err);
-      else {
-        onDone &&
-          onDone(coreCall("formatAiDisplay", assembledContent, assembledReasoning), {
-            content: assembledContent,
-            reasoning: assembledReasoning,
-            finishReason,
-            sawDone,
-          });
-      }
-    };
-
-    const emit = () => {
-      onDelta &&
-        onDelta("", coreCall("formatAiDisplay", assembledContent, assembledReasoning), {
-          content: assembledContent,
-          reasoning: assembledReasoning,
-        });
-    };
-
-    const applyPiece = (c, r) => {
-      let ch = false;
-      if (c) {
-        assembledContent += c;
-        ch = true;
-      }
-      if (r) {
-        assembledReasoning += r;
-        ch = true;
-      }
-      if (ch) emit();
-    };
-
-    const handleSseLine = (line) => {
-      const parsed = coreCall("parseSseDataLine", line);
-      if (parsed.kind === "done") sawDone = true;
-      if (parsed.kind === "delta") {
-        applyPiece(parsed.content, parsed.reasoning);
-        if (parsed.finishReason) finishReason = parsed.finishReason;
-      }
-      if (parsed.kind === "error") throw new Error(parsed.message);
-    };
-
-    onStatus && onStatus("页内 fetch 流式请求（peer/opencli 路径）…");
-
-    (async () => {
-      try {
-        if (runtime.abort) throw new Error("用户停止");
-        const res = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: "Bearer " + apiKey,
-            Accept: useStream
-              ? "text/event-stream, application/json"
-              : "application/json",
-          },
-          body: JSON.stringify(body),
-          signal: ac.signal,
-        });
-        if (!res.ok) {
-          const t = await res.text();
-          throw new Error(`HTTP ${res.status}: ${t.slice(0, 300)}`);
-        }
-
-        if (!useStream || !res.body || !res.body.getReader) {
-          const text = await res.text();
-          const j = JSON.parse(text);
-          if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
-          const choice = j.choices?.[0];
-          const { content, reasoning } = coreCall("extractFromChoice", choice);
-          finishReason = String(choice?.finish_reason || "");
-          assembledContent = content || "";
-          assembledReasoning = reasoning || "";
-          emit();
-          if (!assembledContent && !assembledReasoning) {
-            throw new Error("响应无正文: " + text.slice(0, 200));
-          }
-          if (finishReason === "length") {
-            throw new Error(`输出达到 max_tokens=${body.max_tokens}，结果已截断`);
-          }
-          finish(null);
-          return;
-        }
-
-        onStatus && onStatus("已连接，流式读取中…");
-        const reader = res.body.getReader();
-        const dec = new TextDecoder();
-        let totalBytes = 0;
-        while (true) {
-          if (runtime.abort) {
-            try {
-              await reader.cancel();
-            } catch (_) {
-              /* */
-            }
-            throw new Error("用户停止");
-          }
-          const { done, value } = await reader.read();
-          if (done) break;
-          totalBytes += value ? value.length : 0;
-          lineBuf += dec.decode(value, { stream: true });
-          const lines = lineBuf.split(/\r?\n/);
-          lineBuf = lines.pop() || "";
-          for (const line of lines) handleSseLine(line);
-          const now = Date.now();
-          if (now - lastStatusAt > 400) {
-            lastStatusAt = now;
-            onStatus &&
-              onStatus(
-                `页内流式… ${totalBytes}B · 正文 ${assembledContent.length} · 思考 ${assembledReasoning.length}`,
-              );
-          }
-        }
-        if (lineBuf.trim()) handleSseLine(lineBuf);
-        if (!assembledContent && !assembledReasoning) {
-          throw new Error("流式结束但 content/reasoning 皆空");
-        }
-        if (finishReason === "length") {
-          throw new Error(`输出达到 max_tokens=${body.max_tokens}，结果已截断`);
-        }
-        if (!sawDone && !finishReason) {
-          throw new Error("流式连接在 [DONE]/finish_reason 之前中断，已保留部分内容");
-        }
-        finish(null);
-      } catch (e) {
-        if (runtime.abort || (e && e.name === "AbortError")) {
-          if (assembledContent || assembledReasoning) {
-            onStatus && onStatus("已停止，保留已接收内容");
-            finish(null);
-          } else {
-            finish(new Error("用户停止"));
-          }
-          return;
-        }
-        // 有部分内容：不重试以免重复计费，但必须标记为失败/截断，不能伪装成完整成功。
-        if (assembledContent || assembledReasoning) {
-          onStatus && onStatus("连接异常结束，保留已接收内容并标记失败");
-          finish(e instanceof Error ? e : new Error(String(e)));
-          return;
-        }
-        finish(e instanceof Error ? e : new Error(String(e)));
-      }
-    })();
-  }
-
-  function requestChatViaGm({
-    runtime,
-    url,
-    apiKey,
-    body,
-    useStream,
-    onDelta,
-    onDone,
-    onError,
-    onStatus,
-  }) {
-    let assembledContent = "";
-    let assembledReasoning = "";
-    let settled = false;
-    let lineBuf = "";
-    let lastSeenLen = 0;
-    let lastStatusAt = 0;
-    let sawDone = false;
-    let finishReason = "";
-    let xhrHandle = null;
-    let usedStreamReader = false;
-    /** Only one text POST may start (prevents parallel billing) */
-    let textPathStarted = false;
-    /** When true, stream onabort is expected and must not finish/error */
-    let switchingToText = false;
-
-    const finish = (err) => {
-      if (settled) return;
-      settled = true;
-      switchingToText = false;
-      if (runtime.xhr === xhrHandle) runtime.xhr = null;
-      if (err) onError && onError(err);
-      else {
-        onDone &&
-          onDone(coreCall("formatAiDisplay", assembledContent, assembledReasoning), {
-            content: assembledContent,
-            reasoning: assembledReasoning,
-            finishReason,
-            sawDone,
-          });
-      }
-    };
-
-    const softFinishOrError = (label) => {
-      if (assembledContent || assembledReasoning) {
-        onStatus && onStatus(`${label}，保留已接收内容并标记失败`);
-      }
-      finish(new Error(label));
-    };
-
-    const emit = () => {
-      onDelta &&
-        onDelta("", coreCall("formatAiDisplay", assembledContent, assembledReasoning), {
-          content: assembledContent,
-          reasoning: assembledReasoning,
-        });
-    };
-
-    const applyPiece = (c, r) => {
-      let ch = false;
-      if (c) {
-        assembledContent += c;
-        ch = true;
-      }
-      if (r) {
-        assembledReasoning += r;
-        ch = true;
-      }
-      if (ch) emit();
-    };
-
-    const handleSseLine = (line) => {
-      const parsed = coreCall("parseSseDataLine", line);
-      if (parsed.kind === "done") sawDone = true;
-      if (parsed.kind === "delta") {
-        applyPiece(parsed.content, parsed.reasoning);
-        if (parsed.finishReason) finishReason = parsed.finishReason;
-      }
-      if (parsed.kind === "error") softFinishOrError(parsed.message);
-    };
-
-    const ingestSseText = (fullText) => {
-      if (fullText.length < lastSeenLen) lastSeenLen = 0;
-      const neu = fullText.slice(lastSeenLen);
-      lastSeenLen = fullText.length;
-      if (!neu) return;
-      lineBuf += neu;
-      const lines = lineBuf.split(/\r?\n/);
-      lineBuf = lines.pop() || "";
-      for (const line of lines) handleSseLine(line);
-      const now = Date.now();
-      if (now - lastStatusAt > 400) {
-        lastStatusAt = now;
-        onStatus &&
-          onStatus(
-            `GM流式… ${fullText.length}B · 正文 ${assembledContent.length} · 思考 ${assembledReasoning.length}`,
-          );
-      }
-    };
-
-    const abortXhr = (handle) => {
-      if (!handle) return;
-      try {
-        if (typeof handle.abort === "function") handle.abort();
-      } catch (_) {
-        /* */
-      }
-    };
-
-    const commonHeaders = {
-      "Content-Type": "application/json",
-      Authorization: "Bearer " + apiKey,
-      Accept: useStream
-        ? "text/event-stream, application/json"
-        : "application/json",
-    };
-
-    function startGmTextPath(reason) {
-      if (settled || textPathStarted) return;
-      textPathStarted = true;
-      // Abort any in-flight stream XHR before opening a second POST
-      if (xhrHandle) {
-        switchingToText = true;
-        const prev = xhrHandle;
-        xhrHandle = null;
-        abortXhr(prev);
-        switchingToText = false;
-      }
-      onStatus &&
-        onStatus(
-          `GM text/onprogress（无 timeout）${reason ? " · " + reason : ""}…`,
-        );
-      xhrHandle = GM_xmlhttpRequest({
-        method: "POST",
-        url,
-        headers: commonHeaders,
-        data: JSON.stringify(body),
-        responseType: "text",
-        onloadstart() {
-          onStatus && onStatus("GM text 已连接…");
-        },
-        onprogress(res) {
-          if (runtime.abort) {
-            abortXhr(xhrHandle);
-            softFinishOrError("用户停止");
-            return;
-          }
-          if (useStream) ingestSseText(res.responseText || "");
-        },
-        onreadystatechange(res) {
-          if (runtime.abort) return;
-          if (res.readyState === 3 && useStream && res.responseText) {
-            ingestSseText(res.responseText);
-          }
-        },
-        onload(res) {
-          if (runtime.abort) {
-            softFinishOrError("用户停止");
-            return;
-          }
-          const text = res.responseText || "";
-          if (res.status < 200 || res.status >= 300) {
-            softFinishOrError(`HTTP ${res.status}: ${text.slice(0, 200)}`);
-            return;
-          }
-          try {
-            if (useStream) {
-              ingestSseText(text);
-              if (lineBuf.trim()) handleSseLine(lineBuf);
-            } else {
-              const j = JSON.parse(text);
-              if (j.error) {
-                throw new Error(j.error.message || JSON.stringify(j.error));
-              }
-              const choice = j.choices?.[0];
-              const { content, reasoning } = coreCall("extractFromChoice", choice);
-              finishReason = String(choice?.finish_reason || "");
-              assembledContent = content || "";
-              assembledReasoning = reasoning || "";
-              emit();
-            }
-          } catch (e) {
-            softFinishOrError(e.message || String(e));
-            return;
-          }
-          if (!assembledContent && !assembledReasoning) {
-            softFinishOrError("GM 响应无正文");
-            return;
-          }
-          if (finishReason === "length") {
-            softFinishOrError(`输出达到 max_tokens=${body.max_tokens}，结果已截断`);
-            return;
-          }
-          if (useStream && !sawDone && !finishReason) {
-            softFinishOrError("GM 流式连接在 [DONE]/finish_reason 之前中断");
-            return;
-          }
-          finish(null);
-        },
-        onerror() {
-          softFinishOrError("GM 网络错误");
-        },
-        ontimeout() {
-          softFinishOrError("GM ontimeout 误触");
-        },
-        onabort() {
-          if (runtime.abort) softFinishOrError("用户停止");
-          // ignore aborts while replacing handles
-        },
-      });
-      runtime.xhr = xhrHandle;
-    }
-
-    // Peer practice (GreasyFork 459997): responseType stream + getReader
-    if (useStream) {
-      onStatus && onStatus("GM stream reader 回退…");
-      xhrHandle = GM_xmlhttpRequest({
-        method: "POST",
-        url,
-        headers: commonHeaders,
-        data: JSON.stringify(body),
-        responseType: "stream",
-        onloadstart(streamRes) {
-          if (settled || textPathStarted) return;
-          try {
-            const reader =
-              streamRes.response &&
-              streamRes.response.getReader &&
-              streamRes.response.getReader();
-            if (!reader) throw new Error("no stream reader");
-            usedStreamReader = true;
-            onStatus && onStatus("GM stream reader 已连接…");
-            const dec = new TextDecoder();
-            let buf = "";
-            const pump = () => {
-              if (settled || textPathStarted) return;
-              if (runtime.abort) {
-                try {
-                  reader.cancel();
-                } catch (_) {
-                  /* */
-                }
-                softFinishOrError("用户停止");
-                return;
-              }
-              reader
-                .read()
-                .then(({ done, value }) => {
-                  if (settled || textPathStarted) return;
-                  if (done) {
-                    if (buf.trim()) {
-                      buf.split(/\r?\n/).forEach(handleSseLine);
-                    }
-                    if (!assembledContent && !assembledReasoning) {
-                      softFinishOrError("GM stream 结束无正文");
-                    } else if (finishReason === "length") {
-                      softFinishOrError(`输出达到 max_tokens=${body.max_tokens}，结果已截断`);
-                    } else if (!sawDone && !finishReason) {
-                      softFinishOrError("GM stream 在 [DONE]/finish_reason 之前中断");
-                    } else finish(null);
-                    return;
-                  }
-                  buf += dec.decode(value, { stream: true });
-                  const lines = buf.split(/\r?\n/);
-                  buf = lines.pop() || "";
-                  for (const line of lines) handleSseLine(line);
-                  onStatus &&
-                    onStatus(
-                      `GM stream… 正文 ${assembledContent.length} · 思考 ${assembledReasoning.length}`,
-                    );
-                  pump();
-                })
-                .catch((e) => {
-                  if (settled || textPathStarted) return;
-                  softFinishOrError(e.message || String(e));
-                });
-            };
-            pump();
-          } catch (_) {
-            // stream unsupported → single text POST after aborting this handle
-            if (!settled && !usedStreamReader && !textPathStarted) {
-              onStatus && onStatus("GM stream 不可用，改 text…");
-              startGmTextPath("stream unsupported");
-            }
-          }
-        },
-        onerror() {
-          if (settled || textPathStarted) return;
-          if (!usedStreamReader) {
-            startGmTextPath("stream onerror");
-          } else {
-            softFinishOrError("GM stream 网络错误");
-          }
-        },
-        onabort() {
-          // Intentional abort when switching to text path — do not finish
-          if (switchingToText || textPathStarted) return;
-          if (settled) return;
-          softFinishOrError(runtime.abort ? "用户停止" : "GM stream 中止");
-        },
-      });
-      runtime.xhr = xhrHandle;
-      return xhrHandle;
-    }
-
-    startGmTextPath("non-stream");
-    return xhrHandle;
   }
 
   function abortPreprocessChildRuntime(runtime) {
@@ -10676,36 +9861,6 @@ body{padding:48px 20px 80px}
     }
   }
 
-  function validateCtxForScan(ctx) {
-    if (ctx.type === "video" || ctx.type === "selection") {
-      if (!ctx.bvid) {
-        throw new Error("缺少 BV 号。请打开视频页，或切到「单个视频/视频选集」后重试");
-      }
-    } else if (ctx.type === "user") {
-      if (!ctx.mid) {
-        throw new Error("缺少 mid。请打开个人主页，或模式选「个人主页」");
-      }
-    } else if (ctx.type === "collection") {
-      if (!ctx.mid || !ctx.season_id) {
-        throw new Error(
-          "合集需要 mid + season_id。请打开合集页（space/lists 或 /list/{mid}?sid=），或从合集内视频页切到「合集」后重试",
-        );
-      }
-    } else if (ctx.type === "favorite") {
-      if (!ctx.media_id) {
-        throw new Error("收藏夹需要 fid/media_id。请打开带 fid 的收藏夹页");
-      }
-    } else if (ctx.type === "search") {
-      if (!ctx.keyword) {
-        throw new Error("搜索需要 keyword。请打开搜索结果页");
-      }
-    } else if (ctx.type === "unknown") {
-      throw new Error(
-        "未能识别页面。可手动选择模式：单个视频 / 视频选集 / 个人主页 / 收藏夹 / 合集 / 搜索页",
-      );
-    }
-  }
-
   /**
    * 合集内视频页往往只有 BV，没有 URL 参数 sid。
    * 扫描「合集」时从 view 接口补 mid + ugc_season.id，便于一键拉全合集。
@@ -10805,7 +9960,7 @@ body{padding:48px 20px 80px}
         }
       }
 
-      validateCtxForScan(ctx);
+      appCall("scan.validateContext", ctx);
 
       let items = [];
       let meta = {};
@@ -10858,8 +10013,7 @@ body{padding:48px 20px 80px}
         ctx.type === "collection" ||
         ctx.type === "search"
       ) {
-        const pageSize =
-          ctx.type === "favorite" ? 20 : ctx.type === "search" ? 42 : 30;
+        const pageSize = appCall("scan.pageSizeFor", ctx.type);
         const res = await loadAllListItems(ctx, {
           maxPages: state.maxPages,
           pageSize,

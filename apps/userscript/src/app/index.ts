@@ -1,3 +1,4 @@
+import * as scanContext from "./scan-context";
 import * as configOrder from "./config-order";
 import * as libraryScanController from "./library-scan-controller";
 import * as libraryJobController from "./library-job-controller";
@@ -18,6 +19,11 @@ export const ordering = {
   reorderIds: configOrder.reorderIds,
   applyConfigIdOrder: configOrder.applyConfigIdOrder,
   applyPromptStageOrder: configOrder.applyPromptStageOrder,
+} as const;
+
+export const scan = {
+  validateContext: scanContext.validateContext,
+  pageSizeFor: scanContext.pageSizeFor,
 } as const;
 
 export const libraryScan = {

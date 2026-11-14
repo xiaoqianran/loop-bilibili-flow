@@ -53,6 +53,29 @@ describe("Bundled full-feature workbench source", () => {
     ).toHaveLength(3); // fetchSubtitle already used the canonical acquisition owner.
   });
 
+  it("delegates flow drawer setting changes to the typed UI controller", () => {
+    expect(maintainedSource).toContain("ui.settingsInteraction.bindFlowChanges(root,");
+    expect(maintainedSource).not.toContain('root.addEventListener("change", (e) => {');
+    expect(maintainedSource).toContain("taskPrompt: (taskId, promptId) =>");
+  });
+
+  it("routes scan input requirements and paging policy through typed Application", () => {
+    expect(maintainedSource).toContain('appCall("scan.validateContext", ctx)');
+    expect(maintainedSource).toContain('appCall("scan.pageSizeFor", ctx.type)');
+    expect(maintainedSource).not.toContain("function validateCtxForScan(");
+  });
+
+  it("uses only the canonical Application AI transport and core fingerprinting", () => {
+    const ai = extractFunctionSource(maintainedSource, "requestChatCompletion");
+    expect(ai).toContain('appCall("ai.request"');
+    expect(ai).toContain("network: runtimeNetwork()");
+    expect(maintainedSource).not.toContain("function requestChatViaPageFetch(");
+    expect(maintainedSource).not.toContain("function requestChatViaGm(");
+    expect(maintainedSource).not.toContain("function md5(");
+    expect(maintainedSource).toContain('coreCall("md5", currentInputPreviewText("processed")');
+    expect(maintainedSource).toContain('coreCall("md5", clean || block.text)');
+  });
+
   it("only removes functions that have a registered canonical owner", () => {
     const baselineNames = functionNames(legacySource);
     const maintainedNames = functionNames(maintainedSource);
@@ -125,6 +148,19 @@ describe("Bundled full-feature workbench source", () => {
       "trimProcessedOverlap",
       "dedupeExactBlocks",
       "defaultUiGeom",
+      "md5",
+      "requestChatViaPageFetch",
+      "requestChatViaGm",
+      "startGmTextPath",
+      "validateCtxForScan",
+      "bytesToWords",
+      "cmn",
+      "ff",
+      "gg",
+      "hh",
+      "ii",
+      "toUtf8Bytes",
+      "wordsToHex",
       "stitchPreprocessChunks",
       "preprocessCacheKey",
       "makePromptProfileId",
@@ -421,6 +457,19 @@ describe("Bundled full-feature workbench source", () => {
       "trimProcessedOverlap",
       "dedupeExactBlocks",
       "defaultUiGeom",
+      "md5",
+      "requestChatViaPageFetch",
+      "requestChatViaGm",
+      "startGmTextPath",
+      "validateCtxForScan",
+      "bytesToWords",
+      "cmn",
+      "ff",
+      "gg",
+      "hh",
+      "ii",
+      "toUtf8Bytes",
+      "wordsToHex",
       "stitchPreprocessChunks",
       "preprocessCacheKey",
       "makePromptProfileId",
@@ -614,7 +663,7 @@ describe("Bundled full-feature workbench source", () => {
     expect(maintainedSource).toContain('bilibiliFn("extractPlayingVideoHint")');
     expect(renderShellStyles("bili-subbatch-panel", 420, 520, 32)).toContain("--bsb-ui-font: 14px");
     expect(renderWorkspaceOverrides("bili-subbatch-panel")).toContain("font-size: 14px !important");
-    expect(maintainedSource).toContain("CORE_LOCAL_FALLBACKS");
+    expect(maintainedSource).not.toContain("CORE_LOCAL_FALLBACKS");
     expect(maintainedSource).toContain("NOTE_FONT_DEFAULT = 14");
     expect(renderShellStyles("bili-subbatch-panel", 420, 520, 32)).toContain("--bsb-knowledge-font: 14px");
     expect(renderReadingStyles("bili-subbatch-panel")).toContain("font-size:var(--bsb-knowledge-font)");

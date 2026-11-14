@@ -1,3 +1,4 @@
+import * as coreRegistry from "../packages/core/src/index";
 import * as applicationRegistry from "../apps/userscript/src/app";
 import { resolveAppMethod } from "../apps/userscript/src/runtime/app-bridge";
 import { readdir, readFile } from "node:fs/promises";
@@ -108,6 +109,18 @@ async function main(): Promise<void> {
   for (const path of new Set(literalAppMethods)) {
     if (!resolveAppMethod(applicationRegistry, path)) {
       violations.push("workbench Application API path does not exist: " + path);
+    }
+  }
+
+  // Product workbench core rules must exist in the canonical, bundled core.
+  // Silent local stand-ins used to hide broken resource grouping and export logic.
+  const literalCoreMethods = [...workbenchSource.matchAll(/\bcoreCall\(\s*["']([^"']+)["']/g)]
+    .map(match => match[1])
+    .filter((name): name is string => Boolean(name));
+  for (const name of new Set(literalCoreMethods)) {
+    const method: unknown = Object.hasOwn(coreRegistry, name) ? Reflect.get(coreRegistry, name) : undefined;
+    if (typeof method !== "function") {
+      violations.push("workbench canonical core API missing: " + name);
     }
   }
 

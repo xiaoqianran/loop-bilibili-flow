@@ -69,6 +69,15 @@ describe("application AI controller", () => {
     expect(requestMock).toHaveBeenCalledTimes(1);
   });
 
+  it("never retries a possibly-delivered network POST after transport failure", async () => {
+    const { promise, requestMock } = runWithResponse(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    await expect(promise).rejects.toThrow("Failed to fetch");
+    expect(requestMock).toHaveBeenCalledTimes(1);
+    expect(requestMock.mock.calls[0]?.[1]?.fallback).toBe("never");
+  });
+
   it("propagates HTTP failures without resending a POST", async () => {
     const { promise, requestMock } = runWithResponse(async () => ({
       status: 429, ok: false, text: "rate limit", headers: {},

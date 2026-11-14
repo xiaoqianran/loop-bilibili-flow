@@ -85,3 +85,73 @@ export function bind(root: HTMLElement, ports: SettingsInputPorts, defaults: Set
   bindings.set(root, dispose);
   return dispose;
 }
+
+/** Delegated controls that are re-rendered inside the AI flow drawer. */
+export type ShortcutPreference = "enabled" | "summonLayout" | "summonTarget" | "preferredDock";
+export interface FlowSettingsPorts {
+  shortcutPreference(key: ShortcutPreference, value: string, checked: boolean): void;
+  knowledgeModel(value: string): void;
+  preprocessEnabled(value: boolean): void;
+  preprocessPrompt(value: string): void;
+  preprocessModel(value: string): void;
+  preprocessConcurrency(value: string): void;
+  preprocessTargetMinutes(value: string): void;
+  preprocessOverlapSeconds(value: string): void;
+  preprocessMaxChars(value: string): void;
+  preprocessRetries(value: string): void;
+  studioModel(value: string): void;
+  studioContext(value: string): void;
+  taskPrompt(taskId: string, promptId: string): void;
+}
+
+const flowBindings = new WeakMap<HTMLElement, () => void>();
+export function bindFlowChanges(root: HTMLElement, ports: FlowSettingsPorts): () => void {
+  flowBindings.get(root)?.();
+  const onChange = (event: Event): void => {
+    const target = event.target as Element | null;
+    if (!target || typeof target.closest !== "function") return;
+    const near = <T extends Element>(selector: string): T | null => target.closest<T>(selector);
+    const shortcut = near<HTMLInputElement>("[data-shortcut-pref]");
+    if (shortcut) {
+      const key = shortcut.dataset.shortcutPref || "";
+      if (key === "enabled" || key === "summonLayout" || key === "summonTarget" || key === "preferredDock") {
+        ports.shortcutPreference(key, shortcut.value, shortcut.checked);
+      }
+      return;
+    }
+    const knowledge = near<HTMLInputElement>('[data-role="knowledge-model"]');
+    if (knowledge) { ports.knowledgeModel(knowledge.value); return; }
+    const preEnabled = near<HTMLInputElement>("[data-flow-preprocess-enabled]");
+    if (preEnabled) { ports.preprocessEnabled(preEnabled.checked); return; }
+    const changes: Array<{ selector: string; handle: (value: string) => void }> = [
+      { selector: "[data-flow-preprompt]", handle: ports.preprocessPrompt },
+      { selector: "[data-flow-premodel]", handle: ports.preprocessModel },
+      { selector: "[data-flow-preconcurrency]", handle: ports.preprocessConcurrency },
+      { selector: "[data-flow-pretarget-minutes]", handle: ports.preprocessTargetMinutes },
+      { selector: "[data-flow-preoverlap-seconds]", handle: ports.preprocessOverlapSeconds },
+      { selector: "[data-flow-premax-chars]", handle: ports.preprocessMaxChars },
+      { selector: "[data-flow-preretries]", handle: ports.preprocessRetries },
+      { selector: "[data-flow-studiomodel]", handle: ports.studioModel },
+      { selector: "[data-flow-studiocontext]", handle: ports.studioContext },
+    ];
+    for (const change of changes) {
+      const match = near<HTMLInputElement>(change.selector);
+      if (!match) continue;
+      change.handle(match.value);
+      return;
+    }
+    const card = near<HTMLElement>("[data-flow-task-id]");
+    const prompt = near<HTMLInputElement>("[data-flow-task-prompt]");
+    if (card && prompt && card.contains(prompt)) {
+      const taskId = card.dataset.flowTaskId || "";
+      if (taskId) ports.taskPrompt(taskId, prompt.value);
+    }
+  };
+  root.addEventListener("change", onChange);
+  const dispose = () => {
+    root.removeEventListener("change", onChange);
+    if (flowBindings.get(root) === dispose) flowBindings.delete(root);
+  };
+  flowBindings.set(root, dispose);
+  return dispose;
+}
