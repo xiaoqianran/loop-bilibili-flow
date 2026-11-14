@@ -61,6 +61,8 @@ describe("Bundled full-feature workbench source", () => {
       .sort();
     const migrated = [
       "scheduleAutoHide",
+      "knowledgeAncestorNodes",
+      "knowledgeBranchContext",
       "openCacheDatabase",
       "persistentCacheRead",
       "persistentCacheWrite",
@@ -200,6 +202,27 @@ describe("Bundled full-feature workbench source", () => {
     expect(maintainedSource).toContain("async function loadUserSpaceSeasons(mid,");
     expect(maintainedSource).not.toContain("const seasonsList = lists.seasons_list || [];");
     expect(maintainedSource).not.toContain("const totalHint = pageInfo.total");
+  });
+
+  it("delegates Studio context and Knowledge tree policies to Application", () => {
+    for (const name of [
+      "transcriptContext", "compressTranscript", "refreshMemory",
+      "compactMemoryText", "lastAssistantText",
+    ]) {
+      expect(maintainedSource).toContain('"studio.' + name + '"');
+    }
+    for (const name of ["ancestorNodes", "branchContext"]) {
+      expect(maintainedSource).toContain('"knowledge.' + name + '"');
+    }
+    for (const obsolete of [
+      "function compressStudioTranscript(",
+      "function compactStudioMemoryText(",
+      "function studioQueryTokens(",
+      "function knowledgeAncestorNodes(",
+      "function knowledgeBranchContext(",
+    ]) {
+      expect(maintainedSource).not.toContain(obsolete);
+    }
   });
 
   it("delegates migrated acquisition rules to grouped Bilibili APIs", () => {
@@ -482,7 +505,7 @@ describe("Bundled full-feature workbench source", () => {
     expect(maintainedSource).toContain("<strong>对话</strong>");
     expect(maintainedSource).toContain("function flowTaskModelsHtml(");
     expect(maintainedSource).toContain("function bindFlowModelDrag(");
-    expect(maintainedSource).toContain("function compressStudioTranscript(");
+    expect(maintainedSource).toContain('appCall("studio.compressTranscript"');
     expect(maintainedSource).toContain("function refreshStudioMemory(");
     expect(renderAiWorkspace()).toContain("data-ai-stage=\"chat\"");
     expect(maintainedSource).toContain("看完能懂");

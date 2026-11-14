@@ -5606,29 +5606,6 @@ export function mountWorkbench(SubBatch) {
     return (state.knowledgeNodes || []).find((n) => n.id === id) || null;
   }
 
-  function knowledgeAncestorNodes(node) {
-    const out = [];
-    let cur = node;
-    const seen = new Set();
-    while (cur?.parentId && !seen.has(cur.parentId) && out.length < 12) {
-      seen.add(cur.parentId);
-      const parent = knowledgeNodeById(cur.parentId);
-      if (!parent) break;
-      out.unshift(parent);
-      cur = parent;
-    }
-    return out;
-  }
-
-  function knowledgeBranchContext(parentNode) {
-    if (!parentNode) return "（这是该锚点下的新分支）";
-    const chain = [...knowledgeAncestorNodes(parentNode), parentNode].slice(-6);
-    return chain.map((node, i) => {
-      const answer = String(node.answer || "").trim().replace(/\s+/g, " ").slice(0, 1800);
-      return `${i + 1}. 问题：${node.question}\n   回答摘要：${answer || "（尚无回答）"}`;
-    }).join("\n");
-  }
-
   function parseKnowledgeOutput(raw) {
     const source = String(raw || "");
     const match = source.match(/<suggestions>([\s\S]*?)(?:<\/suggestions>|$)/i);
@@ -5882,7 +5859,7 @@ export function mountWorkbench(SubBatch) {
 
   function knowledgeBreadcrumbHtml(node) {
     if (!node) return "";
-    const chain = [...knowledgeAncestorNodes(node), node];
+    const chain = [...appCall("knowledge.ancestorNodes", node, state.knowledgeNodes || []), node];
     return chain.map((n, i) => `<button type="button" data-knowledge-node-id="${escapeAttr(n.id)}" title="${escapeAttr(n.question)}">${escapeHtml(n.question.length > 28 ? `${n.question.slice(0, 28)}…` : n.question)}</button>${i < chain.length - 1 ? '<span>›</span>' : ""}`).join("");
   }
 
@@ -6306,7 +6283,7 @@ export function mountWorkbench(SubBatch) {
       author: anchor.author || "",
       anchorText: anchor.selectedText || "",
       sourceContext: anchor.contextText || anchor.selectedText || "",
-      ancestorPath: knowledgeBranchContext(parent),
+      ancestorPath: appCall("knowledge.branchContext", parent, state.knowledgeNodes || []),
       question: q,
     };
     const messages = [];
@@ -7559,147 +7536,16 @@ export function mountWorkbench(SubBatch) {
   }
 
   function studioTranscriptContext() {
-    const processed = currentInputPreviewText("processed");
-    const raw = currentInputPreviewText("raw");
-    const pref = state.studioContextPref;
-    if (pref === "raw") return { text: raw, source: "原始字幕" };
-    if (pref === "processed") return { text: processed || raw, source: processed ? "规范化稿" : "原始字幕" };
-    return { text: processed || raw, source: processed ? "规范化稿" : "原始字幕" };
+    return appCall("studio.transcriptContext",
+      currentInputPreviewText("raw"), currentInputPreviewText("processed"), state.studioContextPref);
   }
 
   function clipStudioContext(text) {
-    const packed = compressStudioTranscript(text, "");
-    return packed.text;
-  }
-
-  function studioQueryTokens(...parts) {
-    const raw = parts.filter(Boolean).join(" ").toLowerCase();
-    return raw
-      .split(/[^\u4e00-\u9fffA-Za-z0-9_]+/)
-      .map((t) => t.trim())
-      .filter((t) => t.length >= 2);
-  }
-
-  function splitStudioTranscriptChunks(text) {
-    const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
-    const chunks = [];
-    let buf = [];
-    const flush = () => {
-      const value = buf.join("\n").trim();
-      if (value) chunks.push(value);
-      buf = [];
-    };
-    for (const line of lines) {
-      const trimmed = line.trim();
-      const boundary = !trimmed
-        || /^#{1,4}\s/.test(trimmed)
-        || /^\[BV/i.test(trimmed)
-        || /^===\s/.test(trimmed);
-      if (boundary && buf.length) flush();
-      if (trimmed) buf.push(line);
-      if (buf.join("\n").length >= 720) flush();
-    }
-    flush();
-    return chunks;
-  }
-
-  function scoreStudioChunk(chunk, tokens) {
-    const low = String(chunk || "").toLowerCase();
-    let score = 0;
-    for (const token of tokens) {
-      if (!low.includes(token)) continue;
-      score += token.length >= 4 ? 2 : 1;
-    }
-    if (/^#{1,4}\s/.test(chunk.trim())) score += 0.4;
-    return score;
-  }
-
-  function compressStudioTranscript(text, query, budget = STUDIO_CHAT_CONTEXT_CHARS) {
-    const value = String(text || "");
-    if (!value) {
-      return { text: "", compressed: false, original: 0, kept: 0, chunks: 0, total: 0 };
-    }
-    if (value.length <= budget) {
-      return { text: value, compressed: false, original: value.length, kept: value.length, chunks: 1, total: 1 };
-    }
-    const chunks = splitStudioTranscriptChunks(value);
-    const tokens = studioQueryTokens(query);
-    const selected = new Set();
-    const head = Math.min(2, chunks.length);
-    for (let i = 0; i < head; i++) selected.add(i);
-    const ranked = chunks
-      .map((chunk, index) => ({ chunk, index, score: scoreStudioChunk(chunk, tokens) }))
-      .filter((row) => !selected.has(row.index))
-      .sort((a, b) => b.score - a.score || a.index - b.index);
-    let used = [...selected].reduce((sum, index) => sum + chunks[index].length, 0);
-    for (const row of ranked) {
-      if (row.score <= 0 && used > budget * 0.55) continue;
-      if (used + row.chunk.length > budget) continue;
-      selected.add(row.index);
-      used += row.chunk.length;
-      if (used >= budget * 0.94) break;
-    }
-    const ordered = [...selected].sort((a, b) => a - b);
-    const parts = [];
-    let prev = -2;
-    for (const index of ordered) {
-      if (index !== prev + 1) parts.push("…");
-      parts.push(chunks[index]);
-      prev = index;
-    }
-    return {
-      text: parts.join("\n\n"),
-      compressed: true,
-      original: value.length,
-      kept: used,
-      chunks: selected.size,
-      total: chunks.length,
-    };
-  }
-
-  function clipStudioSnippet(text, max) {
-    const value = String(text || "").replace(/\s+/g, " ").trim();
-    if (value.length <= max) return value;
-    return `${value.slice(0, Math.max(0, max - 1))}…`;
-  }
-
-  function compactStudioMemoryText(text, budget = STUDIO_CHAT_MEMORY_CHARS) {
-    const lines = String(text || "").split("\n").map((line) => line.trim()).filter(Boolean);
-    if (!lines.length) return "";
-    const kept = [];
-    let used = 0;
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i];
-      if (used + line.length + 1 > budget && kept.length) break;
-      kept.unshift(line);
-      used += line.length + 1;
-    }
-    return kept.join("\n");
+    return appCall("studio.compressTranscript", text, "", STUDIO_CHAT_CONTEXT_CHARS).text;
   }
 
   function refreshStudioMemory() {
-    const all = (state.studioMessages || []).filter((msg) => (
-      (msg.role === "user" || msg.role === "assistant")
-      && msg.content
-      && msg.status !== "running"
-    ));
-    if (all.length <= STUDIO_CHAT_KEEP_RECENT) return false;
-    const foldable = all.slice(0, -STUDIO_CHAT_KEEP_RECENT);
-    const lastId = String(state.studioMemoryUntilId || "");
-    const already = lastId ? foldable.findIndex((msg) => msg.id === lastId) : -1;
-    const fresh = already >= 0 ? foldable.slice(already + 1) : foldable;
-    if (!fresh.length) return !!state.studioMemory;
-    const bullets = fresh.map((msg) => (
-      msg.role === "user"
-        ? `- 问：${clipStudioSnippet(msg.content, 72)}`
-        : `- 答：${clipStudioSnippet(msg.content, 140)}`
-    ));
-    state.studioMemory = compactStudioMemoryText(
-      [state.studioMemory, ...bullets].filter(Boolean).join("\n"),
-    );
-    state.studioMemoryUntilId = foldable[foldable.length - 1]?.id || lastId;
-    state.studioMemoryTurns = foldable.length;
-    return true;
+    return appCall("studio.refreshMemory", state, STUDIO_CHAT_KEEP_RECENT, STUDIO_CHAT_MEMORY_CHARS);
   }
 
   function matchStudioSlash(query) {
@@ -7713,14 +7559,6 @@ export function mountWorkbench(SubBatch) {
     const token = String(hit[1] || "").toLowerCase();
     const cmd = STUDIO_SLASH_COMMANDS.find((c) => c.aliases.includes(token));
     return cmd ? { cmd, rest: String(hit[2] || "").trim() } : null;
-  }
-
-  function studioLastAssistantText() {
-    const msgs = state.studioMessages || [];
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i].role === "assistant" && msgs[i].content) return String(msgs[i].content);
-    }
-    return "";
   }
 
   function renderStudioSlashMenu() {
@@ -7846,7 +7684,7 @@ export function mountWorkbench(SubBatch) {
   }
 
   function studioCopyLast() {
-    const text = studioLastAssistantText();
+    const text = appCall("studio.lastAssistantText", state.studioMessages || []);
     if (!text) return setStatus("还没有可复制的回答", "err");
     clipboardWrite(text);
     setStatus("已复制上一条回答", "ok");
@@ -7932,7 +7770,7 @@ export function mountWorkbench(SubBatch) {
         });
       });
       if (state.studioRuntime !== runtime || runtime.abort) return;
-      const next = compactStudioMemoryText(latest.trim());
+      const next = appCall("studio.compactMemoryText", latest.trim(), STUDIO_CHAT_MEMORY_CHARS);
       if (next) state.studioMemory = next;
       persistStudioChat();
       renderStudioCanvas();
@@ -8014,7 +7852,7 @@ export function mountWorkbench(SubBatch) {
     persistStudioChat();
     renderStudioCanvas();
     refreshStudioMemory();
-    const packed = compressStudioTranscript(
+    const packed = appCall("studio.compressTranscript",
       ctx.text,
       [text, ...(state.studioMessages || []).filter((m) => m.role === "user").slice(-3).map((m) => m.content)].join(" "),
     );

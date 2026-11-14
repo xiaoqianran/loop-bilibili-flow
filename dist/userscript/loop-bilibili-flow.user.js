@@ -4241,6 +4241,28 @@ ${prompt2.userPromptTemplate}`
       await execution.cleanup();
     }
   }
+  function ancestorNodes(node, nodes) {
+    const out = [];
+    let current = node;
+    const seen = /* @__PURE__ */ new Set();
+    while (current?.parentId && !seen.has(current.parentId) && out.length < 12) {
+      const parentId = current.parentId;
+      seen.add(parentId);
+      const parent = nodes.find((item) => item.id === parentId);
+      if (!parent) break;
+      out.unshift(parent);
+      current = parent;
+    }
+    return out;
+  }
+  function branchContext(parentNode, nodes) {
+    if (!parentNode) return "（这是该锚点下的新分支）";
+    const chain = [...ancestorNodes(parentNode, nodes), parentNode].slice(-6);
+    return chain.map((node, index) => {
+      const answer = String(node.answer || "").trim().replace(/\s+/g, " ").slice(0, 1800);
+      return index + 1 + ". 问题：" + node.question + "\n   回答摘要：" + (answer || "（尚无回答）");
+    }).join("\n");
+  }
   const WBI_TTL_MS = 6e5;
   const wbiCache = /* @__PURE__ */ new WeakMap();
   const JSON_REQUEST = {
@@ -4608,6 +4630,119 @@ ${prompt2.userPromptTemplate}`
   function buildChatMessages(system, messages, currentUserId, question, keepRecent) {
     const history = messages.filter((message) => (message.role === "user" || message.role === "assistant") && message.id !== currentUserId && Boolean(message.content) && message.status !== "running").slice(-Math.max(0, keepRecent)).map((message) => ({ role: String(message.role), content: String(message.content) }));
     return [{ role: "system", content: system }, ...history, { role: "user", content: question }];
+  }
+  function transcriptContext(raw, processed, pref) {
+    if (pref === "raw") return { text: raw, source: "原始字幕" };
+    return { text: processed || raw, source: processed ? "规范化稿" : "原始字幕" };
+  }
+  function queryTokens(...parts) {
+    const raw = parts.filter(Boolean).join(" ").toLowerCase();
+    return raw.split(/[^\u4e00-\u9fffA-Za-z0-9_]+/).map((token) => token.trim()).filter((token) => token.length >= 2);
+  }
+  function splitTranscriptChunks(text) {
+    const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+    const chunks = [];
+    let buffer = [];
+    const flush = () => {
+      const value = buffer.join("\n").trim();
+      if (value) chunks.push(value);
+      buffer = [];
+    };
+    for (const line of lines) {
+      const trimmed = line.trim();
+      const boundary = !trimmed || /^#{1,4}\s/.test(trimmed) || /^\[BV/i.test(trimmed) || /^===\s/.test(trimmed);
+      if (boundary && buffer.length) flush();
+      if (trimmed) buffer.push(line);
+      if (buffer.join("\n").length >= 720) flush();
+    }
+    flush();
+    return chunks;
+  }
+  function scoreChunk(chunk, tokens) {
+    const lower = String(chunk || "").toLowerCase();
+    let score = 0;
+    for (const token of tokens) {
+      if (!lower.includes(token)) continue;
+      score += token.length >= 4 ? 2 : 1;
+    }
+    if (/^#{1,4}\s/.test(chunk.trim())) score += 0.4;
+    return score;
+  }
+  function compressTranscript(text, query, budget = 12e3) {
+    const value = String(text || "");
+    if (!value) return { text: "", compressed: false, original: 0, kept: 0, chunks: 0, total: 0 };
+    if (value.length <= budget) {
+      return { text: value, compressed: false, original: value.length, kept: value.length, chunks: 1, total: 1 };
+    }
+    const chunks = splitTranscriptChunks(value);
+    const tokens = queryTokens(query);
+    const selected = /* @__PURE__ */ new Set();
+    const head = Math.min(2, chunks.length);
+    for (let i = 0; i < head; i++) selected.add(i);
+    const ranked = chunks.map((chunk, index) => ({ chunk, index, score: scoreChunk(chunk, tokens) })).filter((row) => !selected.has(row.index)).sort((a, b) => b.score - a.score || a.index - b.index);
+    let used = [...selected].reduce((sum, index) => sum + chunks[index].length, 0);
+    for (const row of ranked) {
+      if (row.score <= 0 && used > budget * 0.55) continue;
+      if (used + row.chunk.length > budget) continue;
+      selected.add(row.index);
+      used += row.chunk.length;
+      if (used >= budget * 0.94) break;
+    }
+    const ordered = [...selected].sort((a, b) => a - b);
+    const parts = [];
+    let prev = -2;
+    for (const index of ordered) {
+      if (index !== prev + 1) parts.push("…");
+      parts.push(chunks[index]);
+      prev = index;
+    }
+    return {
+      text: parts.join("\n\n"),
+      compressed: true,
+      original: value.length,
+      kept: used,
+      chunks: selected.size,
+      total: chunks.length
+    };
+  }
+  function clipSnippet(text, max) {
+    const value = String(text || "").replace(/\s+/g, " ").trim();
+    if (value.length <= max) return value;
+    return value.slice(0, Math.max(0, max - 1)) + "…";
+  }
+  function compactMemoryText(text, budget = 2400) {
+    const lines = String(text || "").split("\n").map((line) => line.trim()).filter(Boolean);
+    if (!lines.length) return "";
+    const kept = [];
+    let used = 0;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      if (used + line.length + 1 > budget && kept.length) break;
+      kept.unshift(line);
+      used += line.length + 1;
+    }
+    return kept.join("\n");
+  }
+  function refreshMemory(state2, keepRecent = 8, budget = 2400) {
+    const all = (state2.studioMessages || []).filter((message) => (message.role === "user" || message.role === "assistant") && message.content && message.status !== "running");
+    if (all.length <= keepRecent) return false;
+    const foldable = all.slice(0, -keepRecent);
+    const lastId = String(state2.studioMemoryUntilId || "");
+    const already = lastId ? foldable.findIndex((message) => message.id === lastId) : -1;
+    const fresh = already >= 0 ? foldable.slice(already + 1) : foldable;
+    if (!fresh.length) return !!state2.studioMemory;
+    const bullets = fresh.map((message) => message.role === "user" ? "- 问：" + clipSnippet(String(message.content), 72) : "- 答：" + clipSnippet(String(message.content), 140));
+    state2.studioMemory = compactMemoryText([state2.studioMemory, ...bullets].filter(Boolean).join("\n"), budget);
+    state2.studioMemoryUntilId = foldable[foldable.length - 1]?.id || lastId;
+    state2.studioMemoryTurns = foldable.length;
+    return true;
+  }
+  function lastAssistantText(messages) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (message.role === "assistant" && message.content) return String(message.content);
+    }
+    return "";
   }
   const V6_KNOWLEDGE_DB = {
     name: "bili-subbatch-knowledge-v1",
@@ -5234,11 +5369,18 @@ ${prompt2.userPromptTemplate}`
     parseStore,
     persist,
     restore,
-    buildChatMessages
+    buildChatMessages,
+    transcriptContext,
+    compressTranscript,
+    compactMemoryText,
+    refreshMemory,
+    lastAssistantText
   };
   const knowledge = {
     createController,
     selectAnchor,
+    ancestorNodes,
+    branchContext,
     runAnswer,
     completeAnswer,
     failAnswer,
@@ -10292,7 +10434,6 @@ ${prompt2.userPromptTemplate}`
     const STUDIO_CHAT_STORE_KEY = "bili-subbatch-studio-chat-v1";
     const STUDIO_MODEL_STORE_KEY = "bili-subbatch-studio-model-v1";
     const STUDIO_CHAT_KEEP_RECENT = 8;
-    const STUDIO_CHAT_CONTEXT_CHARS = 12e3;
     const STUDIO_CHAT_MEMORY_CHARS = 2400;
     const STUDIO_SLASH_COMMANDS = Object.freeze([
       Object.freeze({ id: "clear", aliases: ["clear", "清空", "new", "新建"], hint: "清空当前对话" }),
@@ -15363,28 +15504,6 @@ ${addition}`.trim() };
     function knowledgeNodeById(id) {
       return (state2.knowledgeNodes || []).find((n) => n.id === id) || null;
     }
-    function knowledgeAncestorNodes(node) {
-      const out = [];
-      let cur = node;
-      const seen = /* @__PURE__ */ new Set();
-      while (cur?.parentId && !seen.has(cur.parentId) && out.length < 12) {
-        seen.add(cur.parentId);
-        const parent = knowledgeNodeById(cur.parentId);
-        if (!parent) break;
-        out.unshift(parent);
-        cur = parent;
-      }
-      return out;
-    }
-    function knowledgeBranchContext2(parentNode) {
-      if (!parentNode) return "（这是该锚点下的新分支）";
-      const chain = [...knowledgeAncestorNodes(parentNode), parentNode].slice(-6);
-      return chain.map((node, i) => {
-        const answer = String(node.answer || "").trim().replace(/\s+/g, " ").slice(0, 1800);
-        return `${i + 1}. 问题：${node.question}
-   回答摘要：${answer || "（尚无回答）"}`;
-      }).join("\n");
-    }
     function parseKnowledgeOutput2(raw) {
       const source = String(raw || "");
       const match = source.match(/<suggestions>([\s\S]*?)(?:<\/suggestions>|$)/i);
@@ -15586,7 +15705,7 @@ ${addition}`.trim() };
     }
     function knowledgeBreadcrumbHtml(node) {
       if (!node) return "";
-      const chain = [...knowledgeAncestorNodes(node), node];
+      const chain = [...appCall("knowledge.ancestorNodes", node, state2.knowledgeNodes || []), node];
       return chain.map((n, i) => `<button type="button" data-knowledge-node-id="${escapeAttr(n.id)}" title="${escapeAttr(n.question)}">${escapeHtml(n.question.length > 28 ? `${n.question.slice(0, 28)}…` : n.question)}</button>${i < chain.length - 1 ? "<span>›</span>" : ""}`).join("");
     }
     function knowledgeSuggestionsHtml(node) {
@@ -15979,7 +16098,7 @@ ${addition}`.trim() };
         author: anchor.author || "",
         anchorText: anchor.selectedText || "",
         sourceContext: anchor.contextText || anchor.selectedText || "",
-        ancestorPath: knowledgeBranchContext2(parent),
+        ancestorPath: appCall("knowledge.branchContext", parent, state2.knowledgeNodes || []),
         question: q
       };
       const messages = [];
@@ -17119,118 +17238,15 @@ ${p.baseUrl}`.toLocaleLowerCase().includes(q)) : profiles;
       state2.studioContextPref = ["raw", "processed"].includes(entry?.contextPref) ? entry.contextPref : "auto";
     }
     function studioTranscriptContext() {
-      const processed = currentInputPreviewText("processed");
-      const raw = currentInputPreviewText("raw");
-      const pref = state2.studioContextPref;
-      if (pref === "raw") return { text: raw, source: "原始字幕" };
-      if (pref === "processed") return { text: processed || raw, source: processed ? "规范化稿" : "原始字幕" };
-      return { text: processed || raw, source: processed ? "规范化稿" : "原始字幕" };
-    }
-    function studioQueryTokens(...parts) {
-      const raw = parts.filter(Boolean).join(" ").toLowerCase();
-      return raw.split(/[^\u4e00-\u9fffA-Za-z0-9_]+/).map((t) => t.trim()).filter((t) => t.length >= 2);
-    }
-    function splitStudioTranscriptChunks(text) {
-      const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
-      const chunks = [];
-      let buf = [];
-      const flush = () => {
-        const value = buf.join("\n").trim();
-        if (value) chunks.push(value);
-        buf = [];
-      };
-      for (const line of lines) {
-        const trimmed = line.trim();
-        const boundary = !trimmed || /^#{1,4}\s/.test(trimmed) || /^\[BV/i.test(trimmed) || /^===\s/.test(trimmed);
-        if (boundary && buf.length) flush();
-        if (trimmed) buf.push(line);
-        if (buf.join("\n").length >= 720) flush();
-      }
-      flush();
-      return chunks;
-    }
-    function scoreStudioChunk(chunk, tokens) {
-      const low = String(chunk || "").toLowerCase();
-      let score = 0;
-      for (const token of tokens) {
-        if (!low.includes(token)) continue;
-        score += token.length >= 4 ? 2 : 1;
-      }
-      if (/^#{1,4}\s/.test(chunk.trim())) score += 0.4;
-      return score;
-    }
-    function compressStudioTranscript(text, query, budget = STUDIO_CHAT_CONTEXT_CHARS) {
-      const value = String(text || "");
-      if (!value) {
-        return { text: "", compressed: false, original: 0, kept: 0, chunks: 0, total: 0 };
-      }
-      if (value.length <= budget) {
-        return { text: value, compressed: false, original: value.length, kept: value.length, chunks: 1, total: 1 };
-      }
-      const chunks = splitStudioTranscriptChunks(value);
-      const tokens = studioQueryTokens(query);
-      const selected = /* @__PURE__ */ new Set();
-      const head = Math.min(2, chunks.length);
-      for (let i = 0; i < head; i++) selected.add(i);
-      const ranked = chunks.map((chunk, index) => ({ chunk, index, score: scoreStudioChunk(chunk, tokens) })).filter((row) => !selected.has(row.index)).sort((a, b) => b.score - a.score || a.index - b.index);
-      let used = [...selected].reduce((sum, index) => sum + chunks[index].length, 0);
-      for (const row of ranked) {
-        if (row.score <= 0 && used > budget * 0.55) continue;
-        if (used + row.chunk.length > budget) continue;
-        selected.add(row.index);
-        used += row.chunk.length;
-        if (used >= budget * 0.94) break;
-      }
-      const ordered = [...selected].sort((a, b) => a - b);
-      const parts = [];
-      let prev = -2;
-      for (const index of ordered) {
-        if (index !== prev + 1) parts.push("…");
-        parts.push(chunks[index]);
-        prev = index;
-      }
-      return {
-        text: parts.join("\n\n"),
-        compressed: true,
-        original: value.length,
-        kept: used,
-        chunks: selected.size,
-        total: chunks.length
-      };
-    }
-    function clipStudioSnippet(text, max) {
-      const value = String(text || "").replace(/\s+/g, " ").trim();
-      if (value.length <= max) return value;
-      return `${value.slice(0, Math.max(0, max - 1))}…`;
-    }
-    function compactStudioMemoryText(text, budget = STUDIO_CHAT_MEMORY_CHARS) {
-      const lines = String(text || "").split("\n").map((line) => line.trim()).filter(Boolean);
-      if (!lines.length) return "";
-      const kept = [];
-      let used = 0;
-      for (let i = lines.length - 1; i >= 0; i--) {
-        const line = lines[i];
-        if (used + line.length + 1 > budget && kept.length) break;
-        kept.unshift(line);
-        used += line.length + 1;
-      }
-      return kept.join("\n");
+      return appCall(
+        "studio.transcriptContext",
+        currentInputPreviewText("raw"),
+        currentInputPreviewText("processed"),
+        state2.studioContextPref
+      );
     }
     function refreshStudioMemory() {
-      const all = (state2.studioMessages || []).filter((msg) => (msg.role === "user" || msg.role === "assistant") && msg.content && msg.status !== "running");
-      if (all.length <= STUDIO_CHAT_KEEP_RECENT) return false;
-      const foldable = all.slice(0, -STUDIO_CHAT_KEEP_RECENT);
-      const lastId = String(state2.studioMemoryUntilId || "");
-      const already = lastId ? foldable.findIndex((msg) => msg.id === lastId) : -1;
-      const fresh = already >= 0 ? foldable.slice(already + 1) : foldable;
-      if (!fresh.length) return !!state2.studioMemory;
-      const bullets = fresh.map((msg) => msg.role === "user" ? `- 问：${clipStudioSnippet(msg.content, 72)}` : `- 答：${clipStudioSnippet(msg.content, 140)}`);
-      state2.studioMemory = compactStudioMemoryText(
-        [state2.studioMemory, ...bullets].filter(Boolean).join("\n")
-      );
-      state2.studioMemoryUntilId = foldable[foldable.length - 1]?.id || lastId;
-      state2.studioMemoryTurns = foldable.length;
-      return true;
+      return appCall("studio.refreshMemory", state2, STUDIO_CHAT_KEEP_RECENT, STUDIO_CHAT_MEMORY_CHARS);
     }
     function matchStudioSlash(query) {
       const q = String(query || "").replace(/^\//, "").trim().toLowerCase();
@@ -17242,13 +17258,6 @@ ${p.baseUrl}`.toLocaleLowerCase().includes(q)) : profiles;
       const token = String(hit[1] || "").toLowerCase();
       const cmd = STUDIO_SLASH_COMMANDS.find((c) => c.aliases.includes(token));
       return cmd ? { cmd, rest: String(hit[2] || "").trim() } : null;
-    }
-    function studioLastAssistantText() {
-      const msgs = state2.studioMessages || [];
-      for (let i = msgs.length - 1; i >= 0; i--) {
-        if (msgs[i].role === "assistant" && msgs[i].content) return String(msgs[i].content);
-      }
-      return "";
     }
     function renderStudioSlashMenu() {
       const root = document.getElementById(PANEL_ID);
@@ -17371,7 +17380,7 @@ ${p.baseUrl}`.toLocaleLowerCase().includes(q)) : profiles;
       setStatus("已清空当前对话", "ok");
     }
     function studioCopyLast() {
-      const text = studioLastAssistantText();
+      const text = appCall("studio.lastAssistantText", state2.studioMessages || []);
       if (!text) return setStatus("还没有可复制的回答", "err");
       clipboardWrite(text);
       setStatus("已复制上一条回答", "ok");
@@ -17467,7 +17476,7 @@ ${memory}`
           });
         });
         if (state2.studioRuntime !== runtime2 || runtime2.abort) return;
-        const next = compactStudioMemoryText(latest.trim());
+        const next = appCall("studio.compactMemoryText", latest.trim(), STUDIO_CHAT_MEMORY_CHARS);
         if (next) state2.studioMemory = next;
         persistStudioChat();
         renderStudioCanvas();
@@ -17547,7 +17556,8 @@ ${memory}`
       persistStudioChat();
       renderStudioCanvas();
       refreshStudioMemory();
-      const packed = compressStudioTranscript(
+      const packed = appCall(
+        "studio.compressTranscript",
         ctx.text,
         [text, ...(state2.studioMessages || []).filter((m) => m.role === "user").slice(-3).map((m) => m.content)].join(" ")
       );

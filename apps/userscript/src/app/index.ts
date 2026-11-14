@@ -77,11 +77,18 @@ export const studio = {
   persist: studioController.persist,
   restore: studioController.restore,
   buildChatMessages: studioController.buildChatMessages,
+  transcriptContext: studioController.transcriptContext,
+  compressTranscript: studioController.compressTranscript,
+  compactMemoryText: studioController.compactMemoryText,
+  refreshMemory: studioController.refreshMemory,
+  lastAssistantText: studioController.lastAssistantText,
 } as const;
 
 export const knowledge = {
   createController: knowledgeController.createController,
   selectAnchor: knowledgeController.selectAnchor,
+  ancestorNodes: knowledgeController.ancestorNodes,
+  branchContext: knowledgeController.branchContext,
   runAnswer: knowledgeController.runAnswer,
   completeAnswer: knowledgeController.completeAnswer,
   failAnswer: knowledgeController.failAnswer,

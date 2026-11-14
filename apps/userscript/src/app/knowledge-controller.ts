@@ -58,3 +58,34 @@ export async function runAnswer<N extends AnswerNode>(execution: AnswerExecution
     await execution.cleanup();
   }
 }
+
+/** Resolve breadcrumb ancestors from source nodes; retain 12-level and cycle guards. */
+export function ancestorNodes<T extends { id: string; parentId?: string | null }>(
+  node: T | null | undefined, nodes: readonly T[],
+): T[] {
+  const out: T[] = [];
+  let current = node;
+  const seen = new Set<string>();
+  while (current?.parentId && !seen.has(current.parentId) && out.length < 12) {
+    const parentId: string = current.parentId;
+    seen.add(parentId);
+    const parent = nodes.find(item => item.id === parentId);
+    if (!parent) break;
+    out.unshift(parent);
+    current = parent;
+  }
+  return out;
+}
+
+/** Compose the bounded ancestor/answer context for a Knowledge follow-up. */
+export function branchContext<T extends {
+  id: string; parentId?: string | null; question?: string; answer?: string;
+}>(parentNode: T | null | undefined, nodes: readonly T[]): string {
+  if (!parentNode) return "（这是该锚点下的新分支）";
+  const chain = [...ancestorNodes(parentNode, nodes), parentNode].slice(-6);
+  return chain.map((node, index) => {
+    const answer = String(node.answer || "").trim().replace(/\s+/g, " ").slice(0, 1800);
+    return (index + 1) + ". 问题：" + node.question
+      + "\n   回答摘要：" + (answer || "（尚无回答）");
+  }).join("\n");
+}
