@@ -73,6 +73,7 @@
  */
 
 import { readSessionCache, writeSessionCache } from "../runtime/session-cache";
+import { createPersistentCache } from "../runtime/persistent-cache";
 
 export function mountWorkbench(SubBatch) {
   "use strict";
@@ -1889,92 +1890,15 @@ export function mountWorkbench(SubBatch) {
 
 
 
-  function openCacheDatabase() {
-    if (state.cacheDbPromise) return state.cacheDbPromise;
-    state.cacheDbPromise = new Promise((resolve, reject) => {
-      if (!globalThis.indexedDB) return reject(new Error("IndexedDB unavailable"));
-      const req = indexedDB.open(CACHE_DB_NAME, CACHE_DB_VERSION);
-      req.onupgradeneeded = () => {
-        const db = req.result;
-        if (!db.objectStoreNames.contains(CACHE_STORE_NAME)) {
-          db.createObjectStore(CACHE_STORE_NAME, { keyPath: "key" });
-        }
-      };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error || new Error("cache database open failed"));
-    }).catch((error) => {
-      state.cacheDbPromise = null;
-      throw error;
-    });
-    return state.cacheDbPromise;
-  }
-
-  async function persistentCacheRead(key) {
-    try {
-      const db = await openCacheDatabase();
-      const record = await new Promise((resolve, reject) => {
-        const tx = db.transaction(CACHE_STORE_NAME, "readonly");
-        const req = tx.objectStore(CACHE_STORE_NAME).get(key);
-        req.onsuccess = () => resolve(req.result || null);
-        req.onerror = () => reject(req.error);
-      });
-      if (!record) return null;
-      if (Number(record.expiresAt || 0) < Date.now()) {
-        persistentCacheDelete(key).catch(() => {});
-        return null;
-      }
-      return record;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  async function persistentCacheWrite(key, value, ttlMs = SUBTITLE_CACHE_TTL_MS) {
-    const record = {
-      key,
-      value,
-      updatedAt: Date.now(),
-      expiresAt: Date.now() + ttlMs,
-    };
-    try {
-      const db = await openCacheDatabase();
-      await new Promise((resolve, reject) => {
-        const tx = db.transaction(CACHE_STORE_NAME, "readwrite");
-        tx.objectStore(CACHE_STORE_NAME).put(record);
-        tx.oncomplete = resolve;
-        tx.onerror = () => reject(tx.error);
-      });
-      state.cacheChannel?.postMessage({ type: "cache-updated", key, updatedAt: record.updatedAt });
-    } catch (_) {
-      /* private mode / quota: memory cache remains available */
-    }
-    return record;
-  }
-
-  async function persistentCacheDelete(key) {
-    try {
-      const db = await openCacheDatabase();
-      await new Promise((resolve, reject) => {
-        const tx = db.transaction(CACHE_STORE_NAME, "readwrite");
-        tx.objectStore(CACHE_STORE_NAME).delete(key);
-        tx.oncomplete = resolve;
-        tx.onerror = () => reject(tx.error);
-      });
-    } catch (_) { /* ignore */ }
-  }
-
-  function initCacheChannel() {
-    if (state.cacheChannel || typeof BroadcastChannel === "undefined") return;
-    try {
-      state.cacheChannel = new BroadcastChannel(CACHE_CHANNEL_NAME);
-      state.cacheChannel.addEventListener("message", (event) => {
-        const msg = event.data;
-        if (!msg || msg.type !== "cache-updated" || !String(msg.key).startsWith("subtitle:")) return;
-        const shortKey = String(msg.key).slice("subtitle:".length);
-        state.fastSubtitleCache.delete(shortKey);
-      });
-    } catch (_) { /* optional */ }
-  }
+  const persistentCache = createPersistentCache({
+    databaseName: CACHE_DB_NAME,
+    databaseVersion: CACHE_DB_VERSION,
+    storeName: CACHE_STORE_NAME,
+    channelName: CACHE_CHANNEL_NAME,
+    indexedDb: () => globalThis.indexedDB,
+    broadcastChannel: () => globalThis.BroadcastChannel,
+    onSubtitleChanged: (key) => state.fastSubtitleCache.delete(key),
+  });
 
   async function fetchVideoViewFast(bvid, signal, { forceNetwork = false } = {}) {
     const key = String(bvid || "").toUpperCase();
@@ -2045,7 +1969,7 @@ export function mountWorkbench(SubBatch) {
     if (!forceNetwork) {
       const memory = lruGet(state.fastTrackBodyCache, cacheKey);
       if (memory) return { ...memory, source: "L1 内存字幕", cacheLevel: "L1 内存" };
-      const persistent = await persistentCacheRead(`subtitle-track:${cacheKey}`);
+      const persistent = await persistentCache.read(`subtitle-track:${cacheKey}`);
       if (persistent?.value) {
         const result = { ...persistent.value, cacheStale: Date.now() - persistent.updatedAt > SUBTITLE_REVALIDATE_MS };
         lruSet(state.fastTrackBodyCache, cacheKey, result);
@@ -2084,7 +2008,7 @@ export function mountWorkbench(SubBatch) {
       cacheStale: false,
     };
     lruSet(state.fastTrackBodyCache, cacheKey, result);
-    persistentCacheWrite(`subtitle-track:${cacheKey}`, result).catch(() => {});
+    persistentCache.write(`subtitle-track:${cacheKey}`, result, SUBTITLE_CACHE_TTL_MS).catch(() => {});
     return result;
   }
 
@@ -2106,7 +2030,7 @@ export function mountWorkbench(SubBatch) {
     if (!forceNetwork) {
       const memory = lruGet(state.fastSubtitleCache, preferredKey);
       if (memory) return { ...memory, source: "L1 内存字幕", cacheLevel: "L1 内存" };
-      const persistent = await persistentCacheRead(`subtitle:${preferredKey}`);
+      const persistent = await persistentCache.read(`subtitle:${preferredKey}`);
       if (persistent?.value) {
         const result = {
           ...persistent.value,
@@ -2130,7 +2054,7 @@ export function mountWorkbench(SubBatch) {
     };
     if (finalResult.status === "ok") {
       lruSet(state.fastSubtitleCache, preferredKey, finalResult);
-      persistentCacheWrite(`subtitle:${preferredKey}`, finalResult).catch(() => {});
+      persistentCache.write(`subtitle:${preferredKey}`, finalResult, SUBTITLE_CACHE_TTL_MS).catch(() => {});
     }
     return finalResult;
   }
@@ -2782,8 +2706,6 @@ export function mountWorkbench(SubBatch) {
     fastTrackCache: new Map(),
     fastSubtitleCache: new Map(),
     fastTrackBodyCache: new Map(),
-    cacheDbPromise: null,
-    cacheChannel: null,
     transcriptItemKey: "",
     transcriptItem: null, // 当前阅读字幕独立于扫描列表，扫描合集时不会被覆盖
     transcriptQuery: "",
@@ -4961,7 +4883,7 @@ export function mountWorkbench(SubBatch) {
     Object.assign(item, result, { selected: item.selected !== false });
     rememberTranscriptItem(item);
     lruSet(state.fastSubtitleCache, `${item.bvid}:${item.cid}`, item);
-    persistentCacheWrite(`subtitle:${item.bvid}:${item.cid}`, item).catch(() => {});
+    persistentCache.write(`subtitle:${item.bvid}:${item.cid}`, item, SUBTITLE_CACHE_TTL_MS).catch(() => {});
     state.transcriptQuery = "";
     const input = ensurePanel().querySelector('[data-role="transcript-search"]');
     if (input) input.value = "";
@@ -9647,7 +9569,7 @@ export function mountWorkbench(SubBatch) {
       activeTaskId: state.aiActiveTaskId,
     });
     if (!usableFn(payload)) return false;
-    await persistentCacheWrite(key, payload, ttlFn ? ttlFn() : 30 * 24 * 60 * 60_000);
+    await persistentCache.write(key, payload, ttlFn ? ttlFn() : 30 * 24 * 60 * 60_000);
     return true;
   }
 
@@ -9720,7 +9642,7 @@ export function mountWorkbench(SubBatch) {
       try {
         const cacheKey = coreCall("aiSessionCacheKey", key);
         if (!cacheKey) return false;
-        const cached = await persistentCacheRead(cacheKey);
+        const cached = await persistentCache.read(cacheKey);
         if (currentRouteVideoKey() && currentRouteVideoKey() !== key) return false;
         if (!coreCall("isUsableAiSessionCache", cached?.value)) return false;
         return await hydrateAiSessionFromCache(cached.value, key);
@@ -11383,7 +11305,7 @@ body{padding:48px 20px 80px}
       abortChild: (child) => abortPreprocessChildRuntime(child),
       getRaw: (item) => coreCall("cuesToAiText", item.data || [], item.bvid, item.page || 1),
       cacheKey: (item, raw) => coreCall("preprocessCacheKey", item, raw, prompt, cfg, settings),
-      readCache: (key) => persistentCacheRead(key),
+      readCache: (key) => persistentCache.read(key),
       split: (item) => coreCall("splitCuesForPreprocess", item, settings),
       forceRefresh: state.forcePreprocessOnce,
       cacheModel: cfg.model,
@@ -11401,7 +11323,7 @@ body{padding:48px 20px 80px}
         sleep,
       }),
       stitch: (chunks, outputs) => coreCall("stitchPreprocessChunks", chunks, outputs),
-      writeCache: (key, value) => persistentCacheWrite(key, value, PREPROCESS_CACHE_TTL_MS),
+      writeCache: (key, value) => persistentCache.write(key, value, PREPROCESS_CACHE_TTL_MS),
     });
   }
 
@@ -11559,7 +11481,7 @@ body{padding:48px 20px 80px}
     let cachedPayload = null;
     if (!forceAll && routeKeyForCache && coreFn("aiSessionCacheKey") && coreFn("isUsableAiSessionCache")) {
       try {
-        const rec = await persistentCacheRead(coreFn("aiSessionCacheKey")(routeKeyForCache));
+        const rec = await persistentCache.read(coreFn("aiSessionCacheKey")(routeKeyForCache));
         if (coreFn("isUsableAiSessionCache")(rec?.value)) cachedPayload = rec.value;
       } catch (_) { /* ignore cache read */ }
     }
@@ -12694,7 +12616,7 @@ body{padding:48px 20px 80px}
   function boot() {
     if (booted) return;
     booted = true;
-    initCacheChannel();
+    persistentCache.initChannel();
     ensurePanel();
     bindGlobalShortcuts();
     refreshContextUI();

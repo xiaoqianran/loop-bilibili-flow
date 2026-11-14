@@ -61,6 +61,11 @@ describe("Bundled full-feature workbench source", () => {
       .sort();
     const migrated = [
       "scheduleAutoHide",
+      "openCacheDatabase",
+      "persistentCacheRead",
+      "persistentCacheWrite",
+      "persistentCacheDelete",
+      "initCacheChannel",
       "sessionCacheRead",
       "sessionCacheWrite",
       "libraryStatus",
@@ -156,6 +161,15 @@ describe("Bundled full-feature workbench source", () => {
     for (const obsolete of ["sessionCacheRead", "sessionCacheWrite", "function libraryStatus(", "function libraryFilteredEntries("]) {
       expect(maintainedSource).not.toContain(obsolete);
     }
+  });
+
+  it("delegates indexed storage and cache invalidation to Runtime", () => {
+    expect(maintainedSource).toContain("createPersistentCache({");
+    expect(maintainedSource).toContain("persistentCache.read(");
+    expect(maintainedSource).toContain("persistentCache.write(");
+    expect(maintainedSource).toContain("persistentCache.initChannel()");
+    expect(maintainedSource).not.toContain("function openCacheDatabase(");
+    expect(maintainedSource).not.toContain("function persistentCacheRead(");
   });
 
   it("delegates migrated acquisition rules to grouped Bilibili APIs", () => {
