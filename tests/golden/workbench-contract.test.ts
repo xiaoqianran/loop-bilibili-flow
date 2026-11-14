@@ -61,6 +61,11 @@ describe("Bundled full-feature workbench source", () => {
       .sort();
     const migrated = [
       "scheduleAutoHide",
+      "sessionCacheRead",
+      "sessionCacheWrite",
+      "libraryStatus",
+      "libraryStatusLabel",
+      "libraryFilteredEntries",
       "formatTranscriptTime",
       "copySubtitleState",
       "filterTranscriptIndexes",
@@ -137,6 +142,18 @@ describe("Bundled full-feature workbench source", () => {
       "function transcriptCueIndexAt(",
       "function copySubtitleState(",
     ]) {
+      expect(maintainedSource).not.toContain(obsolete);
+    }
+  });
+
+  it("routes resource library and session cache through their new owners", () => {
+    for (const name of ["status", "statusLabel", "filteredEntries"]) {
+      expect(maintainedSource).toContain("SubBatch.SubBatchMonorepo.ui.libraryController." + name + "(");
+    }
+    for (const name of ["readSessionCache", "writeSessionCache"]) {
+      expect(maintainedSource).toContain(name + "(() => sessionStorage,");
+    }
+    for (const obsolete of ["sessionCacheRead", "sessionCacheWrite", "function libraryStatus(", "function libraryFilteredEntries("]) {
       expect(maintainedSource).not.toContain(obsolete);
     }
   });

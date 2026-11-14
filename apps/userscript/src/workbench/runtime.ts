@@ -72,6 +72,8 @@
  * See PEER_AI_PRACTICES.md.
  */
 
+import { readSessionCache, writeSessionCache } from "../runtime/session-cache";
+
 export function mountWorkbench(SubBatch) {
   "use strict";
 
@@ -528,32 +530,6 @@ export function mountWorkbench(SubBatch) {
     map.set(key, value);
     while (map.size > max) map.delete(map.keys().next().value);
     return value;
-  }
-
-  function sessionCacheRead(kind, key, ttlMs) {
-    try {
-      const raw = sessionStorage.getItem(`${CACHE_SESSION_PREFIX}${kind}:${key}`);
-      if (!raw) return null;
-      const record = JSON.parse(raw);
-      if (!record || Date.now() - Number(record.at || 0) > ttlMs) {
-        sessionStorage.removeItem(`${CACHE_SESSION_PREFIX}${kind}:${key}`);
-        return null;
-      }
-      return record.value;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  function sessionCacheWrite(kind, key, value) {
-    try {
-      sessionStorage.setItem(
-        `${CACHE_SESSION_PREFIX}${kind}:${key}`,
-        JSON.stringify({ at: Date.now(), value }),
-      );
-    } catch (_) {
-      /* storage quota or privacy mode: memory/IDB still work */
-    }
   }
 
   const TYPE_LABEL = {
@@ -2007,12 +1983,12 @@ export function mountWorkbench(SubBatch) {
       const runtime = bilibiliCall("video.runtimeView", pageWindow, key);
       if (runtime) {
         lruSet(state.fastViewCache, key, runtime);
-        sessionCacheWrite("view", key, runtime);
+        writeSessionCache(() => sessionStorage, CACHE_SESSION_PREFIX, "view", key, runtime);
         return { value: runtime, cacheLevel: "L0 页面态" };
       }
       const memory = lruGet(state.fastViewCache, key);
       if (memory) return { value: memory, cacheLevel: "L1 内存" };
-      const session = sessionCacheRead("view", key, VIEW_CACHE_TTL_MS);
+      const session = readSessionCache(() => sessionStorage, CACHE_SESSION_PREFIX, "view", key, VIEW_CACHE_TTL_MS);
       if (session) {
         lruSet(state.fastViewCache, key, session);
         return { value: session, cacheLevel: "L2 会话" };
@@ -2026,7 +2002,7 @@ export function mountWorkbench(SubBatch) {
       signal,
     );
     lruSet(state.fastViewCache, key, value);
-    sessionCacheWrite("view", key, value);
+    writeSessionCache(() => sessionStorage, CACHE_SESSION_PREFIX, "view", key, value);
     return { value, cacheLevel: "NET 视频详情" };
   }
 
@@ -2036,12 +2012,12 @@ export function mountWorkbench(SubBatch) {
       const runtime = bilibiliCall("subtitle.runtimeTracks", pageWindow, meta);
       if (runtime) {
         lruSet(state.fastTrackCache, cacheKey, runtime);
-        sessionCacheWrite("tracks", cacheKey, runtime);
+        writeSessionCache(() => sessionStorage, CACHE_SESSION_PREFIX, "tracks", cacheKey, runtime);
         return { tracks: runtime, cacheLevel: "L0 播放器态" };
       }
       const memory = lruGet(state.fastTrackCache, cacheKey);
       if (memory) return { tracks: memory, cacheLevel: "L1 内存" };
-      const session = sessionCacheRead("tracks", cacheKey, TRACK_CACHE_TTL_MS);
+      const session = readSessionCache(() => sessionStorage, CACHE_SESSION_PREFIX, "tracks", cacheKey, TRACK_CACHE_TTL_MS);
       if (session) {
         lruSet(state.fastTrackCache, cacheKey, session);
         return { tracks: session, cacheLevel: "L2 会话" };
@@ -2055,7 +2031,7 @@ export function mountWorkbench(SubBatch) {
       signal,
     );
     lruSet(state.fastTrackCache, cacheKey, tracks);
-    sessionCacheWrite("tracks", cacheKey, tracks);
+    writeSessionCache(() => sessionStorage, CACHE_SESSION_PREFIX, "tracks", cacheKey, tracks);
     return { tracks, cacheLevel: "NET 字幕轨道" };
   }
 
@@ -4588,40 +4564,9 @@ export function mountWorkbench(SubBatch) {
     }
   }
 
-  function libraryStatus(item) {
-    const status = String(item?.subStatus || "wait");
-    return ["ok", "empty", "error", "wait"].includes(status) ? status : "wait";
-  }
-
-  function libraryStatusLabel(item) {
-    const status = libraryStatus(item);
-    if (status === "ok") return `${item?.cue_count || item?.data?.length || 0} 条`;
-    if (status === "empty") return "无字幕";
-    if (status === "error") return "失败";
-    return "待抓取";
-  }
-
-  function libraryFilteredEntries() {
-    const query = String(state.libraryQuery || "").trim().toLocaleLowerCase();
-    const filter = String(state.libraryFilter || "all");
-    return state.items
-      .map((item, index) => ({ item, index }))
-      .filter(({ item }) => filter === "all" || libraryStatus(item) === filter)
-      .filter(({ item }) => {
-        if (!query) return true;
-        const haystack = [
-          item?.title, item?.bvid, item?.author, item?.part,
-          item?.groupFolder, item?.parentFolder, item?.collectionName, item?.videoTitle,
-          item?.collectionShortUrl,
-          ...(Array.isArray(item?.sources) ? item.sources : []),
-        ].filter(Boolean).join(" ").toLocaleLowerCase();
-        return haystack.includes(query);
-      });
-  }
-
   function renderLibraryCounts(root) {
     const counts = { all: state.items.length, ok: 0, wait: 0, error: 0, empty: 0 };
-    state.items.forEach((item) => { counts[libraryStatus(item)] += 1; });
+    state.items.forEach((item) => { counts[SubBatch.SubBatchMonorepo.ui.libraryController.status(item)] += 1; });
     Object.entries(counts).forEach(([key, value]) => {
       const el = root.querySelector(`[data-library-count="${key}"]`);
       if (el) el.textContent = String(value);
@@ -4633,7 +4578,7 @@ export function mountWorkbench(SubBatch) {
   }
 
   function libraryItemRowHtml(it, i, { child = false, depth = 0 } = {}) {
-    const status = libraryStatus(it);
+    const status = SubBatch.SubBatchMonorepo.ui.libraryController.status(it);
     const stClass = status === "ok" ? "st-ok" : status === "empty" ? "st-empty" : status === "error" ? "st-err" : "st-wait";
     const active = routeVideoKey(it.bvid, it.page || 1) === state.transcriptItemKey;
     const page = Math.max(1, Number(it.page) || 1);
@@ -4651,7 +4596,7 @@ export function mountWorkbench(SubBatch) {
         <input type="checkbox" data-i="${i}" ${it.selected ? "checked" : ""} aria-label="选择 ${escapeAttr(displayTitle)}">
         <div class="bsb-resource-main">
           <div class="bsb-resource-title">${escapeHtml(displayTitle)}</div>
-          <div class="bsb-resource-meta"><span>${secondary}</span><span class="bsb-resource-status ${stClass}">${libraryStatusLabel(it)}</span></div>
+          <div class="bsb-resource-meta"><span>${secondary}</span><span class="bsb-resource-status ${stClass}">${SubBatch.SubBatchMonorepo.ui.libraryController.statusLabel(it)}</span></div>
         </div>
       </div>`;
   }
@@ -4709,7 +4654,7 @@ export function mountWorkbench(SubBatch) {
     const box = root?.querySelector('[data-role="list"]');
     if (!box || !root) return;
     renderLibraryCounts(root);
-    const entries = libraryFilteredEntries();
+    const entries = SubBatch.SubBatchMonorepo.ui.libraryController.filteredEntries(state.items, state.libraryQuery, state.libraryFilter);
     const visible = root.querySelector('[data-role="library-visible-count"]');
     if (visible) visible.textContent = `${entries.length} / ${state.items.length}`;
 
@@ -4902,7 +4847,7 @@ export function mountWorkbench(SubBatch) {
     const item = currentTranscriptItem();
     if (!item || item.subStatus !== "ok" || !item.data?.length) {
       title.textContent = item?.title || "当前视频字幕";
-      const status = item ? libraryStatus(item) : "";
+      const status = item ? SubBatch.SubBatchMonorepo.ui.libraryController.status(item) : "";
       meta.textContent = !item
         ? "从左侧选择一个视频"
         : status === "error"

@@ -3553,8 +3553,8 @@ ${prompt2.userPromptTemplate}`
               throw error;
             }
           },
-          finish(status = "done") {
-            if (current()) task.status = status;
+          finish(status2 = "done") {
+            if (current()) task.status = status2;
           }
         };
       },
@@ -4471,10 +4471,10 @@ ${prompt2.userPromptTemplate}`
   }
   function classifyAcquisitionError(error) {
     const message = error instanceof Error ? error.message : String(error);
-    const status = Number(error?.status);
+    const status2 = Number(error?.status);
     const aborted = error?.name === "AbortError";
-    const rateLimited = status === 429 || /(?:HTTP\s*(?:429|412)|rate.limit|too many requests)/i.test(message);
-    const unauthorized = status === 401 || status === 403 || /HTTP\s*(?:401|403)/i.test(message);
+    const rateLimited = status2 === 429 || /(?:HTTP\s*(?:429|412)|rate.limit|too many requests)/i.test(message);
+    const unauthorized = status2 === 401 || status2 === 403 || /HTTP\s*(?:401|403)/i.test(message);
     const network = /(?:network|failed to fetch|load failed|timeout|http\s*5\d\d)/i.test(message);
     const code = aborted ? "aborted" : rateLimited ? "rate_limited" : unauthorized ? "unauthorized" : network ? "network" : "unknown";
     return {
@@ -9389,6 +9389,43 @@ ${prompt2.userPromptTemplate}`
     filterIndexes,
     formatTime
   }, Symbol.toStringTag, { value: "Module" }));
+  function status(item) {
+    const value = String(item?.subStatus || "wait");
+    return value === "ok" || value === "empty" || value === "error" ? value : "wait";
+  }
+  function statusLabel(item) {
+    const value = status(item);
+    if (value === "ok") return String(item?.cue_count || item?.data?.length || 0) + " 条";
+    if (value === "empty") return "无字幕";
+    if (value === "error") return "失败";
+    return "待抓取";
+  }
+  function filteredEntries(items, queryValue, filterValue) {
+    const query = String(queryValue || "").trim().toLocaleLowerCase();
+    const filter = String(filterValue || "all");
+    return items.map((item, index) => ({ item, index })).filter(({ item }) => filter === "all" || status(item) === filter).filter(({ item }) => {
+      if (!query) return true;
+      const haystack = [
+        item?.title,
+        item?.bvid,
+        item?.author,
+        item?.part,
+        item?.groupFolder,
+        item?.parentFolder,
+        item?.collectionName,
+        item?.videoTitle,
+        item?.collectionShortUrl,
+        ...Array.isArray(item?.sources) ? item.sources : []
+      ].filter(Boolean).join(" ").toLocaleLowerCase();
+      return haystack.includes(query);
+    });
+  }
+  const libraryController = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    filteredEntries,
+    status,
+    statusLabel
+  }, Symbol.toStringTag, { value: "Module" }));
   const ui = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
     aiStyles,
@@ -9396,6 +9433,7 @@ ${prompt2.userPromptTemplate}`
     knowledgeDrilldownStyles: knowledgeStyles,
     knowledgeWorkspaceStyles,
     lateStudioStyles: lateStyles,
+    libraryController,
     panelChrome: chromeController,
     panelGeometry: geometry,
     panelInteraction: interaction,
@@ -9663,6 +9701,27 @@ ${prompt2.userPromptTemplate}`
       registerShortcuts,
       onNavigate
     };
+  }
+  function readSessionCache(storage, prefix, kind, key, ttlMs, now = Date.now()) {
+    try {
+      const fullKey = prefix + kind + ":" + key;
+      const raw = storage().getItem(fullKey);
+      if (!raw) return null;
+      const record2 = JSON.parse(raw);
+      if (!record2 || now - Number(record2.at || 0) > ttlMs) {
+        storage().removeItem(fullKey);
+        return null;
+      }
+      return record2.value;
+    } catch {
+      return null;
+    }
+  }
+  function writeSessionCache(storage, prefix, kind, key, value, now = Date.now()) {
+    try {
+      storage().setItem(prefix + kind + ":" + key, JSON.stringify({ at: now, value }));
+    } catch {
+    }
   }
   function mountWorkbench(SubBatch2) {
     const SCRIPT_VERSION = typeof GM_info !== "undefined" && GM_info?.script?.version || "6.10.1";
@@ -10161,29 +10220,6 @@ ${prompt2.userPromptTemplate}`
       map.set(key, value);
       while (map.size > max) map.delete(map.keys().next().value);
       return value;
-    }
-    function sessionCacheRead(kind, key, ttlMs) {
-      try {
-        const raw = sessionStorage.getItem(`${CACHE_SESSION_PREFIX}${kind}:${key}`);
-        if (!raw) return null;
-        const record2 = JSON.parse(raw);
-        if (!record2 || Date.now() - Number(record2.at || 0) > ttlMs) {
-          sessionStorage.removeItem(`${CACHE_SESSION_PREFIX}${kind}:${key}`);
-          return null;
-        }
-        return record2.value;
-      } catch (_) {
-        return null;
-      }
-    }
-    function sessionCacheWrite(kind, key, value) {
-      try {
-        sessionStorage.setItem(
-          `${CACHE_SESSION_PREFIX}${kind}:${key}`,
-          JSON.stringify({ at: Date.now(), value })
-        );
-      } catch (_) {
-      }
     }
     const TYPE_LABEL = {
       video: "单个视频",
@@ -11379,12 +11415,12 @@ ${prompt2.userPromptTemplate}`
         const runtime2 = bilibiliCall("video.runtimeView", pageWindow, key);
         if (runtime2) {
           lruSet(state2.fastViewCache, key, runtime2);
-          sessionCacheWrite("view", key, runtime2);
+          writeSessionCache(() => sessionStorage, CACHE_SESSION_PREFIX, "view", key, runtime2);
           return { value: runtime2, cacheLevel: "L0 页面态" };
         }
         const memory = lruGet(state2.fastViewCache, key);
         if (memory) return { value: memory, cacheLevel: "L1 内存" };
-        const session = sessionCacheRead("view", key, VIEW_CACHE_TTL_MS);
+        const session = readSessionCache(() => sessionStorage, CACHE_SESSION_PREFIX, "view", key, VIEW_CACHE_TTL_MS);
         if (session) {
           lruSet(state2.fastViewCache, key, session);
           return { value: session, cacheLevel: "L2 会话" };
@@ -11397,7 +11433,7 @@ ${prompt2.userPromptTemplate}`
         signal
       );
       lruSet(state2.fastViewCache, key, value);
-      sessionCacheWrite("view", key, value);
+      writeSessionCache(() => sessionStorage, CACHE_SESSION_PREFIX, "view", key, value);
       return { value, cacheLevel: "NET 视频详情" };
     }
     async function fetchSubtitleTracksFast(meta, signal, { forceNetwork = false } = {}) {
@@ -11406,12 +11442,12 @@ ${prompt2.userPromptTemplate}`
         const runtime2 = bilibiliCall("subtitle.runtimeTracks", pageWindow, meta);
         if (runtime2) {
           lruSet(state2.fastTrackCache, cacheKey, runtime2);
-          sessionCacheWrite("tracks", cacheKey, runtime2);
+          writeSessionCache(() => sessionStorage, CACHE_SESSION_PREFIX, "tracks", cacheKey, runtime2);
           return { tracks: runtime2, cacheLevel: "L0 播放器态" };
         }
         const memory = lruGet(state2.fastTrackCache, cacheKey);
         if (memory) return { tracks: memory, cacheLevel: "L1 内存" };
-        const session = sessionCacheRead("tracks", cacheKey, TRACK_CACHE_TTL_MS);
+        const session = readSessionCache(() => sessionStorage, CACHE_SESSION_PREFIX, "tracks", cacheKey, TRACK_CACHE_TTL_MS);
         if (session) {
           lruSet(state2.fastTrackCache, cacheKey, session);
           return { tracks: session, cacheLevel: "L2 会话" };
@@ -11424,7 +11460,7 @@ ${prompt2.userPromptTemplate}`
         signal
       );
       lruSet(state2.fastTrackCache, cacheKey, tracks);
-      sessionCacheWrite("tracks", cacheKey, tracks);
+      writeSessionCache(() => sessionStorage, CACHE_SESSION_PREFIX, "tracks", cacheKey, tracks);
       return { tracks, cacheLevel: "NET 字幕轨道" };
     }
     async function fetchTrackBodyFast(base, tracks, trackIndex, signal, { forceNetwork = false } = {}) {
@@ -13655,11 +13691,11 @@ ${prompt2.userPromptTemplate}`
       renderAiResultTabs();
       applyAiWorkbenchStageUi();
       if (currentAiWorkbenchStage() === "preprocess") {
-        const status = root.querySelector('[data-role="ai-preprocess-status"]');
-        if (status) {
+        const status2 = root.querySelector('[data-role="ai-preprocess-status"]');
+        if (status2) {
           const raw = currentInputPreviewText("raw");
           const processed = currentInputPreviewText("processed");
-          status.textContent = !raw ? "当前视频暂无字幕" : processed ? "AI 字幕已就绪" : state2.preprocessEnabled ? "原始字幕已就绪" : "预处理已关闭";
+          status2.textContent = !raw ? "当前视频暂无字幕" : processed ? "AI 字幕已就绪" : state2.preprocessEnabled ? "原始字幕已就绪" : "预处理已关闭";
         }
       }
     }
@@ -13877,41 +13913,10 @@ ${prompt2.userPromptTemplate}`
         }
       }
     }
-    function libraryStatus(item) {
-      const status = String(item?.subStatus || "wait");
-      return ["ok", "empty", "error", "wait"].includes(status) ? status : "wait";
-    }
-    function libraryStatusLabel(item) {
-      const status = libraryStatus(item);
-      if (status === "ok") return `${item?.cue_count || item?.data?.length || 0} 条`;
-      if (status === "empty") return "无字幕";
-      if (status === "error") return "失败";
-      return "待抓取";
-    }
-    function libraryFilteredEntries() {
-      const query = String(state2.libraryQuery || "").trim().toLocaleLowerCase();
-      const filter = String(state2.libraryFilter || "all");
-      return state2.items.map((item, index) => ({ item, index })).filter(({ item }) => filter === "all" || libraryStatus(item) === filter).filter(({ item }) => {
-        if (!query) return true;
-        const haystack = [
-          item?.title,
-          item?.bvid,
-          item?.author,
-          item?.part,
-          item?.groupFolder,
-          item?.parentFolder,
-          item?.collectionName,
-          item?.videoTitle,
-          item?.collectionShortUrl,
-          ...Array.isArray(item?.sources) ? item.sources : []
-        ].filter(Boolean).join(" ").toLocaleLowerCase();
-        return haystack.includes(query);
-      });
-    }
     function renderLibraryCounts(root) {
       const counts = { all: state2.items.length, ok: 0, wait: 0, error: 0, empty: 0 };
       state2.items.forEach((item) => {
-        counts[libraryStatus(item)] += 1;
+        counts[SubBatch2.SubBatchMonorepo.ui.libraryController.status(item)] += 1;
       });
       Object.entries(counts).forEach(([key, value]) => {
         const el = root.querySelector(`[data-library-count="${key}"]`);
@@ -13923,8 +13928,8 @@ ${prompt2.userPromptTemplate}`
       return counts;
     }
     function libraryItemRowHtml(it, i, { child = false, depth = 0 } = {}) {
-      const status = libraryStatus(it);
-      const stClass = status === "ok" ? "st-ok" : status === "empty" ? "st-empty" : status === "error" ? "st-err" : "st-wait";
+      const status2 = SubBatch2.SubBatchMonorepo.ui.libraryController.status(it);
+      const stClass = status2 === "ok" ? "st-ok" : status2 === "empty" ? "st-empty" : status2 === "error" ? "st-err" : "st-wait";
       const active = routeVideoKey2(it.bvid, it.page || 1) === state2.transcriptItemKey;
       const page = Math.max(1, Number(it.page) || 1);
       const displayTitle = it.groupType === "selection" || it.groupType === "collection" ? it.groupType === "selection" ? it.part ? `P${page}${it.part}` : `P${page}` : it.title || it.bvid || "未命名视频" : it.title || it.bvid || "未命名视频";
@@ -13937,7 +13942,7 @@ ${prompt2.userPromptTemplate}`
         <input type="checkbox" data-i="${i}" ${it.selected ? "checked" : ""} aria-label="选择 ${escapeAttr(displayTitle)}">
         <div class="bsb-resource-main">
           <div class="bsb-resource-title">${escapeHtml(displayTitle)}</div>
-          <div class="bsb-resource-meta"><span>${secondary}</span><span class="bsb-resource-status ${stClass}">${libraryStatusLabel(it)}</span></div>
+          <div class="bsb-resource-meta"><span>${secondary}</span><span class="bsb-resource-status ${stClass}">${SubBatch2.SubBatchMonorepo.ui.libraryController.statusLabel(it)}</span></div>
         </div>
       </div>`;
     }
@@ -13991,7 +13996,7 @@ ${prompt2.userPromptTemplate}`
       const box = root?.querySelector('[data-role="list"]');
       if (!box || !root) return;
       renderLibraryCounts(root);
-      const entries = libraryFilteredEntries();
+      const entries = SubBatch2.SubBatchMonorepo.ui.libraryController.filteredEntries(state2.items, state2.libraryQuery, state2.libraryFilter);
       const visible = root.querySelector('[data-role="library-visible-count"]');
       if (visible) visible.textContent = `${entries.length} / ${state2.items.length}`;
       if (!state2.items.length) {
@@ -14163,11 +14168,11 @@ ${prompt2.userPromptTemplate}`
       const item = currentTranscriptItem();
       if (!item || item.subStatus !== "ok" || !item.data?.length) {
         title.textContent = item?.title || "当前视频字幕";
-        const status = item ? libraryStatus(item) : "";
-        meta.textContent = !item ? "从左侧选择一个视频" : status === "error" ? `${item.bvid || ""}${item.page > 1 ? ` · P${item.page}` : ""} · 抓取失败` : status === "empty" ? `${item.bvid || ""}${item.page > 1 ? ` · P${item.page}` : ""} · 无字幕` : `${item.bvid || ""}${item.page > 1 ? ` · P${item.page}` : ""} · 待抓取`;
+        const status2 = item ? SubBatch2.SubBatchMonorepo.ui.libraryController.status(item) : "";
+        meta.textContent = !item ? "从左侧选择一个视频" : status2 === "error" ? `${item.bvid || ""}${item.page > 1 ? ` · P${item.page}` : ""} · 抓取失败` : status2 === "empty" ? `${item.bvid || ""}${item.page > 1 ? ` · P${item.page}` : ""} · 无字幕` : `${item.bvid || ""}${item.page > 1 ? ` · P${item.page}` : ""} · 待抓取`;
         count.textContent = "";
         populateTranscriptTrackSelect(null);
-        list.innerHTML = item ? `<div class="bsb-transcript-empty">${status === "error" ? "字幕抓取失败，可点击右上角刷新重试。" : status === "empty" ? "这个视频没有可读取字幕。" : "该视频尚未抓取字幕，可勾选后点击左侧「抓取所选」。"}</div>` : `<div class="bsb-transcript-empty">从左侧选择一个视频。<br>已有字幕的项目会直接显示全文。</div>`;
+        list.innerHTML = item ? `<div class="bsb-transcript-empty">${status2 === "error" ? "字幕抓取失败，可点击右上角刷新重试。" : status2 === "empty" ? "这个视频没有可读取字幕。" : "该视频尚未抓取字幕，可勾选后点击左侧「抓取所选」。"}</div>` : `<div class="bsb-transcript-empty">从左侧选择一个视频。<br>已有字幕的项目会直接显示全文。</div>`;
         return;
       }
       if (!state2.transcriptItemKey) state2.transcriptItemKey = routeVideoKey2(item.bvid, item.page || 1);
@@ -15481,10 +15486,10 @@ ${addition}`.trim() };
       }
       const answer = knowledgeVisibleAnswer(activeNode.answer || activeNode.preview || "");
       const streaming = activeNode.status === "running";
-      const statusLabel = streaming ? "正在回答" : activeNode.status === "stopped" ? "已停止" : activeNode.status === "error" ? "回答失败" : "当前问题";
+      const statusLabel2 = streaming ? "正在回答" : activeNode.status === "stopped" ? "已停止" : activeNode.status === "error" ? "回答失败" : "当前问题";
       const answerFallback = activeNode.status === "error" ? `<div class="bsb-knowledge-thinking">回答失败${activeNode.error ? `：${escapeHtml(activeNode.error)}` : ""}</div>` : activeNode.status === "stopped" ? '<div class="bsb-knowledge-thinking">回答已停止。可以从这个节点继续提出新的问题。</div>' : '<div class="bsb-knowledge-thinking">正在组织回答…</div>';
       const answerHtml = answer ? renderKnowledgeAnswerCards(answer, { streaming }) : answerFallback;
-      return `<article class="bsb-knowledge-question-card"><div class="bsb-knowledge-question"><div class="bsb-knowledge-question-meta"><span>${statusLabel}</span><button type="button" class="bsb-knowledge-node-star${activeNode.starred ? " active" : ""}" data-knowledge-star-node title="${activeNode.starred ? "取消收藏这个回答" : "收藏这个回答"}">${activeNode.starred ? "★" : "☆"}</button></div><h3>${escapeHtml(activeNode.question)}</h3></div></article>
+      return `<article class="bsb-knowledge-question-card"><div class="bsb-knowledge-question"><div class="bsb-knowledge-question-meta"><span>${statusLabel2}</span><button type="button" class="bsb-knowledge-node-star${activeNode.starred ? " active" : ""}" data-knowledge-star-node title="${activeNode.starred ? "取消收藏这个回答" : "收藏这个回答"}">${activeNode.starred ? "★" : "☆"}</button></div><h3>${escapeHtml(activeNode.question)}</h3></div></article>
       <div class="bsb-knowledge-answer${streaming ? " streaming" : ""}">${answerHtml}</div>
       ${knowledgeSuggestionsHtml(activeNode)}`;
     }
@@ -17602,13 +17607,13 @@ ${memory}
       applyAiWorkbenchStageUi();
       const kind = state2.aiInputView === "processed" ? "processed" : "raw";
       const text = kind === "processed" ? processed : raw;
-      const status = root.querySelector('[data-role="ai-preprocess-status"]');
-      if (status) {
-        if (!raw) status.textContent = "当前视频暂无字幕";
-        else if (!state2.preprocessEnabled) status.textContent = "预处理已关闭";
-        else if (state2.preprocessRun?.busy) status.textContent = state2.preprocessRun.statusText || "AI 正在处理字幕…";
-        else if (processed) status.textContent = state2.preprocessRun?.statusText || "AI 字幕已就绪";
-        else status.textContent = "原始字幕已就绪 · 尚未生成 AI 字幕";
+      const status2 = root.querySelector('[data-role="ai-preprocess-status"]');
+      if (status2) {
+        if (!raw) status2.textContent = "当前视频暂无字幕";
+        else if (!state2.preprocessEnabled) status2.textContent = "预处理已关闭";
+        else if (state2.preprocessRun?.busy) status2.textContent = state2.preprocessRun.statusText || "AI 正在处理字幕…";
+        else if (processed) status2.textContent = state2.preprocessRun?.statusText || "AI 字幕已就绪";
+        else status2.textContent = "原始字幕已就绪 · 尚未生成 AI 字幕";
       }
       const meta = root.querySelector('[data-role="ai-canvas-meta"]');
       if (meta) meta.textContent = kind === "processed" ? "AI 处理字幕" : "原始字幕";
@@ -17688,10 +17693,10 @@ ${memory}
       }
       outputHost.innerHTML = tasks.map((task) => {
         const runs2 = state2.aiRunOrder.map((id) => state2.aiRuns.get(id)).filter((r) => r?.taskId === task.id);
-        const status = aggregateRunStatus(runs2);
+        const status2 = aggregateRunStatus(runs2);
         const active = task.id === state2.aiActiveTaskId ? " active" : "";
         const configuredModels = task.modelIds?.length || 0;
-        return `<button type="button" class="bsb-output-tab ${escapeAttr(status)}${active}" data-ai-output-task="${escapeAttr(task.id)}" title="${escapeAttr(taskDisplayName(task))}"><span class="dot"></span><span class="name">${escapeHtml(taskDisplayName(task))}</span><span class="count">${runs2.length || configuredModels}</span></button>`;
+        return `<button type="button" class="bsb-output-tab ${escapeAttr(status2)}${active}" data-ai-output-task="${escapeAttr(task.id)}" title="${escapeAttr(taskDisplayName(task))}"><span class="dot"></span><span class="name">${escapeHtml(taskDisplayName(task))}</span><span class="count">${runs2.length || configuredModels}</span></button>`;
       }).join("");
       const activeTask = tasks.find((t) => t.id === state2.aiActiveTaskId) || tasks[0];
       const runs = state2.aiRunOrder.map((id) => state2.aiRuns.get(id)).filter((r) => r?.taskId === activeTask.id);
@@ -17702,9 +17707,9 @@ ${memory}
         }
         modelHost.innerHTML = runs.map((run) => {
           const active = run.id === state2.aiActiveRunId ? " active" : "";
-          const status = run.status || (run.busy ? "running" : "queued");
+          const status2 = run.status || (run.busy ? "running" : "queued");
           const name = run.config.name || run.config.model;
-          return `<button type="button" class="bsb-model-tab ${escapeAttr(status)}${active}" data-ai-result-id="${escapeAttr(run.id)}" title="${escapeAttr(`${run.promptName} · ${name} · ${run.statusText || status}`)}"><span class="dot"></span><span>${escapeHtml(name)}</span></button>`;
+          return `<button type="button" class="bsb-model-tab ${escapeAttr(status2)}${active}" data-ai-result-id="${escapeAttr(run.id)}" title="${escapeAttr(`${run.promptName} · ${name} · ${run.statusText || status2}`)}"><span class="dot"></span><span>${escapeHtml(name)}</span></button>`;
         }).join("");
       } else {
         const profiles = state2.aiProfiles?.length ? state2.aiProfiles : loadAiProfiles();
