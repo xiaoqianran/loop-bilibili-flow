@@ -8,7 +8,8 @@ export interface BilibiliVideoView {
   aid?: number | string;
   cid?: number | string;
   title?: string;
-  owner?: { name?: string } | null;
+  owner?: { name?: string; mid?: string | number } | null;
+  ugc_season?: { id?: string | number; mid?: string | number; title?: string } | null;
   pages?: BilibiliVideoPage[] | null;
   is_upower_exclusive?: boolean;
   is_upower_play?: boolean;

@@ -47,11 +47,11 @@ export function createCoordinator() {
   };
 }
 
-export interface BatchModel { id: string; enabled?: boolean; apiKey?: string; baseUrl?: string; model?: string; temperature?: number; maxTokens?: number }
+export interface BatchModel { id: string; name?: string; enabled?: boolean; apiKey?: string; baseUrl?: string; model?: string; temperature?: number; maxTokens?: number }
 export interface BatchPrompt { id: string; stage: string; systemPrompt: string; userPromptTemplate: string }
 export interface BatchTask { id: string; promptId: string; modelIds: string[]; enabled?: boolean }
 /** The application owns task expansion; UI supplies only saved configuration. */
-export function planTasks(tasks: readonly BatchTask[], prompts: readonly BatchPrompt[], profiles: readonly BatchModel[]) {
+export function planTasks<P extends BatchPrompt, M extends BatchModel>(tasks: readonly BatchTask[], prompts: readonly P[], profiles: readonly M[]) {
   const profileMap = new Map(profiles.map(profile => [profile.id, profile]));
   const plans = tasks.filter(task => task.enabled !== false).flatMap(task => {
     const prompt = prompts.find(prompt => prompt.id === task.promptId && prompt.stage === "postprocess");
@@ -136,14 +136,14 @@ export interface SubtitleCandidate {
   page?: number;
   subStatus?: string;
   data?: unknown[] | null;
-  cue_count?: number;
+  cue_count?: number | null;
   error?: string;
   title?: string;
   author?: string;
 }
 export interface SubtitleFetchResult {
   status: string;
-  cue_count?: number;
+  cue_count?: number | null;
   data?: unknown[] | null;
   error?: string;
   title?: string;
@@ -168,6 +168,7 @@ export async function ensureSubtitles<T extends SubtitleCandidate>(
     if (item.subStatus === "ok" && item.data?.length) continue;
     ports.onFetching(item, i, targets.length);
     const result = await ports.fetchSubtitle(item.bvid, item.page || 1);
+    if (ports.cancelled()) throw new Error("用户停止");
     item.subStatus = result.status;
     item.cue_count = result.cue_count || 0;
     item.data = result.data || null;
@@ -224,7 +225,6 @@ export interface BatchRunIdentity {
 export interface BatchRunState extends BatchRunIdentity {
   id: string;
   sourceBvids?: string[];
-  [key: string]: unknown;
 }
 
 /** Assign cached model output to its existing run identity; return only missing run IDs. */

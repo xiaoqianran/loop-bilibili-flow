@@ -4,12 +4,18 @@ export type ScanMode = "auto" | "video" | "selection" | "user" |
 
 export interface ScanContext {
   type: ScanMode | (string & {});
-  bvid?: string;
-  mid?: string;
-  season_id?: string;
-  media_id?: string;
-  keyword?: string;
-  [key: string]: unknown;
+  bvid?: string | undefined;
+  mid?: string | undefined;
+  season_id?: string | undefined;
+  media_id?: string | undefined;
+  keyword?: string | undefined;
+  page?: number | undefined;
+  order?: string | undefined;
+  source?: string | undefined;
+  note?: string | undefined;
+  text?: string | undefined;
+  authorHint?: string | undefined;
+  collectionTitleHint?: string | undefined;
 }
 
 export function validateContext(value: unknown): asserts value is ScanContext {

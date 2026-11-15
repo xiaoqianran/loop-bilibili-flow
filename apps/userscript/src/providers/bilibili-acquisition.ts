@@ -8,7 +8,7 @@ import {
   type WbiKeys,
   type WbiParams,
 } from "@subbatch/bilibili";
-import { md5 } from "@subbatch/core";
+import { md5, type RawSubtitleCue } from "@subbatch/core";
 import type { NetworkAdapter, NetworkRequest } from "@subbatch/runtime";
 
 interface BilibiliPayload<T> {
@@ -133,9 +133,11 @@ export async function fetchSubtitleBody(
   network: NetworkAdapter,
   url: string,
   signal?: AbortSignal,
-): Promise<unknown[]> {
+): Promise<RawSubtitleCue[]> {
   const payload = await network.json<{ body?: unknown }>(url, request(signal));
-  return Array.isArray(payload?.body) ? payload.body : [];
+  if (!Array.isArray(payload?.body)) return [];
+  return payload.body.filter((value): value is RawSubtitleCue =>
+    value !== null && typeof value === "object" && !Array.isArray(value));
 }
 
 async function fetchPlayerWbiTracks(

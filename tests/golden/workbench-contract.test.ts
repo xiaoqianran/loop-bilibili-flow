@@ -26,7 +26,7 @@ const maintainedSource = readFileSync(
 
 function functionNames(source: string): Set<string> {
   return new Set(
-    [...source.matchAll(/\b(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/g)]
+    [...source.matchAll(/\b(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\s*\(/g)]
       .map((match) => match[1])
       .filter((name): name is string => Boolean(name)),
   );
@@ -56,7 +56,7 @@ describe("Bundled full-feature workbench source", () => {
   it("delegates flow drawer setting changes to the typed UI controller", () => {
     expect(maintainedSource).toContain("ui.settingsInteraction.bindFlowChanges(root,");
     expect(maintainedSource).not.toContain('root.addEventListener("change", (e) => {');
-    expect(maintainedSource).toContain("taskPrompt: (taskId, promptId) =>");
+    expect(maintainedSource).toContain("taskPrompt: (taskId");
   });
 
   it("routes scan input requirements and paging policy through typed Application", () => {
@@ -84,6 +84,8 @@ describe("Bundled full-feature workbench source", () => {
       .sort();
     const migrated = [
       "scheduleAutoHide",
+      "resolveAiScrollState",
+      "shouldStickBottom",
       "knowledgeAncestorNodes",
       "knowledgeBranchContext",
       "knowledgeTreeHtml",
@@ -104,6 +106,8 @@ describe("Bundled full-feature workbench source", () => {
       "copySubtitleState",
       "filterTranscriptIndexes",
       "transcriptCueIndexAt",
+      "appendTranscriptHighlightedText",
+      "populateTranscriptTrackSelect",
       "aiSubtitleStat",
       "buildProcessedSubtitlePayload",
       "currentPreprocessSettings",
@@ -174,7 +178,17 @@ describe("Bundled full-feature workbench source", () => {
     ].sort();
 
     expect(baselineNames.size).toBeGreaterThan(250);
-    expect(missing).toEqual(migrated);
+    const presentationSource = readFileSync(new URL("../../apps/userscript/src/ui/workspaces/mermaid-presentation.ts", import.meta.url), "utf8");
+    const presentationOwners = ["buildMermaidCard", "closeMermaidFullscreen", "fitMermaidToViewport",
+      "getMermaidScale", "openMermaidFullscreen", "parseMermaidViewBox", "setMermaidScale", "updateMermaidScaleLabel"];
+    for (const name of presentationOwners) expect(functionNames(presentationSource).has(name)).toBe(true);
+    expect(maintainedSource).toContain('from "../ui/workspaces/mermaid-presentation"');
+    // These private compatibility helpers had no callers in the maintained runtime.
+    // ESLint now checks the whole runtime; their active controllers remain covered above.
+    const retiredUnused = ["debounce", "knowledgeMarkdownHtml", "loadAiConfig", "requestJsonFast",
+      "saveAiConfig", "saveAiConfigFromForm", "setBusy"];
+    for (const name of retiredUnused) expect(maintainedSource).not.toMatch(new RegExp(`\\b${name}\\s*\\(`));
+    expect(missing).toEqual([...migrated, ...presentationOwners, ...retiredUnused].sort());
     expect(maintainedSource).toContain("function boot()");
     expect(maintainedSource).toContain("scheduleAutoCapture(\"initial\", 180)");
   });
@@ -182,8 +196,8 @@ describe("Bundled full-feature workbench source", () => {
   it("delegates all configuration and flow drag events to one typed UI owner", () => {
     const source = extractFunctionSource(maintainedSource, "commitConfigListReorder");
     expect(source).toContain('appCall("ordering.reorderIds"');
-    expect(source).toContain('appCall("ordering.applyConfigIdOrder"');
-    expect(source).toContain('appCall("ordering.applyPromptStageOrder"');
+    expect(source).toContain('SubBatch.SubBatchMonorepo.app.ordering.applyConfigIdOrder(');
+    expect(source).toContain('SubBatch.SubBatchMonorepo.app.ordering.applyPromptStageOrder(');
     expect(maintainedSource).toContain("ui.reorderInteraction.bind(root,");
     for (const obsolete of [
       "function bindConfigListDrag(", "function bindFlowModelDrag(",
@@ -232,7 +246,7 @@ describe("Bundled full-feature workbench source", () => {
 
   it("routes subtitle reading policies through the bundled UI namespace", () => {
     const controller = "SubBatch.SubBatchMonorepo.ui.transcriptController.";
-    for (const method of ["formatTime", "filterIndexes", "cueIndexAt", "copySubtitleState"]) {
+    for (const method of ["renderPanel", "updateActiveCue", "copySubtitleState"]) {
       expect(maintainedSource).toContain(controller + method + "(");
     }
     for (const obsolete of [
@@ -240,6 +254,8 @@ describe("Bundled full-feature workbench source", () => {
       "function filterTranscriptIndexes(",
       "function transcriptCueIndexAt(",
       "function copySubtitleState(",
+      "function appendTranscriptHighlightedText(",
+      "function populateTranscriptTrackSelect(",
     ]) {
       expect(maintainedSource).not.toContain(obsolete);
     }
@@ -249,9 +265,9 @@ describe("Bundled full-feature workbench source", () => {
     for (const name of ["status", "statusLabel", "filteredEntries"]) {
       expect(maintainedSource).toContain("SubBatch.SubBatchMonorepo.ui.libraryController." + name + "(");
     }
-    for (const name of ["readSessionCache", "writeSessionCache"]) {
-      expect(maintainedSource).toContain(name + "(() => sessionStorage,");
-    }
+    expect(maintainedSource).toContain("readSessionCache<BilibiliVideoView>(() => sessionStorage,");
+    expect(maintainedSource).toContain("readSessionCache<SubtitleTrack[]>(() => sessionStorage,");
+    expect(maintainedSource).toContain("writeSessionCache(() => sessionStorage,");
     for (const obsolete of ["sessionCacheRead", "sessionCacheWrite", "function libraryStatus(", "function libraryFilteredEntries("]) {
       expect(maintainedSource).not.toContain(obsolete);
     }
@@ -286,12 +302,12 @@ describe("Bundled full-feature workbench source", () => {
       expect(maintainedSource).toContain('"libraryScan.' + name + '"');
     }
     expect(maintainedSource).not.toContain("const pushItem = (item) => {");
-    expect(maintainedSource).toContain("async function expandCollectionArchivesWithParts(items,");
+    expect(maintainedSource).toContain("async function expandCollectionArchivesWithParts(items:");
   });
 
   it("delegates personal-space season paging to the Application coordinator", () => {
     expect(maintainedSource).toContain('appCall("libraryScan.collectUserSeasons"');
-    expect(maintainedSource).toContain("async function loadUserSpaceSeasons(mid,");
+    expect(maintainedSource).toContain("async function loadUserSpaceSeasons(mid:");
     expect(maintainedSource).not.toContain("const seasonsList = lists.seasons_list || [];");
     expect(maintainedSource).not.toContain("const totalHint = pageInfo.total");
   });
@@ -304,7 +320,7 @@ describe("Bundled full-feature workbench source", () => {
       expect(maintainedSource).toContain('"studio.' + name + '"');
     }
     for (const name of ["ancestorNodes", "branchContext"]) {
-      expect(maintainedSource).toContain('"knowledge.' + name + '"');
+      expect(maintainedSource.includes('appCall("knowledge.' + name + '"') || maintainedSource.includes("SubBatch.SubBatchMonorepo.app.knowledge." + name + "(")).toBe(true);
     }
     for (const obsolete of [
       "function compressStudioTranscript(",
@@ -322,7 +338,7 @@ describe("Bundled full-feature workbench source", () => {
       expect(maintainedSource).toContain('appCall("studio.' + name + '"');
     }
     for (const name of ["sortAnchors", "reconcileNodes"]) {
-      expect(maintainedSource).toContain('"knowledge.' + name + '"');
+      expect(maintainedSource.includes('appCall("knowledge.' + name + '"') || maintainedSource.includes("SubBatch.SubBatchMonorepo.app.knowledge." + name + "(")).toBe(true);
     }
     expect(maintainedSource).not.toContain('const liveRunning = state.knowledgeBusy');
     expect(maintainedSource).not.toContain('botMsg.status = runtime.abort ?');
@@ -332,7 +348,7 @@ describe("Bundled full-feature workbench source", () => {
     expect(maintainedSource).not.toContain("function openKnowledgeDb(");
     expect(maintainedSource).not.toContain("state.knowledgeDbPromise");
     for (const name of ["saveAnchor", "saveNode", "deleteAnchorCommitted"]) {
-      expect(maintainedSource).toContain('appCall("knowledge.' + name + '"');
+      expect(maintainedSource).toContain('SubBatch.SubBatchMonorepo.app.knowledge.' + name + '(');
     }
     expect(maintainedSource).toContain("repository.deleteAnchor(id)");
     expect(maintainedSource).not.toContain("const nodeIds = state.knowledgeNodes.filter(");
@@ -377,7 +393,7 @@ describe("Bundled full-feature workbench source", () => {
   });
 
   it("delegates migrated acquisition rules to grouped Bilibili APIs", () => {
-    expect(maintainedSource).toContain("function bilibiliCall(");
+    expect(maintainedSource).toContain("function bilibiliCall<");
     expect(maintainedSource).toContain('bilibiliCall("video.runtimeView"');
     expect(maintainedSource).toContain('bilibiliCall("video.pageMeta"');
     expect(maintainedSource).toContain('bilibiliCall("video.isChargeBlocked"');
@@ -525,7 +541,7 @@ describe("Bundled full-feature workbench source", () => {
       maintainedSource,
       "currentRouteVideoRef",
     );
-    expect(currentVideoSource).toContain('appFn("resolveCurrentVideoRef")');
+    expect(currentVideoSource).toContain('appCall("video.resolve", location.href, pageWindow)');
     expect(currentVideoSource).toContain('bilibiliFn("resolvePlayingVideoRef")');
     expect(currentVideoSource).toContain('bilibiliFn("extractPlayingVideoHint")');
     expect(extractFunctionSource(maintainedSource, "extractPageHints")).toContain(
@@ -576,18 +592,18 @@ describe("Bundled full-feature workbench source", () => {
   it("bridges subtitle export/library groups to monorepo core (no dual implementation)", () => {
     // Architecture: product body is a thin bridge; rules live only in packages/core.
     expect(maintainedSource).toContain("function subbatchCore(");
-    expect(maintainedSource).toContain("function coreCall(");
+    expect(maintainedSource).toContain("function coreCall<");
     expect(maintainedSource).toContain('coreCall("buildSubtitleExportRelativePath"');
     expect(maintainedSource).toContain('coreCall("upsertIndexForExportItem"');
     expect(maintainedSource).toContain('coreCall("buildLibraryRenderNodes"');
-    expect(maintainedSource).toContain('coreCall("attachSelectionGroupMeta"');
-    expect(maintainedSource).toContain('coreCall("attachCollectionGroupMeta"');
-    expect(maintainedSource).toContain('coreCall("applyUgcSeasonToItems"');
+    expect(maintainedSource).toContain('SubBatch.SubBatchMonorepo.core.attachSelectionGroupMeta(');
+    expect(maintainedSource).toContain('SubBatch.SubBatchMonorepo.core.attachCollectionGroupMeta(');
+    expect(maintainedSource).toContain('SubBatch.SubBatchMonorepo.core.applyUgcSeasonToItems(');
     expect(maintainedSource).toContain('coreCall("normalizeExportItem"');
     expect(maintainedSource).toContain('coreCall("suggestCaptureMode"');
     expect(maintainedSource).toContain("function syncCaptureModeFromItem(");
     expect(maintainedSource).toContain("function downloadSubtitleExportBatch(");
-    expect(maintainedSource).toContain("function stampUgcSeasonGroupMeta(");
+    expect(maintainedSource).toMatch(/function stampUgcSeasonGroupMeta(?:<[^>]+>)?\(/);
     expect(maintainedSource).toContain("auto_promoted_ugc_season");
     expect(maintainedSource).toContain("folder-expand-all");
     expect(maintainedSource).toContain("GM_download");
@@ -684,7 +700,7 @@ describe("Bundled full-feature workbench source", () => {
     expect(maintainedSource).toContain("bsb-folio-toc-title");
     expect(maintainedSource).toContain("阅读大纲");
     expect(extractFunctionSource(maintainedSource, "folioOutlineFromHeadings")).toContain(
-      'coreFn("buildFolioOutline")',
+      'coreCall("buildFolioOutline",',
     );
     expect(extractFunctionSource(maintainedSource, "collectFolioHeadings")).toContain("h2, h3");
     expect(extractFunctionSource(maintainedSource, "setFolioTocCurrent")).not.toContain("scrollIntoView");
@@ -743,10 +759,11 @@ describe("Bundled full-feature workbench source", () => {
       "restoreAiSessionForRoute(nextVideoKey)",
     );
     const analyzeStart = maintainedSource.indexOf(
-      "async function doAiAnalyze(options = {})",
+      "async function doAiAnalyze(",
     );
+    expect(analyzeStart).toBeGreaterThan(0);
     const analyzeSlice = maintainedSource.slice(analyzeStart, analyzeStart + 16000);
-    expect(analyzeSlice).toContain('appFn("ai.partitionRuns")');
+    expect(analyzeSlice).toContain('SubBatch.SubBatchMonorepo.app.ai.partitionRuns');
     expect(analyzeSlice).toContain("generateIds");
     expect(analyzeSlice).toContain("restoreAiSessionForRoute");
   });

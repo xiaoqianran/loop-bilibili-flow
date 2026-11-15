@@ -1,4 +1,16 @@
-// @ts-nocheck
+import type { WorkbenchSubtitleResult } from "../runtime/workbench-state";
+import type * as CoreModule from "@subbatch/core";
+import type { SubBatchMonorepo } from "../main";
+import type { createRepository as createKnowledgeRepository } from "../app/knowledge-repository";
+import type { createController as createKnowledgeController } from "../app/knowledge-controller";
+import type { BatchTask } from "../app/ai-batch-coordinator";
+import type { StudioMessage } from "../app/studio-controller";
+import type { AiSessionCachePayload } from "@subbatch/core";
+import type { createCoordinator as createAiBatchCoordinator } from "../app/ai-batch-coordinator";
+import { buildMermaidCard, getMermaidScale, setMermaidScale, fitMermaidToViewport, createMermaidFullscreen } from "../ui/workspaces/mermaid-presentation";
+import type { MermaidElement } from "../ui/workspaces/mermaid-presentation";
+import { normalizeCachedSessionInput, applyRestoredRunOutput, restorePreprocessRun } from "../app/ai-session-hydration";
+import { resolveAiScrollState } from "../ui/workspaces/ai-scroll-state";
 // Full-feature workbench. Bundled by the composition root; no standalone compatibility script.
 /**
  * v6.10.1 — Video Carrier 抽象：festival/blackboard 仅在检测到真实 BV / active player 后启动完整工作台；修正 live-player helper bridge。
@@ -78,8 +90,48 @@ import { createWorkbenchState } from "../runtime/workbench-state";
 import { callApp, resolveAppMethod } from "../runtime/app-bridge";
 import type { AppMethodPath, AppMethodArgs, AppMethodResult } from "../runtime/app-bridge";
 
-export function mountWorkbench(SubBatch) {
+import type { BilibiliVideoView, SubtitleTrack, SubtitleMeta } from "@subbatch/bilibili";
+import { parseUserSeasonPage } from "../app/library-scan-controller";
+import type { CollectionArchive } from "../app/library-scan-controller";
+import type { KnowledgeAnchor } from "../ui/workspaces/knowledge-navigation-controller";
+import type { BatchModel } from "../app/ai-batch-coordinator";
+import type { ChatCompletionOptions } from "../app/ai-controller";
+import type { AiProfile, PromptProfile, SubtitleCue, LibraryGroupItem, LibraryRenderNode, FolioOutlineNode } from "@subbatch/core";
+import type { ScanContext } from "../app/scan-context";
+type SubtitleFetchResult = WorkbenchSubtitleResult;
+
+interface WorkbenchPanelElement extends HTMLElement {
+  _bsbKnowledgeLayoutBound?: boolean;
+  _bsbSetOpen?: (open: boolean) => void;
+  _bsbSetDock?: (side: "left" | "right" | null) => void;
+  _bsbToggleDockExpanded?: (force?: boolean) => void;
+}
+type CoreApi = typeof CoreModule;
+type CoreMethod = {
+  [K in keyof CoreApi]: CoreApi[K] extends (...args: never[]) => unknown ? K : never
+}[keyof CoreApi];
+import type { WorkbenchKnowledgeNode, WorkbenchLibraryItem, WorkbenchAiRun, WorkbenchAiRuntime, WorkbenchPostTask, WorkbenchUi } from "../runtime/workbench-state";
+
+import type { KnowledgeEvidence, KnowledgeAnswerNode } from "../ui/workspaces/knowledge-answer-view";
+import type { KnowledgeReaderAnchor } from "../ui/workspaces/knowledge-reader-controller";
+export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMonorepo }) {
   "use strict";
+  const { closeMermaidFullscreen, openMermaidFullscreen } = createMermaidFullscreen({
+    root: () => document.getElementById(PANEL_ID),
+    requestFrame: callback => requestAnimationFrame(callback),
+  });
+
+  function errorMessage(value: unknown): string {
+    if (value && typeof value === "object" && "message" in value && value.message) return String(value.message);
+    return String(value);
+  }
+
+  function isAbortError(value: unknown): boolean {
+    return !!value && typeof value === "object" && "name" in value && value.name === "AbortError";
+  }
+  function isMermaidSetupError(value: unknown): boolean {
+    return !!value && typeof value === "object" && "mermaidSetup" in value && value.mermaidSetup === true;
+  }
 
   /**
    * P4.5 monorepo bridge: production bootstrap exposes `var SubBatch`.
@@ -93,7 +145,7 @@ export function mountWorkbench(SubBatch) {
   const UI_STORE_KEY = "bili-subbatch-ui-v2";
   /** Catppuccin flavors — official palette https://catppuccin.com/palette/ */
   const DEFAULT_CTP_FLAVOR = "mocha";
-  const CTP_FLAVOR_IDS = Object.freeze(["latte", "frappe", "macchiato", "mocha"]);
+  const CTP_FLAVOR_IDS = Object.freeze(["latte", "frappe", "macchiato", "mocha"] as const);
   const CTP_FLAVORS = Object.freeze([
     Object.freeze({ id: "mocha", label: "Mocha", hint: "默认深色", emoji: "🌿" }),
     Object.freeze({ id: "macchiato", label: "Macchiato", hint: "中等深色", emoji: "🌺" }),
@@ -138,14 +190,14 @@ export function mountWorkbench(SubBatch) {
       base: "#1e1e2e", mantle: "#181825", crust: "#11111b",
     }),
   });
-  function normalizeCtpFlavor(value) {
+  function normalizeCtpFlavor(value: unknown): (typeof CTP_FLAVOR_IDS)[number] {
     const id = String(value || "").trim().toLowerCase();
-    return CTP_FLAVOR_IDS.includes(id) ? id : DEFAULT_CTP_FLAVOR;
+    return CTP_FLAVOR_IDS.find((flavor) => flavor === id) || DEFAULT_CTP_FLAVOR;
   }
   function getCtpPalette(flavor = DEFAULT_CTP_FLAVOR) {
     return CTP_PALETTES[normalizeCtpFlavor(flavor)] || CTP_PALETTES[DEFAULT_CTP_FLAVOR];
   }
-  function buildCtpFlavorCss(panelId) {
+  function buildCtpFlavorCss(panelId: string) {
     return CTP_FLAVOR_IDS.map((id) => {
       const palette = CTP_PALETTES[id];
       const vars = Object.entries(palette)
@@ -170,7 +222,6 @@ export function mountWorkbench(SubBatch) {
   const STUDIO_CHAT_STORE_KEY = "bili-subbatch-studio-chat-v1";
   const STUDIO_MODEL_STORE_KEY = "bili-subbatch-studio-model-v1";
   const STUDIO_CHAT_KEEP_RECENT = 8;
-  const STUDIO_CHAT_CONTEXT_CHARS = 12000;
   const STUDIO_CHAT_MEMORY_CHARS = 2400;
   const STUDIO_SLASH_COMMANDS = Object.freeze([
     Object.freeze({ id: "clear", aliases: ["clear", "清空", "new", "新建"], hint: "清空当前对话" }),
@@ -460,40 +511,40 @@ export function mountWorkbench(SubBatch) {
 
   function loadAutoCaptureSetting() {
     const raw = storageGet(AUTO_CAPTURE_STORE_KEY, true);
-    return ![false, 0, "0", "false", "off"].includes(raw);
+    return raw !== false && raw !== 0 && raw !== "0" && raw !== "false" && raw !== "off";
   }
 
-  function saveAutoCaptureSetting(enabled) {
+  function saveAutoCaptureSetting(enabled: boolean) {
     storageSet(AUTO_CAPTURE_STORE_KEY, enabled ? "true" : "false");
   }
 
   /** 默认开启：当前视频字幕抓取成功后，自动执行与“开始分析”按钮相同的流程。 */
   function loadAutoAnalyzeSetting() {
     const raw = storageGet(AUTO_ANALYZE_STORE_KEY, true);
-    return ![false, 0, "0", "false", "off"].includes(raw);
+    return raw !== false && raw !== 0 && raw !== "0" && raw !== "false" && raw !== "off";
   }
 
-  function saveAutoAnalyzeSetting(enabled) {
+  function saveAutoAnalyzeSetting(enabled: boolean) {
     storageSet(AUTO_ANALYZE_STORE_KEY, enabled ? "true" : "false");
   }
 
   function loadPreprocessEnabledSetting() {
     const raw = storageGet(PREPROCESS_ENABLED_STORE_KEY, true);
-    return ![false, 0, "0", "false", "off"].includes(raw);
+    return raw !== false && raw !== 0 && raw !== "0" && raw !== "false" && raw !== "off";
   }
 
-  function savePreprocessEnabledSetting(enabled) {
+  function savePreprocessEnabledSetting(enabled: boolean) {
     storageSet(PREPROCESS_ENABLED_STORE_KEY, enabled ? "true" : "false");
   }
 
-  function loadBoundedNumberSetting(key, fallback, min, max, integer = true) {
+  function loadBoundedNumberSetting(key: string, fallback: number, min: number, max: number, integer = true) {
     const raw = Number(storageGet(key, fallback));
     const value = Number.isFinite(raw) ? raw : fallback;
     const bounded = Math.min(max, Math.max(min, value));
     return integer ? Math.round(bounded) : bounded;
   }
 
-  function saveBoundedNumberSetting(key, value, fallback, min, max, integer = true) {
+  function saveBoundedNumberSetting(key: string, value: string | number, fallback: number, min: number, max: number, integer = true) {
     const raw = Number(value);
     const normalized = Number.isFinite(raw) ? Math.min(max, Math.max(min, raw)) : fallback;
     const finalValue = integer ? Math.round(normalized) : normalized;
@@ -503,38 +554,35 @@ export function mountWorkbench(SubBatch) {
 
   function loadTranscriptFollowSetting() {
     const raw = storageGet(TRANSCRIPT_FOLLOW_STORE_KEY, true);
-    return ![false, 0, "0", "false", "off"].includes(raw);
+    return raw !== false && raw !== 0 && raw !== "0" && raw !== "false" && raw !== "off";
   }
 
   function loadPlayerSubtitleSetting() {
     const raw = storageGet(PLAYER_SUBTITLE_STORE_KEY, true);
-    return ![false, 0, "0", "false", "off"].includes(raw);
+    return raw !== false && raw !== 0 && raw !== "0" && raw !== "false" && raw !== "off";
   }
 
-  function debounce(fn, wait = 100) {
-    let timer = 0;
-    return function (...args) {
-      clearTimeout(timer);
-      timer = window.setTimeout(() => fn.apply(this, args), wait);
-    };
-  }
-
-  function lruGet(map, key) {
+  function lruGet<T>(map: Map<string, T>, key: string): T | null {
     if (!map.has(key)) return null;
     const value = map.get(key);
+    if (value === undefined) return null;
     map.delete(key);
     map.set(key, value);
     return value;
   }
 
-  function lruSet(map, key, value, max = MEMORY_CACHE_LIMIT) {
+  function lruSet<T>(map: Map<string, T>, key: string, value: T, max = MEMORY_CACHE_LIMIT): T {
     if (map.has(key)) map.delete(key);
     map.set(key, value);
-    while (map.size > max) map.delete(map.keys().next().value);
+    while (map.size > max) {
+      const oldestKey = map.keys().next().value;
+      if (oldestKey === undefined) break;
+      map.delete(oldestKey);
+    }
     return value;
   }
 
-  const TYPE_LABEL = {
+  const TYPE_LABEL: Record<string,string> = {
     video: "单个视频",
     selection: "视频选集",
     user: "个人主页",
@@ -555,62 +603,17 @@ export function mountWorkbench(SubBatch) {
     "search",
   ];
 
-
   // Stable content fingerprints use the canonical browser-safe core MD5.
 
   // ─── pure helpers (offline harness extracts // #region pure-logic) ─────
   // #region pure-logic
-  /** Peer scroll pattern: stick when distance-to-bottom < threshold */
-  function shouldStickBottom(scrollHeight, scrollTop, clientHeight, threshold) {
-    const th = threshold == null ? 48 : threshold;
-    return scrollHeight - scrollTop - clientHeight < th;
-  }
-
-  /**
-   * 流式滚动状态机（纯函数，供离线测试）。
-   * 修 0.8.3：距底 <80 自动 stick=true 会把刚上滑的用户拽回。
-   *
-   * @param {object} s  { stick, userReading, progScroll }
-   * @param {object} ev { type: 'wheel-up'|'scroll'|'resume'|'start'|'paint', gap? }
-   * @returns {{ stick:boolean, userReading:boolean, allowPaintScroll:boolean }}
-   */
-  function resolveAiScrollState(s, ev) {
-    let stick = !!s.stick;
-    let userReading = !!s.userReading;
-    const prog = !!s.progScroll;
-    const type = (ev && ev.type) || "";
-    const gap = ev && typeof ev.gap === "number" ? ev.gap : null;
-
-    if (type === "start" || type === "resume") {
-      stick = true;
-      userReading = false;
-    } else if (type === "wheel-up" || type === "detach") {
-      stick = false;
-      userReading = true;
-    } else if (type === "scroll") {
-      if (prog) {
-        /* 程序化滚动：状态不变 */
-      } else if (gap != null && gap > 24) {
-        stick = false;
-        userReading = true;
-      } else if (gap != null && gap <= 12 && userReading) {
-        // 用户自己滚回贴底才恢复
-        stick = true;
-        userReading = false;
-      }
-    }
-
-    const allowPaintScroll = stick && !userReading;
-    return { stick, userReading, allowPaintScroll };
-  }
-
   /**
    * 在 marked 之前抽出数学公式，避免 `_` `^` `\` 被 Markdown 拆坏。
    * 支持：$$ $$ / \[ \] / \( \) / $ $ / ```math|latex|tex
    * 代码块内公式不抽取；纯数字 $12.5 不当作公式。
    * @returns {{ md: string, maths: Array<{tex:string, display:boolean}> }}
    */
-  function prepareMarkdownMath(md) {
+  function prepareMarkdownMath(md: string) {
     const maths = [];
     let s = String(md || "");
 
@@ -622,7 +625,7 @@ export function mountWorkbench(SubBatch) {
     });
 
     // 保护其余 fenced / inline code
-    const codes = [];
+    const codes: string[] = [];
     s = s.replace(/```[\s\S]*?```/g, (m) => {
       const i = codes.length;
       codes.push(m);
@@ -658,7 +661,7 @@ export function mountWorkbench(SubBatch) {
       const input = s;
       let out = "";
       let cursor = 0;
-      const escapedAt = (idx) => {
+      const escapedAt = (idx: number) => {
         let slashes = 0;
         for (let j = idx - 1; j >= 0 && input[j] === "\\"; j--) slashes += 1;
         return slashes % 2 === 1;
@@ -708,7 +711,7 @@ export function mountWorkbench(SubBatch) {
    * 把 @@BSBMATHn@@ 换成 KaTeX HTML（或 fallback）。
    * renderToString(tex, display) 可选；失败则转义原文。
    */
-  function replaceMathPlaceholders(html, maths, renderToString) {
+  function replaceMathPlaceholders(html: string, maths: readonly {tex:string;display:boolean}[], renderToString:(tex:string,display:boolean)=>string|null) {
     return String(html || "").replace(/@@BSBMATH(\d+)@@/g, (full, id) => {
       const m = maths[Number(id)];
       if (!m) return full;
@@ -716,7 +719,7 @@ export function mountWorkbench(SubBatch) {
         try {
           const out = renderToString(m.tex, !!m.display);
           if (out != null && out !== "") return out;
-        } catch (_) {
+        } catch  {
           /* fall through */
         }
       }
@@ -734,8 +737,11 @@ export function mountWorkbench(SubBatch) {
   // #endregion pure-logic
 
   // ─── HTTP ───────────────────────────────────────────────────────────────
-  function httpJson(url, extraHeaders) {
+  function httpJson(url: string, extraHeaders: Record<string,string> = {}): Promise<unknown> {
     return new Promise((resolve, reject) => {
+      if (typeof GM_xmlhttpRequest !== "function") {
+        reject(new Error("缺少 GM_xmlhttpRequest 跨域能力")); return;
+      }
       GM_xmlhttpRequest({
         method: "GET",
         url,
@@ -761,7 +767,7 @@ export function mountWorkbench(SubBatch) {
           }
           try {
             resolve(JSON.parse(res.responseText));
-          } catch (e) {
+          } catch  {
             reject(
               new Error(
                 `invalid JSON from ${url}: ${(res.responseText || "").slice(0, 200)}`,
@@ -783,42 +789,16 @@ export function mountWorkbench(SubBatch) {
    * 当前视频快速链路：页面 fetch 优先，避免每次请求跨 userscript bridge。
    * CORS、登录态或 CSP 不允许时再回退 GM_xmlhttpRequest。
    */
-  async function requestJsonFast(url, { signal, headers } = {}) {
-    let fetchError = null;
-    try {
-      const fetchFn = pageWindow.fetch || window.fetch;
-      const res = await fetchFn.call(pageWindow, url, {
-        method: "GET",
-        credentials: "include",
-        cache: "no-store",
-        signal,
-        headers: Object.assign({ Accept: "application/json, text/plain, */*" }, headers || {}),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-      return await res.json();
-    } catch (error) {
-      if (error?.name === "AbortError") throw error;
-      fetchError = error;
-    }
-
-    if (signal?.aborted) throw new DOMException("操作已取消", "AbortError");
-    try {
-      return await httpJson(url, headers);
-    } catch (gmError) {
-      throw gmError || fetchError || new Error(`request failed: ${url}`);
-    }
-  }
-
 
   // ─── util ───────────────────────────────────────────────────────────────
-  function extractBvid(text) {
+  function extractBvid(text: string) {
     try {
       const pure =
         typeof SubBatch !== "undefined"
           ? SubBatch?.SubBatchMonorepo?.bilibili?.extractBvid
           : null;
       if (typeof pure === "function") return pure(text);
-    } catch (_) {
+    } catch  {
       /* monorepo unavailable — local fallback */
     }
     if (!text) return "";
@@ -829,10 +809,10 @@ export function mountWorkbench(SubBatch) {
     return m ? "BV" + m[0].slice(2) : "";
   }
 
-  function resolveCid(view, page = 1) {
+  function resolveCid(view: BilibiliVideoView, page = 1) {
     const pages = view.pages || [];
     if (Array.isArray(pages) && pages.length && page >= 1 && page <= pages.length) {
-      const cid = pages[page - 1].cid;
+      const cid = pages[page - 1]?.cid;
       return cid != null ? Number(cid) : null;
     }
     if (view.cid == null) return null;
@@ -840,34 +820,32 @@ export function mountWorkbench(SubBatch) {
     return Number.isFinite(n) ? n : null;
   }
 
-
-
-  function dedupeCues(cues) {
-    const out = [];
+  function dedupeCues(cues: SubtitleCue[]): SubtitleCue[] {
+    const out: Array<{ cue: SubtitleCue; normalized: string }> = [];
     for (const cue of cues || []) {
       const content = String(cue?.content || "").replace(/\s+/g, " ").trim();
       if (!content) continue;
       const normalized = content.toLocaleLowerCase();
       const previous = out[out.length - 1];
-      if (previous && previous._normalized === normalized) {
-        const previousTo = Number(previous.to_sec ?? coreCall("parseSeconds", previous.to));
+      if (previous && previous.normalized === normalized) {
+        const previousTo = Number(previous.cue.to_sec ?? coreCall("parseSeconds", previous.cue.to));
         const currentFrom = Number(cue.from_sec ?? coreCall("parseSeconds", cue.from));
         if (currentFrom - previousTo <= 1.25) {
           const nextTo = Math.max(
             previousTo,
             Number(cue.to_sec ?? coreCall("parseSeconds", cue.to)),
           );
-          previous.to_sec = nextTo;
-          previous.to = `${nextTo.toFixed(2)}s`;
+          previous.cue.to_sec = nextTo;
+          previous.cue.to = `${nextTo.toFixed(2)}s`;
           continue;
         }
       }
-      out.push({ ...cue, content, _normalized: normalized });
+      out.push({ cue: { ...cue, content }, normalized });
     }
-    return out.map(({ _normalized, ...cue }) => cue);
+    return out.map(entry => entry.cue);
   }
 
-  function stripHtml(s) {
+  function stripHtml(s: string|undefined) {
     return String(s || "")
       .replace(/<[^>]+>/g, "")
       .replace(/&nbsp;/g, " ")
@@ -889,40 +867,45 @@ export function mountWorkbench(SubBatch) {
   function subbatchCore() {
     try {
       return typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.core || null : null;
-    } catch (_) {
+    } catch  {
       return null;
     }
   }
 
-  function coreFn(name) {
+  function coreFn<K extends CoreMethod>(name: K): CoreApi[K] | null {
     const api = subbatchCore();
     const fn = api && api[name];
     return typeof fn === "function" ? fn : null;
   }
 
-  function bilibiliFn(path) {
-    try {
-      const mono = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo : null;
-      let value = mono?.bilibili;
-      for (const segment of String(path || "").split(".").filter(Boolean)) {
-        value = value?.[segment];
-      }
-      if (typeof value === "function") return value;
-      const flat = mono?.bilibili?.[path] || mono?.[path];
-      return typeof flat === "function" ? flat : null;
-    } catch (_) {
-      return null;
-    }
+  // The bundled provider is the only Bilibili implementation.
+  // Every used capability is a statically checked function reference.
+  const bili = SubBatch.SubBatchMonorepo.bilibili;
+  const BILI_FUNCTIONS = {
+    "video.isChargeBlocked": bili.video.isChargeBlocked,
+    "video.runtimeView": bili.video.runtimeView,
+    "video.pageMeta": bili.video.pageMeta,
+    "subtitle.preferredIndex": bili.subtitle.preferredIndex,
+    "subtitle.runtimeTracks": bili.subtitle.runtimeTracks,
+    "subtitle.normalizeUrl": bili.subtitle.normalizeUrl,
+    "subtitle.pickTrack": bili.subtitle.pickTrack,
+    "extractPlayingVideoHint": bili.extractPlayingVideoHint,
+    "resolvePlayingVideoRef": bili.resolvePlayingVideoRef,
+    "playingVideoChanged": bili.playingVideoChanged,
+  } as const;
+  type BiliMethod = keyof typeof BILI_FUNCTIONS;
+
+  function bilibiliFn<P extends BiliMethod>(path: P): (typeof BILI_FUNCTIONS)[P] {
+    return BILI_FUNCTIONS[path];
   }
 
-  function bilibiliCall(path, ...args) {
-    const fn = bilibiliFn(path);
-    if (!fn) {
-      throw new Error(`[bili-subbatch] monorepo bilibili API missing "${path}"`);
-    }
-    return fn(...args);
+  function bilibiliCall<P extends BiliMethod>(
+    path: P, ...args: Parameters<(typeof BILI_FUNCTIONS)[P]>
+  ): ReturnType<(typeof BILI_FUNCTIONS)[P]> {
+    return Reflect.apply(bilibiliFn(path), undefined, args) as ReturnType<(typeof BILI_FUNCTIONS)[P]>;
   }
-  function appFn(path) {
+
+  function appFn(path: string) {
     return resolveAppMethod(SubBatch?.SubBatchMonorepo?.app, path);
   }
 
@@ -931,41 +914,28 @@ export function mountWorkbench(SubBatch) {
   }
 
   function runtimeNetwork() {
-    try {
-      return typeof SubBatch !== "undefined"
-        ? SubBatch?.SubBatchMonorepo?.runtime?.network || null
-        : null;
-    } catch (_) {
-      return null;
-    }
-  }
-  function coreCall(name, ...args) {
-    const fn = coreFn(name);
-    if (!fn) throw new Error("[bili-subbatch] monorepo core API missing: " + name);
-    return fn(...args);
+    const network = SubBatch.SubBatchMonorepo.runtime.network;
+    if (!network) throw new Error("[bili-subbatch] missing network adapter");
+    return network;
   }
 
-  function safeFilename(name) {
+  function coreCall<K extends CoreMethod>(
+    name: K, ...args: Parameters<CoreApi[K]>
+  ): ReturnType<CoreApi[K]> {
+    const fn = coreFn(name);
+    if (!fn) throw new Error("[bili-subbatch] monorepo core API missing: " + name);
+    return Reflect.apply(fn, undefined, args) as ReturnType<CoreApi[K]>;
+  }
+
+  function safeFilename(name: string) {
     return coreCall("safePathSegment", name, 120);
   }
 
-  function safePathSegment(name, maxLen = 120) {
-    return coreCall("safePathSegment", name, maxLen);
-  }
-
-  function buildUpFolderLabel(author, name) {
-    return coreCall("buildUpFolderLabel", author, name);
-  }
-
-  function buildCollectionShortUrl(mid, seasonId) {
+  function buildCollectionShortUrl(mid: string, seasonId: string) {
     return coreCall("buildCollectionShortUrl", mid, seasonId);
   }
 
-  function resolveSeriesTitle(item) {
-    return coreCall("resolveSeriesTitle", item);
-  }
-
-  function buildSubtitleExportRelativePath(item, ext) {
+  function buildSubtitleExportRelativePath(item: Parameters<CoreApi["buildSubtitleExportRelativePath"]>[0], ext: Parameters<CoreApi["buildSubtitleExportRelativePath"]>[1]) {
     return coreCall("buildSubtitleExportRelativePath", item, ext);
   }
 
@@ -982,88 +952,86 @@ export function mountWorkbench(SubBatch) {
       const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
       return parsed;
-    } catch (_) {
+    } catch  {
       return {};
     }
   }
 
-  function saveExportIndexMap(map) {
+  function saveExportIndexMap(map: Record<string,unknown>) {
     try {
       storageSet(SUBTITLE_EXPORT_INDEX_STORE_KEY, JSON.stringify(map || {}));
-    } catch (_) { /* ignore quota */ }
+    } catch  { /* ignore quota */ }
     return map || {};
   }
 
-  function upsertIndexForExportItem(map, item) {
+  function upsertIndexForExportItem(map: Parameters<CoreApi["upsertIndexForExportItem"]>[0], item: Parameters<CoreApi["upsertIndexForExportItem"]>[1]) {
     return coreCall("upsertIndexForExportItem", map, item);
   }
 
-  function renderExportIndexMd(map) {
+  function renderExportIndexMd(map: Parameters<CoreApi["renderExportIndexMd"]>[0]) {
     return coreCall("renderExportIndexMd", map);
   }
 
-  function attachSelectionGroupMeta(items, meta = {}) {
-    return coreCall("attachSelectionGroupMeta", items, meta);
+  function attachSelectionGroupMeta<T extends LibraryGroupItem>(items: T[], meta: Parameters<CoreApi["attachSelectionGroupMeta"]>[1] = {}) {
+    return SubBatch.SubBatchMonorepo.core.attachSelectionGroupMeta(items, meta);
   }
 
-  function attachCollectionGroupMeta(items, meta = {}, ctx = {}) {
-    return coreCall("attachCollectionGroupMeta", items, meta, ctx);
+  function attachCollectionGroupMeta<T extends LibraryGroupItem>(items: T[], meta: Parameters<CoreApi["attachCollectionGroupMeta"]>[1] = {}, ctx: Parameters<CoreApi["attachCollectionGroupMeta"]>[2] = {}) {
+    return SubBatch.SubBatchMonorepo.core.attachCollectionGroupMeta(items, meta, { mid: ctx.mid || "", season_id: ctx.season_id || "", collectionTitleHint: ctx.collectionTitleHint || "", authorHint: ctx.authorHint || "", parentFolder: "" });
   }
 
-  function attachUserSpaceGroupMeta(items, meta = {}) {
-    return coreCall("attachUserSpaceGroupMeta", items, meta);
+  function attachUserSpaceGroupMeta<T extends LibraryGroupItem>(items: T[], meta: Parameters<CoreApi["attachUserSpaceGroupMeta"]>[1] = {}) {
+    return SubBatch.SubBatchMonorepo.core.attachUserSpaceGroupMeta(items, meta);
   }
 
-  function applySpaceCollectionMembership(items, collections) {
-    return coreCall("applySpaceCollectionMembership", items, collections);
+  function applySpaceCollectionMembership<T extends LibraryGroupItem>(items: T[], collections: Parameters<CoreApi["applySpaceCollectionMembership"]>[1]) {
+    return SubBatch.SubBatchMonorepo.core.applySpaceCollectionMembership(items, collections);
   }
 
-  function countSpaceCollectionMatches(items, collections) {
+  function countSpaceCollectionMatches(items: Parameters<CoreApi["countSpaceCollectionMatches"]>[0], collections: Parameters<CoreApi["countSpaceCollectionMatches"]>[1]) {
     return coreCall("countSpaceCollectionMatches", items, collections);
   }
 
-  function attachSpaceLooseVideosMeta(items) {
-    return coreCall("attachSpaceLooseVideosMeta", items);
+  function attachSpaceLooseVideosMeta<T extends LibraryGroupItem>(items: T[]) {
+    return SubBatch.SubBatchMonorepo.core.attachSpaceLooseVideosMeta(items);
   }
 
-  function setGroupSelection(items, groupKey, selected) {
+  function setGroupSelection(items: Parameters<CoreApi["setGroupSelection"]>[0], groupKey: Parameters<CoreApi["setGroupSelection"]>[1], selected: Parameters<CoreApi["setGroupSelection"]>[2]) {
     return coreCall("setGroupSelection", items, groupKey, selected);
   }
 
-  function normalizeExportItem(item, peers = []) {
+  function normalizeExportItem(item: Parameters<CoreApi["normalizeExportItem"]>[0], peers: Parameters<CoreApi["normalizeExportItem"]>[1] = []) {
     const combined = [...(peers || []), ...(state.items || [])];
     return coreCall("normalizeExportItem", item, combined);
   }
 
-  function resolveLibraryGroupKey(item) {
+  function resolveLibraryGroupKey(item: Parameters<CoreApi["resolveLibraryGroupKey"]>[0]) {
     return coreCall("resolveLibraryGroupKey", item);
   }
 
-  function buildLibraryRenderNodes(entries, collapsedMap) {
+  function buildLibraryRenderNodes(entries: Parameters<CoreApi["buildLibraryRenderNodes"]>[0], collapsedMap: Parameters<CoreApi["buildLibraryRenderNodes"]>[1]) {
     return coreCall("buildLibraryRenderNodes", entries, collapsedMap || {});
   }
 
-  function applyUgcSeasonToItem(item, view) {
-    return coreCall("applyUgcSeasonToItem", item, view);
+  function applyUgcSeasonToItems<T extends LibraryGroupItem>(items: T[], view: Parameters<CoreApi["applyUgcSeasonToItems"]>[1]) {
+    return SubBatch.SubBatchMonorepo.core.applyUgcSeasonToItems(items, view);
   }
 
-  function applyUgcSeasonToItems(items, view) {
-    return coreCall("applyUgcSeasonToItems", items, view);
-  }
-
-  function buildGroupMetaPatches(normalized) {
+  function buildGroupMetaPatches(normalized: Parameters<CoreApi["buildGroupMetaPatches"]>[0]) {
     return coreCall("buildGroupMetaPatches", normalized);
   }
 
-  function applyGroupMetaPatchToItems(items, patch) {
-    return coreCall("applyGroupMetaPatchToItems", items, patch);
+  function applyGroupMetaPatchToItems<T extends LibraryGroupItem>(
+    items: T[], patch: Parameters<CoreApi["applyGroupMetaPatchToItems"]>[1],
+  ): T[] {
+    return SubBatch.SubBatchMonorepo.core.applyGroupMetaPatchToItems(items, patch);
   }
 
-  function mergeGroupFields(target, source) {
-    return coreCall("mergeGroupFields", target, source);
+  function mergeGroupFields<T extends LibraryGroupItem>(target: T, source: Parameters<CoreApi["mergeGroupFields"]>[1]) {
+    return SubBatch.SubBatchMonorepo.core.mergeGroupFields(target, source);
   }
 
-  function suggestCaptureMode(item) {
+  function suggestCaptureMode(item: Parameters<CoreApi["suggestCaptureMode"]>[0]) {
     return coreCall("suggestCaptureMode", item);
   }
 
@@ -1071,14 +1039,14 @@ export function mountWorkbench(SubBatch) {
    * 自动抓取后联动采集模式下拉：多分P → 视频选集，ugc 合集 → 合集。
    * 不覆盖用户显式选择的 单个视频 / 个人主页 / 收藏夹 / 搜索。
    */
-  function syncCaptureModeFromItem(item, { silent = true } = {}) {
+  function syncCaptureModeFromItem(item: WorkbenchLibraryItem|null, { silent = true } = {}) {
     const locked = new Set(["video", "user", "favorite", "search"]);
     if (locked.has(state.mode)) return state.mode;
 
     let next = "auto";
     try {
       next = suggestCaptureMode(item) || "auto";
-    } catch (_) {
+    } catch  {
       const pageCount = Array.isArray(item?.pages) ? item.pages.length : 0;
       if (item?.groupType === "collection" || item?.collectionSid) next = "collection";
       else if (item?.groupType === "selection" || pageCount > 1) next = "selection";
@@ -1092,11 +1060,11 @@ export function mountWorkbench(SubBatch) {
 
     state.mode = next;
     const root = document.getElementById(PANEL_ID);
-    const modeSel = root?.querySelector('[data-role="mode"]');
+    const modeSel = root?.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-role="mode"]');
     if (modeSel) modeSel.value = next;
     try {
       refreshContextUI();
-    } catch (_) { /* panel may not exist yet */ }
+    } catch  { /* panel may not exist yet */ }
     if (!silent) {
       setStatus(`采集模式已自动切换为「${TYPE_LABEL[next] || next}」`, "ok");
     }
@@ -1104,14 +1072,14 @@ export function mountWorkbench(SubBatch) {
   }
 
   /** IO only — blob download with optional overwrite (GM_download). */
-  function downloadText(filename, text, { overwrite = false } = {}) {
+  function downloadText(filename: string, text: BlobPart, { overwrite = false } = {}) {
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
-    let name = String(filename || "download.txt").replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+    const name = String(filename || "download.txt").replace(/\\/g, "/").replace(/\/{2,}/g, "/");
 
     const revokeLater = () => {
       setTimeout(() => {
-        try { URL.revokeObjectURL(url); } catch (_) { /* noop */ }
+        try { URL.revokeObjectURL(url); } catch  { /* noop */ }
       }, 60_000);
     };
 
@@ -1123,14 +1091,14 @@ export function mountWorkbench(SubBatch) {
       document.body.appendChild(a);
       a.click();
       setTimeout(() => {
-        try { URL.revokeObjectURL(url); } catch (_) { /* noop */ }
+        try { URL.revokeObjectURL(url); } catch  { /* noop */ }
         a.remove();
       }, 1500);
     };
 
     if (typeof GM_download === "function") {
       try {
-        const opts = {
+        const opts: Parameters<NonNullable<typeof GM_download>>[0] = {
           url,
           name,
           saveAs: false,
@@ -1141,7 +1109,7 @@ export function mountWorkbench(SubBatch) {
         if (overwrite) opts.conflictAction = "overwrite";
         GM_download(opts);
         return;
-      } catch (_) {
+      } catch  {
         /* fall through */
       }
     }
@@ -1152,7 +1120,8 @@ export function mountWorkbench(SubBatch) {
    * Batch-export: pure core builds paths + index; this function only downloads.
    * Group-meta patches returned by pure are applied to state (no inline rule logic).
    */
-  async function downloadSubtitleExportBatch(pool, ext, convert) {
+  async function downloadSubtitleExportBatch(pool: WorkbenchLibraryItem[], ext: string,
+    convert: (data: SubtitleCue[]) => string) {
     let indexMap = loadExportIndexMap();
     const peerPool = [...pool, ...(state.items || [])];
     let nextItems = state.items;
@@ -1161,7 +1130,9 @@ export function mountWorkbench(SubBatch) {
       const patch = buildGroupMetaPatches(it);
       if (patch) nextItems = applyGroupMetaPatchToItems(nextItems, patch);
       indexMap = upsertIndexForExportItem(indexMap, it);
-      downloadText(buildSubtitleExportRelativePath(it, ext), convert(it.data), { overwrite: true });
+      const sourceCues = pool[i]?.data;
+      downloadText(buildSubtitleExportRelativePath(it, ext),
+        convert(Array.isArray(sourceCues) ? sourceCues : []), { overwrite: true });
       if (pool.length > 1) await sleep(220);
     }
     state.items = nextItems;
@@ -1175,7 +1146,7 @@ export function mountWorkbench(SubBatch) {
     return { count: pool.length, indexEntries: Object.keys(indexMap).length };
   }
 
-  function sleep(ms) {
+  function sleep(ms: number|undefined) {
     return new Promise((r) => setTimeout(r, ms));
   }
 
@@ -1187,7 +1158,7 @@ export function mountWorkbench(SubBatch) {
    * - 合集列表页（space lists / collectiondetail）→ collection
    * - 返回字段可被「手动模式」复用（mid/sid/bvid…）
    */
-  function detectContext(href) {
+  function detectContext(href: string): ScanContext {
     try {
       const pure =
         typeof SubBatch !== "undefined"
@@ -1198,17 +1169,17 @@ export function mountWorkbench(SubBatch) {
           const url = new URL(href || location.href);
           // DOM half stays local (extractPageHints); pure core owns URL routing.
           return pure(href || location.href, extractPageHints(url));
-        } catch (_) {
+        } catch  {
           return pure(String(href || ""), {});
         }
       }
-    } catch (_) {
+    } catch  {
       /* monorepo unavailable — local fallback */
     }
     let u;
     try {
       u = new URL(href || location.href);
-    } catch (_) {
+    } catch  {
       return { type: "unknown", source: "auto" };
     }
     const host = u.hostname.toLowerCase();
@@ -1300,7 +1271,7 @@ export function mountWorkbench(SubBatch) {
         const mid = m[1];
         if (
           segs.length === 1 ||
-          (segs.length === 2 && /^(video|upload|dynamic|favlist)?$/i.test(segs[1])) ||
+          (segs.length === 2 && /^(video|upload|dynamic|favlist)?$/i.test(segs[1] || "")) ||
           (segs.length === 3 && segs[1] === "upload" && segs[2] === "video")
         ) {
           // favlist without fid still unknown for fav; treat as user
@@ -1382,7 +1353,7 @@ export function mountWorkbench(SubBatch) {
         extractBvid(path) || extractBvid(href) || hints.bvid;
       if (bvid && (/\/video\//i.test(path) || hints.fromVideoPath)) {
         const p = Math.max(1, parseInt(u.searchParams.get("p") || "1", 10) || 1);
-        const ctx = {
+        const ctx: ScanContext = {
           type: "video",
           source: "auto",
           bvid,
@@ -1432,8 +1403,8 @@ export function mountWorkbench(SubBatch) {
     return { type: "unknown", source: "auto", ...pickHintIds(hints) };
   }
 
-  function pickHintIds(hints) {
-    const o = {};
+  function pickHintIds(hints: Partial<ScanContext>): Partial<ScanContext> {
+    const o: Partial<ScanContext> = {};
     if (hints.mid) o.mid = hints.mid;
     if (hints.season_id) o.season_id = hints.season_id;
     if (hints.media_id) o.media_id = hints.media_id;
@@ -1443,7 +1414,7 @@ export function mountWorkbench(SubBatch) {
   }
 
   /** 从 URL / 页面链接尽量挖 mid、season_id、media_id、bvid */
-  function extractPageHints(u) {
+  function extractPageHints(u?: URL) {
     const hints = {
       bvid: "",
       mid: "",
@@ -1454,7 +1425,7 @@ export function mountWorkbench(SubBatch) {
     };
     try {
       if (!u) u = new URL(location.href);
-    } catch (_) {
+    } catch  {
       return hints;
     }
     hints.bvid =
@@ -1475,21 +1446,21 @@ export function mountWorkbench(SubBatch) {
     // path mid
     let m = u.pathname.match(/space\.bilibili\.com\/(\d+)/i);
     if (!m) m = String(location.href).match(/space\.bilibili\.com\/(\d+)/i);
-    if (m) hints.mid = m[1];
+    if (m?.[1]) hints.mid = m[1];
     m = u.pathname.match(/^\/list\/(\d+)/i);
-    if (m) hints.mid = m[1];
+    if (m?.[1]) hints.mid = m[1];
     m = u.pathname.match(/^\/(\d+)(?:\/|$)/);
-    if (m && /space\.bilibili\.com/i.test(u.hostname)) hints.mid = m[1];
+    if (m?.[1] && /space\.bilibili\.com/i.test(u.hostname)) hints.mid = m[1];
 
     // DOM: 合集 / 列表链接
     try {
-      const anchors = document.querySelectorAll(
+      const anchors = document.querySelectorAll<HTMLAnchorElement>(
         'a[href*="lists/"], a[href*="collectiondetail"], a[href*="season_id"], a[href*="sid="], a[href*="/list/"]',
       );
       for (const a of anchors) {
         const href = a.getAttribute("href") || a.href || "";
         const lm = href.match(/\/(\d+)\/lists\/(\d+)/);
-        if (lm) {
+        if (lm?.[1] && lm[2]) {
           if (!hints.mid) hints.mid = lm[1];
           if (!hints.season_id) hints.season_id = lm[2];
           break;
@@ -1501,25 +1472,25 @@ export function mountWorkbench(SubBatch) {
           if (sm && /^\d+$/.test(sm)) {
             if (!hints.season_id) hints.season_id = sm;
             const mm = au.pathname.match(/\/(\d+)/);
-            if (mm && !hints.mid) hints.mid = mm[1];
+            if (mm?.[1] && !hints.mid) hints.mid = mm[1];
           }
           const listMid = au.pathname.match(/\/list\/(\d+)/i);
-          if (listMid && !hints.mid) hints.mid = listMid[1];
-        } catch (_) {
+          if (listMid?.[1] && !hints.mid) hints.mid = listMid[1];
+        } catch  {
           /* ignore */
         }
       }
       if (!hints.bvid) {
         const b = extractBvid(
-          document.querySelector('meta[itemprop="url"]')?.content || "",
+          document.querySelector<HTMLMetaElement>('meta[itemprop="url"]')?.content || "",
         );
         if (b) hints.bvid = b;
       }
       if (!hints.bvid) {
-        const og = document.querySelector('meta[property="og:url"]')?.content;
+        const og = document.querySelector<HTMLMetaElement>('meta[property="og:url"]')?.content;
         if (og) hints.bvid = extractBvid(og);
       }
-    } catch (_) {
+    } catch  {
       /* ignore */
     }
     if (!hints.bvid) {
@@ -1537,7 +1508,7 @@ export function mountWorkbench(SubBatch) {
    */
   function resolveContext() {
     const root = document.getElementById(PANEL_ID);
-    const modeSel = root?.querySelector('[data-role="mode"]');
+    const modeSel = root?.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-role="mode"]');
     const mode = (modeSel?.value || state.mode || "auto").trim();
     state.mode = MODE_OPTIONS.includes(mode) ? mode : "auto";
 
@@ -1583,7 +1554,7 @@ export function mountWorkbench(SubBatch) {
     return base;
   }
 
-  function formatCtxBits(ctx) {
+  function formatCtxBits(ctx: ScanContext) {
     const bits = [];
     if (ctx.bvid) bits.push(ctx.bvid);
     if (ctx.mid) bits.push(`mid=${ctx.mid}`);
@@ -1603,19 +1574,19 @@ export function mountWorkbench(SubBatch) {
   function currentPageNumber() {
     try {
       return Math.max(1, parseInt(new URL(location.href).searchParams.get("p") || "1", 10) || 1);
-    } catch (_) {
+    } catch  {
       return 1;
     }
   }
 
-  function routeVideoKey(bvid, page) {
+  function routeVideoKey(bvid: string|undefined, page: number) {
     try {
       const pure =
         typeof SubBatch !== "undefined"
           ? SubBatch?.SubBatchMonorepo?.bilibili?.routeVideoKey
           : null;
       if (typeof pure === "function") return pure(bvid, page);
-    } catch (_) {
+    } catch  {
       /* monorepo unavailable — local fallback */
     }
     return `${String(bvid || "").toUpperCase()}:P${Math.max(1, Number(page) || 1)}`;
@@ -1627,10 +1598,8 @@ export function mountWorkbench(SubBatch) {
    * 连播时 URL / __INITIAL_STATE__ 会落后于 player，优先走 monorepo 播放器身份。
    */
   function currentRouteVideoRef() {
-    const resolve = appFn("resolveCurrentVideoRef");
-    if (typeof resolve === "function") {
-      return resolve(location.href, pageWindow);
-    }
+    const resolved = appCall("video.resolve", location.href, pageWindow);
+    if (resolved) return resolved;
     const ctx = detectContext(location.href);
     const resolvePlaying = bilibiliFn("resolvePlayingVideoRef");
     const extractPlaying = bilibiliFn("extractPlayingVideoHint");
@@ -1654,8 +1623,6 @@ export function mountWorkbench(SubBatch) {
     return currentRouteVideoRef()?.key || "";
   }
 
-
-
   const persistentCache = createPersistentCache({
     databaseName: CACHE_DB_NAME,
     databaseVersion: CACHE_DB_VERSION,
@@ -1666,7 +1633,7 @@ export function mountWorkbench(SubBatch) {
     onSubtitleChanged: (key) => state.fastSubtitleCache.delete(key),
   });
 
-  async function fetchVideoViewFast(bvid, signal, { forceNetwork = false } = {}) {
+  async function fetchVideoViewFast(bvid: string, signal?: AbortSignal, { forceNetwork = false } = {}) {
     const key = String(bvid || "").toUpperCase();
 
     if (!forceNetwork) {
@@ -1678,7 +1645,7 @@ export function mountWorkbench(SubBatch) {
       }
       const memory = lruGet(state.fastViewCache, key);
       if (memory) return { value: memory, cacheLevel: "L1 内存" };
-      const session = readSessionCache(() => sessionStorage, CACHE_SESSION_PREFIX, "view", key, VIEW_CACHE_TTL_MS);
+      const session = readSessionCache<BilibiliVideoView>(() => sessionStorage, CACHE_SESSION_PREFIX, "view", key, VIEW_CACHE_TTL_MS);
       if (session) {
         lruSet(state.fastViewCache, key, session);
         return { value: session, cacheLevel: "L2 会话" };
@@ -1696,7 +1663,7 @@ export function mountWorkbench(SubBatch) {
     return { value, cacheLevel: "NET 视频详情" };
   }
 
-  async function fetchSubtitleTracksFast(meta, signal, { forceNetwork = false } = {}) {
+  async function fetchSubtitleTracksFast(meta: SubtitleMeta, signal: AbortSignal|undefined, { forceNetwork = false } = {}): Promise<{tracks:SubtitleTrack[];cacheLevel:string}> {
     const cacheKey = `${meta.bvid}:${meta.cid}`;
     if (!forceNetwork) {
       const runtime = bilibiliCall("subtitle.runtimeTracks", pageWindow, meta);
@@ -1707,7 +1674,7 @@ export function mountWorkbench(SubBatch) {
       }
       const memory = lruGet(state.fastTrackCache, cacheKey);
       if (memory) return { tracks: memory, cacheLevel: "L1 内存" };
-      const session = readSessionCache(() => sessionStorage, CACHE_SESSION_PREFIX, "tracks", cacheKey, TRACK_CACHE_TTL_MS);
+      const session = readSessionCache<SubtitleTrack[]>(() => sessionStorage, CACHE_SESSION_PREFIX, "tracks", cacheKey, TRACK_CACHE_TTL_MS);
       if (session) {
         lruSet(state.fastTrackCache, cacheKey, session);
         return { tracks: session, cacheLevel: "L2 会话" };
@@ -1725,8 +1692,7 @@ export function mountWorkbench(SubBatch) {
     return { tracks, cacheLevel: "NET 字幕轨道" };
   }
 
-
-  async function fetchTrackBodyFast(base, tracks, trackIndex, signal, { forceNetwork = false } = {}) {
+  async function fetchTrackBodyFast(base: SubtitleMeta, tracks: SubtitleTrack[], trackIndex: number, signal: AbortSignal|undefined, { forceNetwork = false } = {}): Promise<SubtitleFetchResult> {
     const track = tracks[trackIndex];
     if (!track) throw new Error("字幕轨道不存在");
     const langKey = String(track.lan || trackIndex || "default");
@@ -1735,7 +1701,7 @@ export function mountWorkbench(SubBatch) {
     if (!forceNetwork) {
       const memory = lruGet(state.fastTrackBodyCache, cacheKey);
       if (memory) return { ...memory, source: "L1 内存字幕", cacheLevel: "L1 内存" };
-      const persistent = await persistentCache.read(`subtitle-track:${cacheKey}`);
+      const persistent = await persistentCache.read<SubtitleFetchResult>(`subtitle-track:${cacheKey}`);
       if (persistent?.value) {
         const result = { ...persistent.value, cacheStale: Date.now() - persistent.updatedAt > SUBTITLE_REVALIDATE_MS };
         lruSet(state.fastTrackBodyCache, cacheKey, result);
@@ -1746,7 +1712,9 @@ export function mountWorkbench(SubBatch) {
     const lan = String(track.lan || "");
     let url = bilibiliCall("subtitle.normalizeUrl", track.subtitle_url || "");
     if (!url && lan.startsWith("ai-") && base.aid) {
-      url = await aiSubtitleStat(base.aid, base.cid);
+      const resolved = await appCall("acquisition.resolveSubtitleUrl",
+        runtimeNetwork(), track, { aid: base.aid, cid: base.cid }, "", signal);
+      url = resolved.url;
     }
     if (!url) return { ...base, status: "empty", lan, tracks, activeTrackIndex: trackIndex, source: "NET 无地址" };
 
@@ -1760,12 +1728,12 @@ export function mountWorkbench(SubBatch) {
       return { ...base, status: "empty", lan, tracks, activeTrackIndex: trackIndex, source: "NET 空字幕" };
     }
     const cues = dedupeCues(coreCall("toCues", body));
-    const result = {
+    const result: SubtitleFetchResult = {
       ...base,
       status: "ok",
       cue_count: cues.length,
       lan,
-      lan_doc: track.lan_doc || lan,
+      lan_doc: String(track.lan_doc || lan),
       data: cues,
       tracks,
       activeTrackIndex: trackIndex,
@@ -1778,7 +1746,7 @@ export function mountWorkbench(SubBatch) {
     return result;
   }
 
-  async function fetchCurrentSubtitleFast(bvid, page = 1, signal, { forceNetwork = false } = {}) {
+  async function fetchCurrentSubtitleFast(bvid: string, page = 1, signal: AbortSignal, { forceNetwork = false } = {}): Promise<SubtitleFetchResult> {
     bvid = extractBvid(bvid) || String(bvid || "").trim();
     if (!bvid) throw new Error("empty bvid");
 
@@ -1796,7 +1764,7 @@ export function mountWorkbench(SubBatch) {
     if (!forceNetwork) {
       const memory = lruGet(state.fastSubtitleCache, preferredKey);
       if (memory) return { ...memory, source: "L1 内存字幕", cacheLevel: "L1 内存" };
-      const persistent = await persistentCache.read(`subtitle:${preferredKey}`);
+      const persistent = await persistentCache.read<SubtitleFetchResult>(`subtitle:${preferredKey}`);
       if (persistent?.value) {
         const result = {
           ...persistent.value,
@@ -1809,11 +1777,11 @@ export function mountWorkbench(SubBatch) {
       }
     }
 
-    const trackHit = await fetchSubtitleTracksFast(base, signal, { forceNetwork });
+    const trackHit = await fetchSubtitleTracksFast({ ...base, cid }, signal, { forceNetwork });
     const tracks = trackHit.tracks;
     if (!tracks.length) return { ...base, status: "empty", tracks: [], source: trackHit.cacheLevel };
     const activeTrackIndex = bilibiliCall("subtitle.preferredIndex", tracks);
-    const result = await fetchTrackBodyFast(base, tracks, activeTrackIndex, signal, { forceNetwork });
+    const result = await fetchTrackBodyFast({ ...base, cid }, tracks, activeTrackIndex, signal, { forceNetwork });
     const finalResult = {
       ...result,
       cachePath: `${viewHit.cacheLevel} → ${trackHit.cacheLevel} → ${result.cacheLevel || result.source}`,
@@ -1825,7 +1793,7 @@ export function mountWorkbench(SubBatch) {
     return finalResult;
   }
 
-  async function fetchSubtitle(bvid, page = 1) {
+  async function fetchSubtitle(bvid: string, page = 1): Promise<SubtitleFetchResult> {
     bvid = extractBvid(bvid) || String(bvid || "").trim();
     if (!bvid) return { bvid: "", status: "error", error: "empty bvid" };
 
@@ -1833,7 +1801,7 @@ export function mountWorkbench(SubBatch) {
     try {
       detail = await appCall("acquisition.fetchVideoDetail", runtimeNetwork(), bvid);
     } catch (e) {
-      return { bvid, status: "error", error: `view/detail: ${e.message || e}` };
+      return { bvid, status: "error", error: `view/detail: ${errorMessage(e)}` };
     }
     if (detail.code !== 0) {
       return {
@@ -1848,8 +1816,7 @@ export function mountWorkbench(SubBatch) {
       return { bvid, status: "empty", error: "charge_exclusive_blocked" };
     }
 
-    let aid = view.aid || 0;
-    aid = Number(aid) || null;
+    const aid = Number(view.aid) || null;
     const cid = resolveCid(view, page);
     const title = String(view.title || "");
     const author = String((view.owner && view.owner.name) || "");
@@ -1886,7 +1853,7 @@ export function mountWorkbench(SubBatch) {
         ...base,
         status: "error",
         lan,
-        error: `subtitle body: ${e.message || e}`,
+        error: `subtitle body: ${errorMessage(e)}`,
       };
     }
 
@@ -1907,7 +1874,11 @@ export function mountWorkbench(SubBatch) {
 
   // ─── list sources ───────────────────────────────────────────────────────
   /** @returns {Promise<{items: Array, hasMore: boolean, meta?: object}>} */
-  async function fetchListPage(ctx, page, pageSize) {
+  async function httpBilibiliList(url: string, headers: Record<string,string>) {
+    return appCall("scan.parseListResponse", await httpJson(url, headers));
+  }
+
+  async function fetchListPage(ctx: ScanContext, page: number, pageSize: number) {
     if (ctx.type === "user") {
       const q = await appCall(
         "acquisition.signWbi",
@@ -1923,7 +1894,7 @@ export function mountWorkbench(SubBatch) {
           order_avoided: true,
         },
       );
-      const result = await httpJson(
+      const result = await httpBilibiliList(
         `https://api.bilibili.com/x/space/wbi/arc/search?${q}`,
         { Referer: `https://space.bilibili.com/${ctx.mid}`, Origin: "https://space.bilibili.com" },
       );
@@ -1947,7 +1918,7 @@ export function mountWorkbench(SubBatch) {
     }
 
     if (ctx.type === "favorite") {
-      const result = await httpJson(
+      const result = await httpBilibiliList(
         `https://api.bilibili.com/x/v3/fav/resource/list?media_id=${ctx.media_id}&pn=${page}&ps=${Math.min(pageSize, 20)}&platform=web&t=${Date.now()}`,
         { Referer: "https://space.bilibili.com/", Origin: "https://www.bilibili.com" },
       );
@@ -1973,7 +1944,7 @@ export function mountWorkbench(SubBatch) {
     }
 
     if (ctx.type === "collection") {
-      const result = await httpJson(
+      const result = await httpBilibiliList(
         `https://api.bilibili.com/x/polymer/web-space/seasons_archives_list?mid=${ctx.mid}&season_id=${ctx.season_id}&sort_reverse=false&page_num=${page}&page_size=${pageSize}&web_location=333.1387`,
         {
           Referer: `https://space.bilibili.com/${ctx.mid}/channel/collectiondetail?sid=${ctx.season_id}`,
@@ -2031,7 +2002,7 @@ export function mountWorkbench(SubBatch) {
           page_size: 42,
         },
       );
-      const result = await httpJson(
+      const result = await httpBilibiliList(
         `https://api.bilibili.com/x/web-interface/wbi/search/type?${q}`,
         { Referer: "https://search.bilibili.com/", Origin: "https://search.bilibili.com" },
       );
@@ -2063,12 +2034,12 @@ export function mountWorkbench(SubBatch) {
     throw new Error(`unsupported list type: ${ctx.type}`);
   }
 
-  async function loadAllListItems(ctx, { maxPages, pageSize, onProgress, delayMs, shouldCancel }) {
-    return appCall("libraryScan.collectPages", { maxPages, pageSize, delayMs }, {
+  async function loadAllListItems(ctx: ScanContext, { maxPages, pageSize, onProgress, delayMs, shouldCancel }: { maxPages: number; pageSize: number; onProgress?: (message: string) => void; delayMs?: number; shouldCancel?: () => boolean }) {
+    return appCall("libraryScan.collectPages", { maxPages, pageSize, ...(delayMs === undefined ? {} : { delayMs }) }, {
       fetchPage: (page, size) => fetchListPage(ctx, page, size),
       waitIfPaused: () => waitIfJobPaused(),
       cancelled: () => typeof shouldCancel === "function" && shouldCancel(),
-      progress: onProgress,
+      ...(onProgress ? { progress: onProgress } : {}),
       sleep,
     });
   }
@@ -2077,39 +2048,39 @@ export function mountWorkbench(SubBatch) {
    * 个人主页：拉取该 UP 的全部 合集（名称 + season_id → 短地址 + 成员 BV）。
    * 列表接口可能只带 recent archives，total 更大时再拉 seasons_archives_list 补全。
    */
-  async function loadUserSpaceSeasons(mid, {
+  async function loadUserSpaceSeasons(mid: unknown, {
     maxPages = 30,
     pageSize = 20,
     onProgress,
     delayMs = 280,
     shouldCancel,
     maxSeasonArchivePages = 40,
-  } = {}) {
+  }: { maxPages?: number; pageSize?: number; onProgress?: (message: string) => void; delayMs?: number; shouldCancel?: () => boolean; maxSeasonArchivePages?: number } = {}) {
     return appCall("libraryScan.collectUserSeasons",
       mid, { maxPages, pageSize, delayMs, maxSeasonArchivePages }, {
-        fetchPage: (midStr, page, size) => httpJson(
+        fetchPage: async (midStr, page, size) => parseUserSeasonPage(await httpJson(
           "https://api.bilibili.com/x/polymer/web-space/seasons_series_list"
           + "?mid=" + encodeURIComponent(midStr)
           + "&page_num=" + page + "&page_size=" + size
           + "&web_location=333.1387",
           { Referer: "https://space.bilibili.com/" + midStr, Origin: "https://space.bilibili.com" },
-        ),
+        )),
         loadMembers: async (midStr, sid, archivePages, ms, progress) => {
           const full = await loadAllListItems(
             { type: "collection", mid: midStr, season_id: sid },
             {
               maxPages: archivePages, pageSize: 30, delayMs: ms,
-              onProgress: progress, shouldCancel,
+              onProgress: progress, ...(shouldCancel ? { shouldCancel } : {}),
             },
           );
           return full.items.map((item) => item.bvid).filter(Boolean);
         },
         shortUrl: buildCollectionShortUrl,
-        progress: onProgress,
+        ...(onProgress ? { progress: onProgress } : {}),
         cancelled: () => typeof shouldCancel === "function" && shouldCancel(),
         sleep,
         warn: (sid, error) => console.warn(
-          "[bili-subbatch] loadUserSpaceSeasons archives", sid, error?.message || error,
+          "[bili-subbatch] loadUserSpaceSeasons archives", sid, errorMessage(error),
         ),
       });
   }
@@ -2119,11 +2090,11 @@ export function mountWorkbench(SubBatch) {
    * 带章节的合集（「第一单元 / 1.1、1.2…」）每个单元本身是多分P稿，
    * 必须再读 view.pages 才能扫到展开后的全部课时。
    */
-  async function expandCollectionArchivesWithParts(items, {
+  async function expandCollectionArchivesWithParts(items: readonly CollectionArchive[]|null|undefined, {
     onProgress,
     shouldCancel,
     delayMs = 160,
-  } = {}) {
+  }: { onProgress?: (message: string) => void; shouldCancel?: () => boolean; delayMs?: number } = {}) {
     return appCall("libraryScan.expandCollectionParts", items, { delayMs }, {
       cancelled: () => typeof shouldCancel === "function" && shouldCancel(),
       waitIfPaused: () => waitIfJobPaused(),
@@ -2132,15 +2103,25 @@ export function mountWorkbench(SubBatch) {
         setLibraryJob({ kind: "scan", index, total, label: "展开分P " + bvid });
         if (onProgress) onProgress("展开合集分P " + index + "/" + total + "（" + bvid + "）…");
       },
-      fetchView: async (bvid) => (await fetchVideoViewFast(bvid))?.value || {},
+      fetchView: async (bvid) => {
+        const view = (await fetchVideoViewFast(bvid))?.value;
+        if (!view) return {};
+        const aid = Number(view.aid);
+        return {
+          ...(view.title !== undefined ? { title: view.title } : {}),
+          ...(view.owner ? { owner: view.owner } : {}),
+          ...(view.pages ? { pages: view.pages } : {}),
+          ...(Number.isFinite(aid) ? { aid } : {}),
+        };
+      },
       onFailure: (bvid, error) => console.warn(
-        "[bili-subbatch] expand collection parts", bvid, error?.message || error,
+        "[bili-subbatch] expand collection parts", bvid, errorMessage(error),
       ),
       sleep,
     });
   }
 
-  async function loadVideoAsItems(bvid, expandAllParts) {
+  async function loadVideoAsItems(bvid: string, expandAllParts: boolean) {
     // page=1 仅用于拿 View/pages 元信息；字幕在批量阶段再按 page 拉
     const r = await fetchSubtitle(bvid, 1);
     if (r.status === "error" && !r.pages?.length && !r.title) {
@@ -2150,9 +2131,9 @@ export function mountWorkbench(SubBatch) {
     if (expandAllParts && pages.length > 1) {
       const videoTitle = r.title || bvid;
       const author = r.author || "";
-      const rawItems = pages.map((p, i) => ({
+      const rawItems = pages.map((p, i: number) => ({
         bvid: r.bvid || bvid,
-        aid: r.aid,
+        aid: r.aid ?? null,
         title: `${videoTitle} - P${i + 1}【${p.part || ""}】`,
         author,
         page: i + 1,
@@ -2169,15 +2150,15 @@ export function mountWorkbench(SubBatch) {
         items: [
           {
             bvid: r.bvid || bvid,
-            aid: r.aid,
+            aid: r.aid ?? null,
             title: r.title || bvid,
             author: r.author || "",
             page: 1,
           },
         ],
         meta: {
-          title: r.title,
-          author: r.author,
+          title: r.title || "",
+          author: r.author || "",
           multip: false,
           hint: "该稿只有 1P，已按单视频处理",
         },
@@ -2188,13 +2169,13 @@ export function mountWorkbench(SubBatch) {
       items: [
         {
           bvid: r.bvid || bvid,
-          aid: r.aid,
+          aid: r.aid ?? null,
           title: r.title || bvid,
           author: r.author || "",
           page: 1,
         },
       ],
-      meta: { title: r.title, author: r.author, multip: pages.length > 1 },
+      meta: { title: r.title || "", author: r.author || "", multip: pages.length > 1 },
       pages,
     };
   }
@@ -2220,46 +2201,32 @@ export function mountWorkbench(SubBatch) {
   });
 
   // ─── UI geometry persistence ────────────────────────────────────────────
-  function isPanelSizePreset(value) {
-    return panelGeometryCall("isPanelSizePreset", value);
+  function panelGeometry() {
+    const api = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.ui?.panelGeometry : null;
+    if (!api) throw new Error("[bili-subbatch] panel geometry API missing");
+    return api;
   }
 
-  function panelGeometryCall(name, ...args) {
-    const fn = typeof SubBatch !== "undefined"
-      ? SubBatch?.SubBatchMonorepo?.ui?.panelGeometry?.[name]
-      : null;
-    if (typeof fn !== "function") {
-      throw new Error(`[bili-subbatch] panel geometry API missing "${name}"`);
-    }
-    return fn(...args);
+  function panelState() {
+    const api = typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo?.ui?.panelState : null;
+    if (!api) throw new Error("[bili-subbatch] panel state API missing");
+    return api;
   }
 
-  function panelPresetWidth(name, viewportWidth = window.innerWidth) {
-    return panelGeometryCall("panelPresetWidth", name, viewportWidth);
+  function isPanelSizePreset(value: unknown): value is keyof typeof PANEL_SIZE_PRESETS {
+    return panelGeometry().isPanelSizePreset(value);
   }
 
-  function panelStateCall(name, ...args) {
-    const fn = typeof SubBatch !== "undefined"
-      ? SubBatch?.SubBatchMonorepo?.ui?.panelState?.[name]
-      : null;
-    if (typeof fn !== "function") throw new Error(`[bili-subbatch] panel state API missing "${name}"`);
-    return fn(...args);
-  }
-
-  function panelInteractionCall(name, ...args) {
-    const fn = typeof SubBatch !== "undefined"
-      ? SubBatch?.SubBatchMonorepo?.ui?.panelInteraction?.[name]
-      : null;
-    if (typeof fn !== "function") throw new Error(`[bili-subbatch] panel interaction API missing "${name}"`);
-    return fn(...args);
+  function panelPresetWidth(name: string, viewportWidth = window.innerWidth) {
+    return panelGeometry().panelPresetWidth(name, viewportWidth);
   }
 
   function highPanelHeight(viewportHeight = window.innerHeight) {
-    return panelGeometryCall("highPanelHeight", viewportHeight);
+    return panelGeometry().highPanelHeight(viewportHeight);
   }
 
-  function panelSizeClassFromWidth(width, viewportWidth = window.innerWidth) {
-    return panelGeometryCall("panelSizeClassFromWidth", width, viewportWidth);
+  function panelSizeClassFromWidth(width: number, viewportWidth = window.innerWidth) {
+    return panelGeometry().panelSizeClassFromWidth(width, viewportWidth);
   }
 
   function panelPersistenceOptions() {
@@ -2281,11 +2248,11 @@ export function mountWorkbench(SubBatch) {
     };
   }
 
-  function clampKnowledgeRailW(value, panelWidth = state.ui?.w || 520) {
+  function clampKnowledgeRailW(value: number, panelWidth = state.ui?.w || 520) {
     return SubBatch.SubBatchMonorepo.ui.panelPersistence.clampKnowledgeRailWidth(value, panelWidth);
   }
 
-  function clampKnowledgeNavW(value, panelWidth = state.ui?.w || 520) {
+  function clampKnowledgeNavW(value: number, panelWidth = state.ui?.w || 520) {
     return SubBatch.SubBatchMonorepo.ui.panelPersistence.clampKnowledgeNavWidth(
       value, panelWidth, String(state.ui?.sizePreset || ""),
     );
@@ -2303,7 +2270,7 @@ export function mountWorkbench(SubBatch) {
     root.dataset.panelView = state.ui.view || "ai";
   }
 
-  function normalizeNoteFont(value, savedDefault) {
+  function normalizeNoteFont(value: number|undefined, savedDefault: number) {
     return SubBatch.SubBatchMonorepo.ui.panelPersistence.normalizeNoteFont(
       value, savedDefault, panelPersistenceOptions(),
     );
@@ -2314,7 +2281,7 @@ export function mountWorkbench(SubBatch) {
       return SubBatch.SubBatchMonorepo.ui.panelPersistence.loadUiGeometry(
         localStorage.getItem(UI_STORE_KEY), panelPersistenceOptions(),
       );
-    } catch (_) {
+    } catch  {
       return SubBatch.SubBatchMonorepo.ui.panelPersistence.defaultUiGeometry(panelPersistenceOptions());
     }
   }
@@ -2325,20 +2292,20 @@ export function mountWorkbench(SubBatch) {
       localStorage.setItem(UI_STORE_KEY, SubBatch.SubBatchMonorepo.ui.panelPersistence.serializeUiGeometry(
         state.ui, panelPersistenceOptions(),
       ));
-    } catch (_) {
+    } catch  {
       /* private mode / storage quota */
     }
   }
 
-  function clampUiToViewport(ui) {
-    Object.assign(ui, panelGeometryCall("clampPanelRect", ui, window.innerWidth, window.innerHeight));
+  function clampUiToViewport(ui: WorkbenchUi) {
+    Object.assign(ui, panelGeometry().clampPanelRect(ui, window.innerWidth, window.innerHeight));
     return ui;
   }
 
   // ─── UI (Catppuccin floating panel · multi-flavor) ─────────────────────
   function injectStyles() {
     // Tokens: Latte / Frappé / Macchiato / Mocha — https://catppuccin.com/palette/
-    GM_addStyle(`
+    GM_addStyle?.(`
       ${buildCtpFlavorCss(PANEL_ID)}
 
       ${SubBatch.SubBatchMonorepo.ui.panelStyles.renderShellStyles(PANEL_ID, MIN_W, MIN_H, DOCK_EDGE_PX)}
@@ -2359,7 +2326,7 @@ export function mountWorkbench(SubBatch) {
   function applyPanelGeometry() {
     const root = document.getElementById(PANEL_ID);
     if (!root || !state.ui) return;
-    const sidebar = root.querySelector(".bsb-sidebar");
+    const sidebar = root.querySelector<HTMLElement>(".bsb-sidebar");
     if (!sidebar) return;
     const ui = clampUiToViewport(state.ui);
     const panelSizeClass = isPanelSizePreset(ui.sizePreset)
@@ -2367,7 +2334,7 @@ export function mountWorkbench(SubBatch) {
       : panelSizeClassFromWidth(ui.w);
     root.setAttribute("data-panel-size", panelSizeClass);
     root.style.setProperty("--bsb-note-font", `${normalizeNoteFont(ui.noteFont, NOTE_FONT_DEFAULT)}px`);
-    root.querySelectorAll('[data-act="panel-size"]').forEach((button) => {
+    root.querySelectorAll<HTMLElement>('[data-act="panel-size"]').forEach((button) => {
       const active = isPanelSizePreset(ui.sizePreset) && button.dataset.size === ui.sizePreset;
       button.classList.toggle("active", active);
       button.setAttribute("aria-pressed", active ? "true" : "false");
@@ -2376,7 +2343,7 @@ export function mountWorkbench(SubBatch) {
     root.classList.toggle("open", !!state.open);
     root.classList.toggle("ai-focus", !!state.aiFocus);
     root.classList.toggle("docked", !!ui.dock);
-    root.querySelectorAll('[data-act="ai-focus"]').forEach((button) => {
+    root.querySelectorAll<HTMLElement>('[data-act="ai-focus"]').forEach((button) => {
       button.setAttribute("aria-pressed", state.aiFocus ? "true" : "false");
       button.title = state.aiFocus
         ? "退出专注阅读（Esc）"
@@ -2414,23 +2381,21 @@ export function mountWorkbench(SubBatch) {
       "aria-hidden",
       state.open && (!ui.dock || ui.dockExpanded) ? "false" : "true",
     );
-    const fab = root.querySelector(".bsb-fab");
+    const fab = root.querySelector<HTMLElement>(".bsb-fab");
     if (fab) fab.setAttribute("aria-expanded", state.open || !!ui.dock ? "true" : "false");
     applyKnowledgeLayoutVars(root);
   }
 
-  function bindPanelChrome(root) {
-    const sidebar = root.querySelector(".bsb-sidebar");
+  function bindPanelChrome(root: WorkbenchPanelElement) {
+    const ui = state.ui = loadUiGeom();
+    applyCtpFlavor(ui.ctpFlavor, { silent: true, persist: false });
 
-    state.ui = loadUiGeom();
-    applyCtpFlavor(state.ui.ctpFlavor, { silent: true, persist: false });
-
-    function setOpen(open) {
-      const next = panelStateCall("setPanelOpen", { ...state.ui, open: state.open, aiFocus: state.aiFocus }, open);
+    function setOpen(open: boolean) {
+      const next = panelState().setPanelOpen({ ...ui, open: state.open, aiFocus: state.aiFocus }, open);
       state.open = next.open;
       state.aiFocus = next.aiFocus;
-      state.ui.dock = next.dock;
-      state.ui.dockExpanded = next.dockExpanded;
+      ui.dock = next.dock;
+      ui.dockExpanded = next.dockExpanded;
       if (open) {
         refreshContextUI();
       } else {
@@ -2440,10 +2405,10 @@ export function mountWorkbench(SubBatch) {
       saveUiGeom();
     }
 
-    function setDock(side) {
+    function setDock(side: "left" | "right" | null) {
       // side: 'left' | 'right' | null
-      const next = panelStateCall("setPanelDock", { ...state.ui, open: state.open, aiFocus: state.aiFocus }, side, window.innerWidth);
-      Object.assign(state.ui, { dock: next.dock, dockExpanded: next.dockExpanded, x: next.x });
+      const next = panelState().setPanelDock({ ...ui, open: state.open, aiFocus: state.aiFocus }, side, window.innerWidth);
+      Object.assign(ui, { dock: next.dock, dockExpanded: next.dockExpanded, x: next.x });
       state.open = next.open;
       state.aiFocus = next.aiFocus;
       if (side) {
@@ -2458,13 +2423,13 @@ export function mountWorkbench(SubBatch) {
       );
     }
 
-    function toggleDockExpanded(force) {
-      if (!state.ui.dock) return;
-      const next = panelStateCall("expandPanelDock", { ...state.ui, open: state.open, aiFocus: state.aiFocus }, force);
-      state.ui.dockExpanded = next.dockExpanded;
+    function toggleDockExpanded(force?: boolean) {
+      if (!ui.dock) return;
+      const next = panelState().expandPanelDock({ ...ui, open: state.open, aiFocus: state.aiFocus }, force);
+      ui.dockExpanded = next.dockExpanded;
       state.open = next.open;
       applyPanelGeometry();
-      if (state.ui.dockExpanded) refreshContextUI();
+      if (ui.dockExpanded) refreshContextUI();
     }
 
     const chromeController = typeof SubBatch !== "undefined"
@@ -2473,23 +2438,23 @@ export function mountWorkbench(SubBatch) {
     if (typeof chromeController !== "function") throw new Error("[bili-subbatch] missing panel chrome controller");
     chromeController({
       root,
-      state: () => ({ open: state.open, dock: state.ui.dock, dockExpanded: state.ui.dockExpanded }),
+      state: () => ({ open: state.open, dock: ui.dock, dockExpanded: ui.dockExpanded }),
       setOpen,
       setDock,
       expandDock: toggleDockExpanded,
-      preferredDockSide: () => panelStateCall("preferredDockSide", state.ui, window.innerWidth),
-      selectSize: (next) => {
+      preferredDockSide: () => panelState().preferredDockSide(ui, window.innerWidth),
+      selectSize: (next: string) => {
         if (!isPanelSizePreset(next)) return;
-        const oldWidth = state.ui.w;
-        const oldRight = state.ui.x + oldWidth;
-        const anchorRight = state.ui.dock === "right" || (!state.ui.dock && state.ui.x + oldWidth / 2 >= window.innerWidth / 2);
-        state.ui.sizePreset = next;
-        state.ui.w = panelPresetWidth(next);
-        if (anchorRight && !state.ui.dock) state.ui.x = oldRight - state.ui.w;
-        clampUiToViewport(state.ui);
+        const oldWidth = ui.w;
+        const oldRight = ui.x + oldWidth;
+        const anchorRight = ui.dock === "right" || (!ui.dock && ui.x + oldWidth / 2 >= window.innerWidth / 2);
+        ui.sizePreset = next;
+        ui.w = panelPresetWidth(next);
+        if (anchorRight && !ui.dock) ui.x = oldRight - ui.w;
+        clampUiToViewport(ui);
         applyPanelGeometry();
         saveUiGeom();
-        setStatus(`面板宽度：${PANEL_SIZE_PRESETS[next].label} · ${Math.round(state.ui.w)}px；高度保持${state.ui.heightMode === "custom" ? "自定义" : "约 90% 视口"}`);
+        setStatus(`面板宽度：${PANEL_SIZE_PRESETS[next].label} · ${Math.round(ui.w)}px；高度保持${ui.heightMode === "custom" ? "自定义" : "约 90% 视口"}`);
       },
     });
     const pointerController = typeof SubBatch !== "undefined"
@@ -2498,9 +2463,9 @@ export function mountWorkbench(SubBatch) {
     if (typeof pointerController !== "function") throw new Error("[bili-subbatch] missing panel pointer controller");
     pointerController({
       root,
-      getState: () => state.ui,
-      update: (patch) => Object.assign(state.ui, patch),
-      setOpen: (open) => { state.open = open; },
+      getState: () => ui,
+      update: (patch) => Object.assign(ui, patch),
+      setOpen: (open: boolean) => { state.open = open; },
       setDock,
       render: applyPanelGeometry,
       persist: saveUiGeom,
@@ -2508,21 +2473,21 @@ export function mountWorkbench(SubBatch) {
       snapThreshold: DOCK_SNAP_PX,
     });
     window.addEventListener("resize", () => {
-      if (!state.ui) return;
-      clampUiToViewport(state.ui);
+      if (!ui) return;
+      clampUiToViewport(ui);
       applyPanelGeometry();
     });
 
     // 若上次是 dock，启动时只显示贴边标签
-    if (state.ui.dock) {
+    if (ui.dock) {
       state.open = true;
-      state.ui.dockExpanded = false;
+      ui.dockExpanded = false;
     }
     applyPanelGeometry();
     // 恢复工作区（AI / 字幕 / 设置）
     try {
-      setWorkspace(state.ui.view || "ai", { silent: true });
-    } catch (_) {
+      setWorkspace(ui.view || "ai", { silent: true });
+    } catch  {
       /* ensurePanel may not be fully wired yet */
     }
 
@@ -2532,11 +2497,11 @@ export function mountWorkbench(SubBatch) {
     root._bsbToggleDockExpanded = toggleDockExpanded;
   }
 
-  function ensurePanel() {
-    let root = document.getElementById(PANEL_ID);
+  function ensurePanel(): WorkbenchPanelElement {
+    let root = document.getElementById(PANEL_ID) as WorkbenchPanelElement | null;
     if (root) return root;
     injectStyles();
-    root = document.createElement("div");
+    root = document.createElement("div") as WorkbenchPanelElement;
     root.id = PANEL_ID;
     root.setAttribute("data-ctp-flavor", normalizeCtpFlavor(state.ui?.ctpFlavor || DEFAULT_CTP_FLAVOR));
     root.innerHTML = `
@@ -2577,9 +2542,9 @@ export function mountWorkbench(SubBatch) {
 
     SubBatch.SubBatchMonorepo.ui.settingsInteraction.bind(root, {
       selectWorkspace: (view) => setWorkspace(view),
-      maxPages: (value) => { state.maxPages = value; },
-      delayMs: (value) => { state.delayMs = value; },
-      autoCapture: (enabled) => {
+      maxPages: (value: number) => { state.maxPages = value; },
+      delayMs: (value: number) => { state.delayMs = value; },
+      autoCapture: (enabled: boolean) => {
         state.autoCaptureEnabled = enabled;
         saveAutoCaptureSetting(enabled);
         if (enabled) {
@@ -2591,7 +2556,7 @@ export function mountWorkbench(SubBatch) {
           setStatus("已关闭自动抓取；仍可手动扫描", "ok");
         }
       },
-      autoAnalyze: (enabled) => {
+      autoAnalyze: (enabled: boolean) => {
         state.autoAnalyzeEnabled = enabled;
         saveAutoAnalyzeSetting(enabled);
         clearTimeout(state.autoAnalyzeTimer);
@@ -2608,12 +2573,12 @@ export function mountWorkbench(SubBatch) {
           setStatus("已关闭自动分析；仍可点击“开始分析”", "ok");
         }
       },
-      playerSubtitle: (enabled) => {
+      playerSubtitle: (enabled: boolean) => {
         state.autoEnablePlayerSubtitle = enabled;
         storageSet(PLAYER_SUBTITLE_STORE_KEY, enabled ? "true" : "false");
         if (enabled) enablePlayerSubtitle(currentTranscriptItem()).catch(() => {});
       },
-      mode: (value) => {
+      mode: (value: string) => {
         state.mode = value;
         refreshContextUI();
         setStatus(value === "auto"
@@ -2625,33 +2590,33 @@ export function mountWorkbench(SubBatch) {
         updatePromptUi(root, getActivePromptProfile());
         setStatus(activeId ? "提示词：" + (getActivePromptProfile()?.name || "未命名") : "当前没有提示词", activeId ? "ok" : "err");
       },
-      preprocessEnabled: (enabled) => {
+      preprocessEnabled: (enabled: boolean) => {
         state.preprocessEnabled = enabled;
         savePreprocessEnabledSetting(enabled);
         refreshPromptSelector(root);
         refreshPreprocessModelSelector(root);
         setStatus(enabled ? "字幕预处理已开启" : "字幕预处理已关闭：后处理将直接使用原始字幕", "ok");
       },
-      preprocessPrompt: (id) => {
+      preprocessPrompt: (id: string|undefined) => {
         savePromptProfilesFromForm({ activeId: state.activePromptId });
         savePromptProfiles(state.promptProfiles, state.activePromptId, id);
         setStatus("预处理 Prompt：" + (getActivePreprocessPromptProfile()?.name || "未命名"), "ok");
       },
-      preprocessModel: (id) => {
+      preprocessModel: (id: string) => {
         state.preprocessModelId = id;
         storageSet(PREPROCESS_MODEL_STORE_KEY, id);
         const cfg = getPreprocessModelConfig();
         setStatus("预处理模型：" + (cfg?.name || cfg?.model || "未选择"), cfg ? "ok" : "err");
       },
-      promptSearch: (value) => {
+      promptSearch: (value: string) => {
         state.promptSearch = value;
         renderPromptList(root);
       },
-      aiSearch: (value) => {
+      aiSearch: (value: string) => {
         state.aiSearch = value;
         renderAiList(root);
       },
-      knowledgeSearch: (value) => {
+      knowledgeSearch: (value: string) => {
         state.knowledgeSearch = value;
         renderKnowledgeWorkspace().catch(() => {});
       },
@@ -2669,7 +2634,7 @@ export function mountWorkbench(SubBatch) {
     });
     SubBatch.SubBatchMonorepo.ui.studioInteractionController.bind(root, {
       getIndex: () => state.studioSlashIndex,
-      setIndex: (index) => { state.studioSlashIndex = index; },
+      setIndex: (index: number) => { state.studioSlashIndex = index; },
       renderMenu: renderStudioSlashMenu,
       hideMenu: hideStudioSlashMenu,
       runCommand: runStudioSlash,
@@ -2677,10 +2642,13 @@ export function mountWorkbench(SubBatch) {
       clear: studioClearChat,
       copy: studioCopyLast,
       exportChat: studioExportChat,
-      onError: (error) => setStatus(`对话失败：${error?.message || error}`, "err"),
+      onError: (error) => setStatus(`对话失败：${errorMessage(error)}`, "err"),
     });
     root.addEventListener("mouseup", (e) => {
-      if (e.target.closest?.('[data-role="knowledge-selection-toolbar"], [data-role="knowledge-rail"]')) return;
+      const target = e.target instanceof Element ? e.target :
+        e.target instanceof Text ? e.target.parentElement : null;
+      if (!target) return;
+      if (target.closest<HTMLElement>('[data-role="knowledge-selection-toolbar"], [data-role="knowledge-rail"]')) return;
       setTimeout(captureKnowledgeSelection, 0);
     });
 
@@ -2690,37 +2658,38 @@ export function mountWorkbench(SubBatch) {
         setGroupSelection(state.items, key, checked);
         renderList({ renderTranscript: false });
       },
-      selectItem: (index, checked) => {
-        if (state.items[index]) state.items[index].selected = checked;
+      selectItem: (index: string|number, checked: boolean) => {
+        const item = state.items[Number(index)];
+        if (item) item.selected = checked;
         renderList({ renderTranscript: false });
       },
-      toggleFolder: (key) => {
+      toggleFolder: (key: string|number) => {
         if (!state.libraryFolderCollapsed) state.libraryFolderCollapsed = {};
         state.libraryFolderCollapsed[key] = !state.libraryFolderCollapsed[key];
         renderList({ renderTranscript: false });
       },
-      openItem: (index) => {
-        const item = state.items[index];
+      openItem: (index: string|number) => {
+        const item = state.items[Number(index)];
         if (item) selectTranscriptItem(item);
       },
-      searchLibrary: (query) => {
+      searchLibrary: (query: string) => {
         state.libraryQuery = query;
         renderList({ renderTranscript: false });
       },
-      filterLibrary: (filter) => {
+      filterLibrary: (filter: string) => {
         state.libraryFilter = filter;
         renderList({ renderTranscript: false });
       },
-      searchTranscript: (query) => {
+      searchTranscript: (query: string) => {
         state.transcriptQuery = query;
         renderTranscriptPanel();
       },
       switchTrack: (index) => {
         switchTranscriptTrack(index).catch((error) => {
-          if (error?.name !== "AbortError") setStatus('切换字幕失败: ' + (error.message || error), "err");
+          if (!isAbortError(error)) setStatus('切换字幕失败: ' + (errorMessage(error)), "err");
         });
       },
-      setFollow: (enabled) => {
+      setFollow: (enabled: boolean) => {
         state.transcriptAutoFollow = enabled;
         storageSet(TRANSCRIPT_FOLLOW_STORE_KEY, enabled ? "true" : "false");
         if (enabled) updateTranscriptActiveCue(currentVideoTime(), true);
@@ -2730,60 +2699,60 @@ export function mountWorkbench(SubBatch) {
     });
 
     SubBatch.SubBatchMonorepo.ui.settingsInteraction.bindFlowChanges(root, {
-      shortcutPreference: (key, value, checked) => {
+      shortcutPreference: (key: string, value, checked: boolean) => {
         if (key === "enabled") state.shortcutConfig.enabled = checked;
-        else state.shortcutConfig[key] = value;
+        else if (key === "summonLayout" || key === "summonTarget" || key === "preferredDock") state.shortcutConfig[key] = value;
         saveShortcutSettings();
         renderShortcutSettings(root);
         setStatus(key === "enabled"
           ? `快捷键已${state.shortcutConfig.enabled ? "开启" : "关闭"}`
           : "快捷召唤偏好已保存", "ok");
       },
-      knowledgeModel: (value) => {
+      knowledgeModel: (value: string) => {
         state.knowledgeModelId = value;
         storageSet(KNOWLEDGE_MODEL_STORE_KEY, value);
       },
-      preprocessEnabled: (value) => {
+      preprocessEnabled: (value: boolean) => {
         state.preprocessEnabled = value;
         savePreprocessEnabledSetting(value);
         renderAiFlowDrawer();
         refreshAiChips();
       },
-      preprocessPrompt: (value) => {
+      preprocessPrompt: (value: string|undefined) => {
         savePromptProfiles(state.promptProfiles, state.activePromptId, value);
         renderAiFlowDrawer();
       },
-      preprocessModel: (value) => {
+      preprocessModel: (value: string) => {
         state.preprocessModelId = value;
         storageSet(PREPROCESS_MODEL_STORE_KEY, value);
         renderAiFlowDrawer();
       },
-      preprocessConcurrency: (raw) => {
+      preprocessConcurrency: (raw: string|number) => {
         state.preprocessConcurrency = saveBoundedNumberSetting(PREPROCESS_CONCURRENCY_STORE_KEY, raw, PREPROCESS_DEFAULT_CONCURRENCY, 1, 8);
       },
-      preprocessTargetMinutes: (raw) => {
+      preprocessTargetMinutes: (raw: string|number) => {
         state.preprocessTargetMinutes = saveBoundedNumberSetting(PREPROCESS_TARGET_MINUTES_STORE_KEY, raw, PREPROCESS_DEFAULT_TARGET_MINUTES, 2, 30);
       },
-      preprocessOverlapSeconds: (raw) => {
+      preprocessOverlapSeconds: (raw: string|number) => {
         state.preprocessOverlapSeconds = saveBoundedNumberSetting(PREPROCESS_OVERLAP_SECONDS_STORE_KEY, raw, PREPROCESS_DEFAULT_OVERLAP_SECONDS, 0, 120);
       },
-      preprocessMaxChars: (raw) => {
+      preprocessMaxChars: (raw: string|number) => {
         state.preprocessMaxChars = saveBoundedNumberSetting(PREPROCESS_MAX_CHARS_STORE_KEY, raw, PREPROCESS_DEFAULT_MAX_CHARS, 8000, 60000);
       },
-      preprocessRetries: (raw) => {
+      preprocessRetries: (raw: string|number) => {
         state.preprocessRetries = saveBoundedNumberSetting(PREPROCESS_RETRIES_STORE_KEY, raw, PREPROCESS_DEFAULT_RETRIES, 0, 4);
       },
-      studioModel: (value) => {
+      studioModel: (value: string) => {
         state.studioModelId = value;
         storageSet(STUDIO_MODEL_STORE_KEY, value);
         renderAiFlowDrawer();
       },
-      studioContext: (value) => {
-        state.studioContextPref = ["raw", "processed"].includes(value) ? value : "auto";
+      studioContext: (value: string) => {
+        state.studioContextPref = value === "raw" || value === "processed" ? value : "auto";
         persistStudioChat();
         if (currentAiWorkbenchStage() === "chat") renderStudioCanvas();
       },
-      taskPrompt: (taskId, promptId) => {
+      taskPrompt: (taskId: string, promptId: string) => {
         const tasks = currentPostTasks().map((task) => ({ ...task, modelIds: [...(task.modelIds || [])] }));
         const task = tasks.find((item) => item.id === taskId);
         if (!task) return;
@@ -2793,42 +2762,46 @@ export function mountWorkbench(SubBatch) {
     });
 
     root.addEventListener("click", (e) => {
-      const knowledgeSelectionAction = e.target.closest?.("[data-knowledge-selection-act]");
+      const target = e.target instanceof Element ? e.target :
+        e.target instanceof Text ? e.target.parentElement : null;
+      if (!target) return;
+      const knowledgeSelectionAction = target.closest<HTMLElement>("[data-knowledge-selection-act]");
       if (knowledgeSelectionAction) {
         e.preventDefault();
         const action = knowledgeSelectionAction.dataset.knowledgeSelectionAct;
         Promise.resolve((async () => {
           const anchor = await ensureKnowledgeAnchorFromSelection({ starred: action === "save" });
+          if (!anchor) return;
           if (action === "save") { setStatus(`已收藏知识锚点：${anchor.selectedText}`, "ok"); return; }
           if (action === "question") {
             await renderKnowledgeRail();
-            ensurePanel().querySelector('[data-role="knowledge-rail"] [data-role="knowledge-question"]')?.focus();
+            ensurePanel().querySelector<HTMLElement>('[data-role="knowledge-rail"] [data-role="knowledge-question"]')?.focus();
             return;
           }
           const question = action === "deep"
             ? `请深入解释「${anchor.selectedText}」，重点说明它在当前字幕语境中的机制、为什么重要、常见误解以及与相邻概念的关系。`
             : `什么是「${anchor.selectedText}」？请结合当前字幕说明它在这里的具体含义和作用。`;
           await knowledgeAsk(anchor.id, null, question);
-        })()).catch((error) => setStatus(`Knowledge 操作失败：${error?.message || error}`, "err"));
+        })()).catch((error) => setStatus(`Knowledge 操作失败：${errorMessage(error)}`, "err"));
         return;
       }
-      const knowledgeMark = e.target.closest?.("[data-knowledge-anchor-id]");
+      const knowledgeMark = target.closest<HTMLElement>("[data-knowledge-anchor-id]");
       if (knowledgeMark) {
         e.preventDefault();
-        openKnowledgeAnchor(knowledgeMark.dataset.knowledgeAnchorId).catch((error) => setStatus(`打开知识锚点失败：${error?.message || error}`, "err"));
+        openKnowledgeAnchor(knowledgeMark.dataset.knowledgeAnchorId || "").catch((error) => setStatus(`打开知识锚点失败：${errorMessage(error)}`, "err"));
         return;
       }
-      if (e.target.closest?.("[data-knowledge-close]")) { e.preventDefault(); closeKnowledgeRail(); return; }
-      if (e.target.closest?.("[data-knowledge-stop]")) { e.preventDefault(); abortKnowledgeRequest(); return; }
-      const handledKnowledgeReader = SubBatch.SubBatchMonorepo.ui.knowledgeReader.dispatchReaderClick(e.target, {
+      if (target.closest<HTMLElement>("[data-knowledge-close]")) { e.preventDefault(); closeKnowledgeRail(); return; }
+      if (target.closest<HTMLElement>("[data-knowledge-stop]")) { e.preventDefault(); abortKnowledgeRequest(); return; }
+      const handledKnowledgeReader = SubBatch.SubBatchMonorepo.ui.knowledgeReader.dispatchReaderClick(target, {
         starAnchor: () => {
           const anchor = knowledgeAnchorById(state.knowledgeActiveAnchorId);
           if (!anchor) return;
           const updated = { ...anchor, starred: !anchor.starred, updatedAt: Date.now() };
-          knowledgePutAnchor(updated).then(() => {
+          knowledgePutAnchor(updated).then(async () => {
             if (state.ui?.view === "knowledge") return renderKnowledgeWorkspace();
-            return Promise.all([renderKnowledgeRail(), decorateKnowledgeAnchors()]);
-          }).catch((error) => setStatus("收藏失败：" + (error?.message || error), "err"));
+            await Promise.all([renderKnowledgeRail(), decorateKnowledgeAnchors()]);
+          }).catch((error) => setStatus("收藏失败：" + (errorMessage(error)), "err"));
         },
         starNode: () => {
           const node = knowledgeNodeById(state.knowledgeActiveNodeId);
@@ -2837,22 +2810,22 @@ export function mountWorkbench(SubBatch) {
           knowledgePutNode(updated).then(() => {
             if (state.ui?.view === "knowledge") return renderKnowledgeWorkspace();
             return renderKnowledgeRail();
-          }).catch((error) => setStatus("收藏失败：" + (error?.message || error), "err"));
+          }).catch((error) => setStatus("收藏失败：" + (errorMessage(error)), "err"));
         },
         deleteAnchor: () => {
           const anchor = knowledgeAnchorById(state.knowledgeActiveAnchorId);
           if (!anchor || !confirm("删除知识锚点「" + anchor.selectedText + "」及其全部追问？")) return;
           knowledgeDeleteAnchor(anchor.id).then(() => renderKnowledgeWorkspace())
             .then(() => decorateKnowledgeAnchors())
-            .catch((error) => setStatus("删除失败：" + (error?.message || error), "err"));
+            .catch((error) => setStatus("删除失败：" + (errorMessage(error)), "err"));
         },
         toggleMore: () => {
-          const menu = e.target.closest(".bsb-knowledge-more")?.querySelector('[data-role="knowledge-more-menu"]');
+          const menu = target.closest<HTMLElement>(".bsb-knowledge-more")?.querySelector<HTMLElement>('[data-role="knowledge-more-menu"]');
           if (menu) menu.hidden = !menu.hidden;
         },
       });
       if (handledKnowledgeReader) { e.preventDefault(); return; }
-      const handledKnowledgeNavigation = SubBatch.SubBatchMonorepo.ui.knowledgeTreeRenderer.dispatchNavigationClick(e.target, {
+      const handledKnowledgeNavigation = SubBatch.SubBatchMonorepo.ui.knowledgeTreeRenderer.dispatchNavigationClick(target, {
         backList: () => {
           state.knowledgeActiveAnchorId = "";
           state.knowledgeActiveNodeId = "";
@@ -2868,25 +2841,25 @@ export function mountWorkbench(SubBatch) {
         },
         newRoot: () => {
           state.knowledgeActiveNodeId = "";
-          renderKnowledgeRail().then(() => ensurePanel().querySelector('[data-role="knowledge-question"]')?.focus()).catch(() => {});
+          renderKnowledgeRail().then(() => ensurePanel().querySelector<HTMLElement>('[data-role="knowledge-question"]')?.focus()).catch(() => {});
         },
-        selectAnchor: (id) => {
+        selectAnchor: (id: string) => {
           state.knowledgeActiveAnchorId = id;
           state.knowledgeActiveNodeId = "";
           renderKnowledgeWorkspace().catch(() => {});
         },
-        selectNode: (id) => {
+        selectNode: (id: string) => {
           state.knowledgeActiveNodeId = id;
           if (state.ui?.view === "knowledge") renderKnowledgeWorkspace().catch(() => {});
           else renderKnowledgeRail().catch(() => {});
         },
         askSuggestion: (question) => {
           knowledgeAsk(state.knowledgeActiveAnchorId, state.knowledgeActiveNodeId || null, question)
-            .catch((error) => setStatus("Knowledge 追问失败：" + (error?.message || error), "err"));
+            .catch((error) => setStatus("Knowledge 追问失败：" + (errorMessage(error)), "err"));
         },
       });
       if (handledKnowledgeNavigation) { e.preventDefault(); return; }
-      if (e.target.closest?.("[data-knowledge-evidence-toggle]")) {
+      if (target.closest<HTMLElement>("[data-knowledge-evidence-toggle]")) {
         e.preventDefault();
         if (state.ui) {
           state.ui.knowledgeContextOpen = !state.ui.knowledgeContextOpen;
@@ -2896,47 +2869,47 @@ export function mountWorkbench(SubBatch) {
         else if (state.knowledgeRailOpen) renderKnowledgeRail().catch(() => {});
         return;
       }
-      if (!e.target.closest?.(".bsb-knowledge-more")) {
-        root.querySelectorAll?.('[data-role="knowledge-more-menu"]').forEach((menu) => { menu.hidden = true; });
+      if (!target.closest<HTMLElement>(".bsb-knowledge-more")) {
+        root.querySelectorAll<HTMLElement>('[data-role="knowledge-more-menu"]').forEach((menu) => { menu.hidden = true; });
       }
-      const knowledgeQuick = e.target.closest?.("[data-knowledge-quick]");
+      const knowledgeQuick = target.closest<HTMLElement>("[data-knowledge-quick]");
       if (knowledgeQuick) {
         e.preventDefault();
         const anchor = knowledgeAnchorById(state.knowledgeActiveAnchorId);
-        if (anchor) knowledgeAsk(anchor.id, null, `什么是「${anchor.selectedText}」？请结合当前字幕说明它在这里的具体含义和作用。`).catch((error) => setStatus(`Knowledge 追问失败：${error?.message || error}`, "err"));
+        if (anchor) knowledgeAsk(anchor.id, null, `什么是「${anchor.selectedText}」？请结合当前字幕说明它在这里的具体含义和作用。`).catch((error) => setStatus(`Knowledge 追问失败：${errorMessage(error)}`, "err"));
         return;
       }
-      const knowledgeSend = e.target.closest?.("[data-knowledge-send]");
+      const knowledgeSend = target.closest<HTMLElement>("[data-knowledge-send]");
       if (knowledgeSend) {
         e.preventDefault();
         const shell = knowledgeSend.closest(".bsb-knowledge-composer, .bsb-knowledge-reader, .bsb-knowledge-rail-body") || root;
-        const input = shell.querySelector('[data-role="knowledge-question"]');
+        const input = shell.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-role="knowledge-question"]');
         const q = String(input?.value || "").trim();
         if (q) {
           knowledgeAsk(state.knowledgeActiveAnchorId, state.knowledgeActiveNodeId || null, q)
             .then(() => { if (input) input.value = ""; })
-            .catch((error) => setStatus(`Knowledge 追问失败：${error?.message || error}`, "err"));
+            .catch((error) => setStatus(`Knowledge 追问失败：${errorMessage(error)}`, "err"));
         }
         return;
       }
-      if (e.target.closest?.("[data-knowledge-seek]")) {
+      if (target.closest<HTMLElement>("[data-knowledge-seek]")) {
         e.preventDefault();
         const anchor = knowledgeAnchorById(state.knowledgeActiveAnchorId);
         if (anchor) {
           setWorkspace("ai");
           state.aiInputView = "processed";
           setAiWorkbenchStage("preprocess").then(() => {
-            if (anchor.timeStart != null) seekToVideoTimestamp(anchor.timeStart, anchor.bvid, anchor.page || 1);
+            if (anchor.timeStart != null) seekToVideoTimestamp(anchor.timeStart, anchor.bvid || "", anchor.page || 1);
             openKnowledgeAnchor(anchor.id).catch(() => {});
           });
         }
         return;
       }
-      const flowStep = e.target.closest?.("[data-flow-step]");
+      const flowStep = target.closest<HTMLElement>("[data-flow-step]");
       if (flowStep) {
         e.preventDefault();
         const shell = flowStep.closest(".bsb-flow-stepper");
-        const input = shell?.querySelector('input[type="number"]');
+        const input = shell?.querySelector<HTMLInputElement>('input[type="number"]');
         if (!input || input.disabled) return;
         const direction = Number(flowStep.dataset.flowStep || 0);
         const step = Math.max(0.000001, Number(input.step) || 1);
@@ -2949,23 +2922,23 @@ export function mountWorkbench(SubBatch) {
         input.dispatchEvent(new Event("change", { bubbles: true }));
         return;
       }
-      const drawerBackdrop = e.target.closest?.('[data-role="ai-drawer-backdrop"]');
+      const drawerBackdrop = target.closest<HTMLElement>('[data-role="ai-drawer-backdrop"]');
       if (drawerBackdrop) { e.preventDefault(); setAiDrawer(""); return; }
-      const drawerAction = e.target.closest?.('[data-role="ai-flow-drawer"] button[data-act], [data-role="ai-input-drawer"] button[data-act]');
+      const drawerAction = target.closest<HTMLElement>('[data-role="ai-flow-drawer"] button[data-act], [data-role="ai-input-drawer"] button[data-act]');
       if (drawerAction) {
         e.preventDefault();
-        Promise.resolve(onAction(drawerAction.dataset.act)).catch((error) => setStatus(`操作失败: ${error?.message || error}`, "err"));
+        Promise.resolve(onAction(drawerAction.dataset.act || null)).catch((error) => setStatus(`操作失败: ${errorMessage(error)}`, "err"));
         return;
       }
-      const inputView = e.target.closest?.("[data-input-view]");
+      const inputView = target.closest<HTMLElement>("[data-input-view]");
       if (inputView) { e.preventDefault(); state.aiInputView = String(inputView.dataset.inputView || "raw"); renderAiInputDrawer(); return; }
-      const aiStageTab = e.target.closest?.("[data-ai-stage]");
-      if (aiStageTab) { e.preventDefault(); setAiWorkbenchStage(aiStageTab.dataset.aiStage).catch((error) => setStatus(`切换 AI 阶段失败: ${error?.message || error}`, "err")); return; }
-      const preprocessView = e.target.closest?.("[data-ai-preprocess-view]");
-      if (preprocessView) { e.preventDefault(); state.aiInputView = String(preprocessView.dataset.aiPreprocessView || "raw"); renderPreprocessCanvas().catch((error) => setStatus(`打开字幕失败: ${error?.message || error}`, "err")); return; }
-      const outputTask = e.target.closest?.("[data-ai-output-task]");
-      if (outputTask) { e.preventDefault(); selectAiOutputTask(outputTask.dataset.aiOutputTask).catch((error) => setStatus(`切换产物失败: ${error?.message || error}`, "err")); return; }
-      const taskRemove = e.target.closest?.("[data-flow-task-remove]");
+      const aiStageTab = target.closest<HTMLElement>("[data-ai-stage]");
+      if (aiStageTab) { e.preventDefault(); setAiWorkbenchStage(aiStageTab.dataset.aiStage || "").catch((error) => setStatus(`切换 AI 阶段失败: ${errorMessage(error)}`, "err")); return; }
+      const preprocessView = target.closest<HTMLElement>("[data-ai-preprocess-view]");
+      if (preprocessView) { e.preventDefault(); state.aiInputView = String(preprocessView.dataset.aiPreprocessView || "raw"); renderPreprocessCanvas().catch((error) => setStatus(`打开字幕失败: ${errorMessage(error)}`, "err")); return; }
+      const outputTask = target.closest<HTMLElement>("[data-ai-output-task]");
+      if (outputTask) { e.preventDefault(); selectAiOutputTask(outputTask.dataset.aiOutputTask || "").catch((error) => setStatus(`切换产物失败: ${errorMessage(error)}`, "err")); return; }
+      const taskRemove = target.closest<HTMLElement>("[data-flow-task-remove]");
       if (taskRemove) {
         e.preventDefault();
         const id = String(taskRemove.dataset.flowTaskRemove || "");
@@ -2973,10 +2946,10 @@ export function mountWorkbench(SubBatch) {
         renderAiFlowDrawer();
         return;
       }
-      const modelAdd = e.target.closest?.("[data-flow-task-model-add]");
+      const modelAdd = target.closest<HTMLElement>("[data-flow-task-model-add]");
       if (modelAdd) {
         e.preventDefault();
-        const card = modelAdd.closest?.("[data-flow-task-id]");
+        const card = modelAdd.closest<HTMLElement>("[data-flow-task-id]");
         const taskId = String(card?.dataset.flowTaskId || "");
         const modelId = String(modelAdd.dataset.flowTaskModelAdd || "");
         const tasks = currentPostTasks().map((t) => ({ ...t, modelIds: [...(t.modelIds || [])] }));
@@ -2988,11 +2961,11 @@ export function mountWorkbench(SubBatch) {
         }
         return;
       }
-      const modelRemove = e.target.closest?.("[data-flow-task-model-remove]");
+      const modelRemove = target.closest<HTMLElement>("[data-flow-task-model-remove]");
       if (modelRemove) {
         e.preventDefault();
         e.stopPropagation();
-        const card = modelRemove.closest?.("[data-flow-task-id]");
+        const card = modelRemove.closest<HTMLElement>("[data-flow-task-id]");
         const taskId = String(card?.dataset.flowTaskId || "");
         const modelId = String(modelRemove.dataset.flowTaskModelRemove || "");
         const tasks = currentPostTasks().map((t) => ({ ...t, modelIds: [...(t.modelIds || [])] }));
@@ -3004,26 +2977,26 @@ export function mountWorkbench(SubBatch) {
         }
         return;
       }
-      const editorAction = e.target.closest?.('[data-role="prompt-editor"] button[data-act], [data-role="ai-editor"] button[data-act]');
+      const editorAction = target.closest<HTMLElement>('[data-role="prompt-editor"] button[data-act], [data-role="ai-editor"] button[data-act]');
       if (editorAction) {
         e.preventDefault();
-        Promise.resolve(onAction(editorAction.dataset.act)).catch((error) => {
-          setStatus(`设置操作失败: ${error?.message || error}`, "err");
+        Promise.resolve(onAction(editorAction.dataset.act || null)).catch((error) => {
+          setStatus(`设置操作失败: ${errorMessage(error)}`, "err");
         });
         return;
       }
-      const shortcutRecord = e.target.closest?.("[data-shortcut-record]");
+      const shortcutRecord = target.closest<HTMLElement>("[data-shortcut-record]");
       if (shortcutRecord) {
         e.preventDefault();
         const id = String(shortcutRecord.dataset.shortcutRecord || "");
         if (!SHORTCUT_COMMANDS.some((command) => command.id === id)) return;
         state.shortcutRecordingId = id;
         renderShortcutSettings(root);
-        root.querySelector(`[data-shortcut-record="${CSS.escape(id)}"]`)?.focus();
+        root.querySelector<HTMLElement>(`[data-shortcut-record="${CSS.escape(id)}"]`)?.focus();
         setStatus("快捷键录制中 · 按 Esc 取消，Backspace / Delete 清除");
         return;
       }
-      const shortcutReset = e.target.closest?.("[data-shortcut-reset]");
+      const shortcutReset = target.closest<HTMLElement>("[data-shortcut-reset]");
       if (shortcutReset) {
         e.preventDefault();
         const id = String(shortcutReset.dataset.shortcutReset || "");
@@ -3036,7 +3009,7 @@ export function mountWorkbench(SubBatch) {
         setStatus(`已恢复：${command.label} · ${shortcutDisplayChord(command.defaultChord)}`, "ok");
         return;
       }
-      const shortcutResetAll = e.target.closest?.("[data-shortcut-reset-all]");
+      const shortcutResetAll = target.closest<HTMLElement>("[data-shortcut-reset-all]");
       if (shortcutResetAll) {
         e.preventDefault();
         const preserved = {
@@ -3052,28 +3025,28 @@ export function mountWorkbench(SubBatch) {
         setStatus("已恢复默认快捷键", "ok");
         return;
       }
-      const settingsTab = e.target.closest?.("[data-settings-tab]");
+      const settingsTab = target.closest<HTMLElement>("[data-settings-tab]");
       if (settingsTab) {
         e.preventDefault();
-        try { savePromptProfilesFromForm({ activeId: state.activePromptId }); } catch (_) { /* noop */ }
-        try { saveAiProfilesFromForm(); } catch (_) { /* noop */ }
-        setSettingsTab(settingsTab.dataset.settingsTab);
+        try { savePromptProfilesFromForm({ activeId: state.activePromptId }); } catch  { /* noop */ }
+        try { saveAiProfilesFromForm(); } catch  { /* noop */ }
+        setSettingsTab(settingsTab.dataset.settingsTab || "");
         return;
       }
-      const flavorPick = e.target.closest?.("[data-ctp-flavor-pick]");
+      const flavorPick = target.closest<HTMLElement>("[data-ctp-flavor-pick]");
       if (flavorPick) {
         e.preventDefault();
         applyCtpFlavor(flavorPick.dataset.ctpFlavorPick);
         return;
       }
-      const promptStageTab = e.target.closest?.("[data-prompt-stage-tab]");
+      const promptStageTab = target.closest<HTMLElement>("[data-prompt-stage-tab]");
       if (promptStageTab) {
         e.preventDefault();
-        try { savePromptProfilesFromForm({ activeId: state.activePromptId }); } catch (_) { /* noop */ }
-        setPromptStageTab(promptStageTab.dataset.promptStageTab);
+        try { savePromptProfilesFromForm({ activeId: state.activePromptId }); } catch  { /* noop */ }
+        setPromptStageTab(promptStageTab.dataset.promptStageTab || "");
         return;
       }
-      const promptListItem = e.target.closest?.("[data-prompt-list-id]");
+      const promptListItem = target.closest<HTMLElement>("[data-prompt-list-id]");
       if (promptListItem) {
         // 拖拽手柄本身仍可点选该行；真正重排由 drag/drop 负责。
         e.preventDefault();
@@ -3082,7 +3055,7 @@ export function mountWorkbench(SubBatch) {
         fillPromptConfigForm(root);
         return;
       }
-      const aiListItem = e.target.closest?.("[data-ai-list-id]");
+      const aiListItem = target.closest<HTMLElement>("[data-ai-list-id]");
       if (aiListItem) {
         e.preventDefault();
         saveAiProfilesFromForm();
@@ -3090,48 +3063,48 @@ export function mountWorkbench(SubBatch) {
         fillAiConfigForm(root);
         return;
       }
-      const promptTool = e.target.closest?.("[data-prompt-act]");
+      const promptTool = target.closest<HTMLElement>("[data-prompt-act]");
       if (promptTool) {
         e.preventDefault();
         handlePromptProfileAction(promptTool);
         return;
       }
-      const profileTool = e.target.closest?.("[data-ai-profile-act]");
+      const profileTool = target.closest<HTMLElement>("[data-ai-profile-act]");
       if (profileTool) {
         e.preventDefault();
         handleAiProfileAction(profileTool);
         return;
       }
-      const preprocessTab = e.target.closest?.("[data-ai-preprocess-tab]");
+      const preprocessTab = target.closest<HTMLElement>("[data-ai-preprocess-tab]");
       if (preprocessTab) {
         e.preventDefault();
-        selectPreprocessResult().catch((error) => setStatus(`打开预处理稿失败: ${error?.message || error}`, "err"));
+        selectPreprocessResult().catch((error) => setStatus(`打开预处理稿失败: ${errorMessage(error)}`, "err"));
         return;
       }
-      const retryTab = e.target.closest?.("[data-ai-retry-id]");
+      const retryTab = target.closest<HTMLElement>("[data-ai-retry-id]");
       if (retryTab) {
         e.preventDefault();
         const runId = retryTab.dataset.aiRetryId;
-        selectAiRun(runId)
+        selectAiRun(runId || "")
           .then(() => regenerateActiveAiRun())
-          .catch((error) => setStatus(`重新生成失败: ${error?.message || error}`, "err"));
+          .catch((error) => setStatus(`重新生成失败: ${errorMessage(error)}`, "err"));
         return;
       }
-      const resultTab = e.target.closest?.("[data-ai-result-id]");
+      const resultTab = target.closest<HTMLElement>("[data-ai-result-id]");
       if (resultTab) {
         e.preventDefault();
-        selectAiRun(resultTab.dataset.aiResultId).catch((error) => {
-          setStatus(`切换结果失败: ${error?.message || error}`, "err");
+        selectAiRun(resultTab.dataset.aiResultId || "").catch((error) => {
+          setStatus(`切换结果失败: ${errorMessage(error)}`, "err");
         });
         return;
       }
-      const mermaidTool = e.target.closest?.("[data-mmd-act]");
+      const mermaidTool = target.closest<HTMLButtonElement>("[data-mmd-act]");
       if (mermaidTool) {
         e.preventDefault();
         handleMermaidTool(mermaidTool);
         return;
       }
-      const ts = e.target.closest?.(".bsb-time-link");
+      const ts = target.closest<HTMLElement>(".bsb-time-link");
       if (!ts) return;
       e.preventDefault();
       seekToVideoTimestamp(
@@ -3141,26 +3114,32 @@ export function mountWorkbench(SubBatch) {
       );
     });
     root.addEventListener("wheel", (e) => {
-      const viewport = e.target.closest?.(".bsb-mermaid-viewport");
+      const target = e.target instanceof Element ? e.target :
+        e.target instanceof Text ? e.target.parentElement : null;
+      if (!target) return;
+      const viewport = target.closest<HTMLElement>(".bsb-mermaid-viewport");
       if (!viewport || !e.ctrlKey) return;
-      const card = viewport.closest(".bsb-mermaid-card");
+      const card = viewport.closest<HTMLElement>(".bsb-mermaid-card");
       if (!card) return;
       e.preventDefault();
       setMermaidScale(card, getMermaidScale(card) + (e.deltaY < 0 ? 0.12 : -0.12));
     }, { passive: false });
     root.addEventListener("keydown", (e) => {
-      const input = e.target.closest?.('[data-role="knowledge-question"]');
+      const target = e.target instanceof Element ? e.target :
+        e.target instanceof Text ? e.target.parentElement : null;
+      if (!target) return;
+      const input = target.closest<HTMLInputElement | HTMLTextAreaElement>('[data-role="knowledge-question"]');
       if (!input || e.key !== "Enter" || !(e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
       const q = String(input.value || "").trim();
-      if (q) knowledgeAsk(state.knowledgeActiveAnchorId, state.knowledgeActiveNodeId || null, q).catch((error) => setStatus(`Knowledge 追问失败：${error?.message || error}`, "err"));
+      if (q) knowledgeAsk(state.knowledgeActiveAnchorId, state.knowledgeActiveNodeId || null, q).catch((error) => setStatus(`Knowledge 追问失败：${errorMessage(error)}`, "err"));
     });
     window.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") return;
       hideKnowledgeSelectionToolbar();
       if (state.knowledgeRailOpen) { closeKnowledgeRail(); return; }
       if (state.aiDrawer) { setAiDrawer(""); return; }
-      const hadMermaidModal = !!root.querySelector(".bsb-mermaid-modal");
+      const hadMermaidModal = !!root.querySelector<MermaidElement>(".bsb-mermaid-modal");
       if (hadMermaidModal) {
         closeMermaidFullscreen();
         return;
@@ -3172,7 +3151,7 @@ export function mountWorkbench(SubBatch) {
       }
     });
 
-    root.querySelectorAll("button[data-act]").forEach((btn) => {
+    root.querySelectorAll<HTMLButtonElement>("button[data-act]").forEach((btn) => {
       const act = btn.getAttribute("data-act");
       if (act === "dock" || act === "collapse") return;
       btn.addEventListener("click", () => onAction(act));
@@ -3188,7 +3167,7 @@ export function mountWorkbench(SubBatch) {
     renderAiInputDrawer();
     refreshPreprocessModelSelector(root);
     setSettingsTab(state.ui?.settingsTab || "prompt", { silent: true });
-    const captureDrawer = root.querySelector('[data-role="capture-drawer"]');
+    const captureDrawer = root.querySelector<HTMLElement>('[data-role="capture-drawer"]');
     if (captureDrawer) captureDrawer.hidden = !state.captureDrawerOpen;
     renderAiResultTabs();
     setAiWorkbenchStage(state.ui?.aiStage || "preprocess", { silent: true }).catch(() => {});
@@ -3198,22 +3177,22 @@ export function mountWorkbench(SubBatch) {
     return root;
   }
 
-  function setWorkspace(view, opts) {
+  function setWorkspace(view: string, opts: { silent?: boolean } = {}) {
     const v = ["ai", "subs", "knowledge", "settings"].includes(view) ? view : "ai";
     const root = ensurePanel();
     if (state.ui) state.ui.view = v;
     root.dataset.panelView = v;
     applyKnowledgeLayoutVars(root);
-    const workspaceTitle = root.querySelector('[data-role="workspace-title"]');
+    const workspaceTitle = root.querySelector<HTMLElement>('[data-role="workspace-title"]');
     if (workspaceTitle) workspaceTitle.textContent = v === "subs" ? "字幕库" : v === "knowledge" ? "知识库" : v === "settings" ? "设置" : "AI 工作台";
-    root.querySelectorAll(".bsb-nav [data-view]").forEach((b) => {
+    root.querySelectorAll<HTMLElement>(".bsb-nav [data-view]").forEach((b) => {
       b.classList.toggle("active", b.getAttribute("data-view") === v);
     });
-    root.querySelectorAll("[data-view-panel]").forEach((p) => {
+    root.querySelectorAll<HTMLElement>("[data-view-panel]").forEach((p) => {
       p.classList.toggle("active", p.getAttribute("data-view-panel") === v);
     });
     if (v === "ai") setAiWorkbenchStage(state.ui?.aiStage || "preprocess", { silent: true }).catch(() => {});
-    if (v === "knowledge") renderKnowledgeWorkspace().catch((error) => setStatus(`知识库加载失败: ${error?.message || error}`, "err"));
+    if (v === "knowledge") renderKnowledgeWorkspace().catch((error) => setStatus(`知识库加载失败: ${errorMessage(error)}`, "err"));
     if (!opts?.silent) {
       saveUiGeom();
       if (v === "ai") refreshAiChips();
@@ -3230,17 +3209,17 @@ export function mountWorkbench(SubBatch) {
     }
   }
 
-  function setSettingsTab(tab, opts) {
+  function setSettingsTab(tab: string, opts: { silent?: boolean } = {}) {
     const root = ensurePanel();
     const next = ["prompt", "llm", "shortcuts", "appearance"].includes(tab) ? tab : "prompt";
     if (next !== "shortcuts" && state.shortcutRecordingId) state.shortcutRecordingId = "";
     if (state.ui) state.ui.settingsTab = next;
-    root.querySelectorAll("[data-settings-tab]").forEach((button) => {
+    root.querySelectorAll<HTMLElement>("[data-settings-tab]").forEach((button) => {
       const active = button.dataset.settingsTab === next;
       button.classList.toggle("active", active);
       button.setAttribute("aria-selected", active ? "true" : "false");
     });
-    root.querySelectorAll("[data-settings-pane]").forEach((pane) => {
+    root.querySelectorAll<HTMLElement>("[data-settings-pane]").forEach((pane) => {
       pane.classList.toggle("active", pane.dataset.settingsPane === next);
     });
     if (next === "shortcuts") renderShortcutSettings(root);
@@ -3315,7 +3294,7 @@ export function mountWorkbench(SubBatch) {
     }
   }
 
-  function applyCtpFlavor(flavor, { silent = false, persist = true } = {}) {
+  function applyCtpFlavor(flavor: unknown, { silent = false, persist = true } = {}) {
     const next = normalizeCtpFlavor(flavor);
     if (state.ui) state.ui.ctpFlavor = next;
     const root = document.getElementById(PANEL_ID) || ensurePanel();
@@ -3323,7 +3302,7 @@ export function mountWorkbench(SubBatch) {
     root.style.colorScheme = next === "latte" ? "light" : "dark";
     refreshMermaidTheme();
     if (persist) saveUiGeom();
-    if (document.getElementById(PANEL_ID)?.querySelector('[data-settings-pane="appearance"].active')) {
+    if (document.getElementById(PANEL_ID)?.querySelector<HTMLElement>('[data-settings-pane="appearance"].active')) {
       renderAppearanceSettings(root);
     }
     if (!silent) {
@@ -3333,7 +3312,7 @@ export function mountWorkbench(SubBatch) {
     return next;
   }
 
-  function renderAppearanceSettings(root) {
+  function renderAppearanceSettings(root: HTMLElement) {
     const host = root?.querySelector?.('[data-role="appearance-settings"]');
     if (!host) return;
     const current = normalizeCtpFlavor(state.ui?.ctpFlavor || DEFAULT_CTP_FLAVOR);
@@ -3359,7 +3338,6 @@ export function mountWorkbench(SubBatch) {
       </div>
     `;
   }
-
 
   function panelIsVisiblyOpen() {
     return !!(state.open && state.ui && (!state.ui.dock || state.ui.dockExpanded));
@@ -3395,7 +3373,7 @@ export function mountWorkbench(SubBatch) {
     setStatus("快捷打开：后处理结果", "ok");
   }
 
-  async function executeShortcutCommand(commandId) {
+  async function executeShortcutCommand(commandId: string) {
     const root = ensurePanel();
     const config = state.shortcutConfig || loadShortcutSettings();
     if (commandId === "toggle-panel") {
@@ -3487,35 +3465,35 @@ export function mountWorkbench(SubBatch) {
       if (!command) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      Promise.resolve(executeShortcutCommand(command.id)).catch((error) => setStatus(`快捷键执行失败：${error?.message || error}`, "err"));
+      Promise.resolve(executeShortcutCommand(command.id)).catch((error) => setStatus(`快捷键执行失败：${errorMessage(error)}`, "err"));
     }, true);
   }
 
-  function setPromptStageTab(stage, opts) {
+  function setPromptStageTab(stage: string, opts: { silent?: boolean; preserveEditor?: boolean } = {}) {
     const root = ensurePanel();
     const next = stage === "postprocess" ? "postprocess" : stage === "knowledge" ? "knowledge" : "preprocess";
     if (state.ui) state.ui.promptStage = next;
     if (!opts?.preserveEditor) {
       const prompts = state.promptProfiles?.length ? state.promptProfiles : loadPromptProfiles().prompts;
       const preferredId = next === "preprocess" ? state.activePrePromptId : next === "knowledge" ? state.activeKnowledgePromptId : state.activePromptId;
-      state.promptEditorId = prompts.find((p) => p.stage === next && p.id === preferredId)?.id
-        || prompts.find((p) => p.stage === next)?.id || "";
+      state.promptEditorId = prompts.find((p: { stage: string; id: string; }) => p.stage === next && p.id === preferredId)?.id
+        || prompts.find((p: { stage: string; }) => p.stage === next)?.id || "";
       state.promptSearch = "";
     }
-    root.querySelectorAll("[data-prompt-stage-tab]").forEach((button) => {
+    root.querySelectorAll<HTMLElement>("[data-prompt-stage-tab]").forEach((button) => {
       const active = button.dataset.promptStageTab === next;
       button.classList.toggle("active", active);
       button.setAttribute("aria-selected", active ? "true" : "false");
     });
-    root.querySelectorAll("[data-prompt-create-stage]").forEach((button) => {
+    root.querySelectorAll<HTMLElement>("[data-prompt-create-stage]").forEach((button) => {
       button.hidden = button.dataset.promptCreateStage !== next;
     });
-    const search = root.querySelector('[data-role="prompt-search"]');
+    const search = root.querySelector<HTMLInputElement>('[data-role="prompt-search"]');
     if (search) {
       search.placeholder = next === "preprocess" ? "搜索预处理 Prompt…" : next === "knowledge" ? "搜索 Knowledge Prompt…" : "搜索后处理 Prompt…";
       if (search.value !== state.promptSearch) search.value = state.promptSearch;
     }
-    const context = root.querySelector('[data-role="prompt-stage-context"]');
+    const context = root.querySelector<HTMLElement>('[data-role="prompt-stage-context"]');
     if (context) {
       context.innerHTML = next === "preprocess"
         ? '<span>预处理 · 原始字幕 → 规范化简体中文字幕稿</span><span>PRE</span>'
@@ -3532,9 +3510,9 @@ export function mountWorkbench(SubBatch) {
     if (!root) return;
     const sel = state.items.filter((it) => it.selected).length;
     const ok = state.items.filter((it) => it.selected && it.subStatus === "ok").length;
-    const elSel = root.querySelector('[data-role="chip-sel"]');
-    const elOk = root.querySelector('[data-role="chip-ok"]');
-    const elModel = root.querySelector('[data-role="chip-model"]');
+    const elSel = root.querySelector<HTMLElement>('[data-role="chip-sel"]');
+    const elOk = root.querySelector<HTMLElement>('[data-role="chip-ok"]');
+    const elModel = root.querySelector<HTMLElement>('[data-role="chip-model"]');
     if (elSel) elSel.textContent = String(sel);
     if (elOk) elOk.textContent = String(ok);
     if (elModel) {
@@ -3542,13 +3520,13 @@ export function mountWorkbench(SubBatch) {
       const runCount = tasks.reduce((n, t) => n + (t.modelIds || []).length, 0);
       elModel.textContent = `${tasks.length} 产物 · ${runCount} runs`;
     }
-    const inputLabel = root.querySelector('[data-role="ai-input-label"]');
+    const inputLabel = root.querySelector<HTMLElement>('[data-role="ai-input-label"]');
     if (inputLabel) {
       const ready = !!state.aiSessionInput;
       const mode = state.preprocessEnabled ? (state.aiSessionInput?.vars?.processedSubtitle ? "已规范化" : "预处理开启") : "原始字幕";
       inputLabel.textContent = `输入 · ${sel} 视频 · ${ready ? mode : "待运行"}`;
     }
-    const flowSummary = root.querySelector('[data-role="flow-summary"]');
+    const flowSummary = root.querySelector<HTMLElement>('[data-role="flow-summary"]');
     if (flowSummary) {
       const tasks = currentPostTasks().filter((t) => t.enabled !== false);
       const runs = tasks.reduce((n, t) => n + (t.modelIds || []).length, 0);
@@ -3557,7 +3535,7 @@ export function mountWorkbench(SubBatch) {
     renderAiResultTabs();
     applyAiWorkbenchStageUi();
     if (currentAiWorkbenchStage() === "preprocess") {
-      const status = root.querySelector('[data-role="ai-preprocess-status"]');
+      const status = root.querySelector<HTMLElement>('[data-role="ai-preprocess-status"]');
       if (status) {
         const raw = currentInputPreviewText("raw");
         const processed = currentInputPreviewText("processed");
@@ -3566,7 +3544,7 @@ export function mountWorkbench(SubBatch) {
     }
   }
 
-  function setStatus(text, cls) {
+  function setStatus(text: string|null, cls?: string) {
     const el = document.querySelector(`#${PANEL_ID} [data-role="status"]`);
     if (!el) return;
     el.textContent = text;
@@ -3604,8 +3582,8 @@ export function mountWorkbench(SubBatch) {
     ]);
     const batchActions = new Set(["copy", "copy-bvid", "dl-srt", "dl-txt", "dl-ok-only", "fetch-selected"]);
 
-    root.querySelectorAll("button[data-act]").forEach((button) => {
-      const act = button.getAttribute("data-act");
+    root.querySelectorAll<HTMLButtonElement>("button[data-act]").forEach((button) => {
+      const act = button.getAttribute("data-act") || "";
       if (act === "cancel") {
         button.style.display = operationBusy() ? "" : "none";
         button.disabled = false;
@@ -3631,12 +3609,12 @@ export function mountWorkbench(SubBatch) {
     refreshActionDisabledState();
   }
 
-  function setScanBusy(busy) {
+  function setScanBusy(busy: boolean) {
     appCall("libraryJob.setBusy", state, "scan", busy);
     syncOperationBusy();
     updateLibraryJobBar();
   }
-  function setBatchBusy(busy) {
+  function setBatchBusy(busy: boolean) {
     appCall("libraryJob.setBusy", state, "fetch", busy);
     syncOperationBusy();
     updateLibraryJobBar();
@@ -3651,16 +3629,16 @@ export function mountWorkbench(SubBatch) {
   }
   function updateLibraryJobBar() {
     const root = document.getElementById(PANEL_ID);
-    const bar = root?.querySelector?.('[data-role="library-jobbar"]');
+    const bar = root?.querySelector<HTMLElement>('[data-role="library-jobbar"]');
     if (!bar) return;
     const job = appCall("libraryJob.view", state);
     bar.hidden = !job.busy;
     bar.classList.toggle("is-on", job.busy);
     bar.classList.toggle("is-paused", job.busy && job.paused);
-    const title = bar.querySelector('[data-role="job-title"]');
-    const meta = bar.querySelector('[data-role="job-meta"]');
-    const meter = bar.querySelector('[data-role="job-meter"]');
-    const pauseBtn = bar.querySelector('[data-act="job-pause"]');
+    const title = bar.querySelector<HTMLElement>('[data-role="job-title"]');
+    const meta = bar.querySelector<HTMLElement>('[data-role="job-meta"]');
+    const meter = bar.querySelector<HTMLElement>('[data-role="job-meter"]');
+    const pauseBtn = bar.querySelector<HTMLElement>('[data-act="job-pause"]');
     if (title) title.textContent = job.title;
     if (meta) meta.textContent = job.meta;
     if (meter) meter.style.width = String(job.percent) + "%";
@@ -3687,9 +3665,6 @@ export function mountWorkbench(SubBatch) {
   }
 
   // 兼容旧调用；新代码不再使用全局 setBusy。
-  function setBusy(busy) {
-    setBatchBusy(busy);
-  }
 
   function flushPendingMainAction() {
     if (operationBusy()) return;
@@ -3724,7 +3699,7 @@ export function mountWorkbench(SubBatch) {
 
   function refreshContextUI() {
     const root = ensurePanel();
-    const modeSel = root.querySelector('[data-role="mode"]');
+    const modeSel = root.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-role="mode"]');
     if (modeSel) {
       // 下拉为源：用户手动选择会保留；非法值回退 state.mode
       if (MODE_OPTIONS.includes(modeSel.value)) state.mode = modeSel.value;
@@ -3736,15 +3711,16 @@ export function mountWorkbench(SubBatch) {
     const ctx = resolveContext();
     state.ctx = ctx;
 
-    const badge = root.querySelector('[data-role="type"]');
-    badge.textContent =
+    const badge = root.querySelector<HTMLElement>('[data-role="type"]');
+    if (badge) badge.textContent =
       (ctx.source === "manual" ? "手动 · " : "自动 · ") +
       (TYPE_LABEL[ctx.type] || ctx.type);
-    badge.classList.toggle("manual", ctx.source === "manual");
+    badge?.classList.toggle("manual", ctx.source === "manual");
 
-    root.querySelector('[data-role="ctx"]').textContent = formatCtxBits(ctx);
+    const contextLabel = root.querySelector<HTMLElement>('[data-role="ctx"]');
+    if (contextLabel) contextLabel.textContent = formatCtxBits(ctx);
 
-    const hint = root.querySelector('[data-role="auto-hint"]');
+    const hint = root.querySelector<HTMLElement>('[data-role="auto-hint"]');
     if (hint) {
       const autoLabel = TYPE_LABEL[auto.type] || auto.type;
       if (state.mode === "auto") {
@@ -3755,23 +3731,24 @@ export function mountWorkbench(SubBatch) {
     }
   }
 
-  function renderLibraryCounts(root) {
+  function renderLibraryCounts(root: HTMLElement) {
     const counts = { all: state.items.length, ok: 0, wait: 0, error: 0, empty: 0 };
     state.items.forEach((item) => { counts[SubBatch.SubBatchMonorepo.ui.libraryController.status(item)] += 1; });
     Object.entries(counts).forEach(([key, value]) => {
       const el = root.querySelector(`[data-library-count="${key}"]`);
       if (el) el.textContent = String(value);
     });
-    root.querySelectorAll("[data-library-filter]").forEach((button) => {
+    root.querySelectorAll<HTMLElement>("[data-library-filter]").forEach((button) => {
       button.classList.toggle("active", button.dataset.libraryFilter === state.libraryFilter);
     });
     return counts;
   }
 
-  function libraryItemRowHtml(it, i, { child = false, depth = 0 } = {}) {
+  function libraryItemRowHtml(it: LibraryGroupItem|null|undefined, i: number, { child = false, depth = 0 } = {}): string {
+    if (!it) return "";
     const status = SubBatch.SubBatchMonorepo.ui.libraryController.status(it);
     const stClass = status === "ok" ? "st-ok" : status === "empty" ? "st-empty" : status === "error" ? "st-err" : "st-wait";
-    const active = routeVideoKey(it.bvid, it.page || 1) === state.transcriptItemKey;
+    const active = routeVideoKey(it.bvid, Number(it.page) || 1) === state.transcriptItemKey;
     const page = Math.max(1, Number(it.page) || 1);
     const displayTitle = it.groupType === "selection" || it.groupType === "collection"
       ? (it.groupType === "selection"
@@ -3792,7 +3769,7 @@ export function mountWorkbench(SubBatch) {
       </div>`;
   }
 
-  function libraryFolderKindLabel(groupType, groupKey) {
+  function libraryFolderKindLabel(groupType: string, groupKey: string) {
     if (String(groupKey || "").startsWith("space-videos:")) return "视频";
     if (groupType === "collection") return "合集";
     if (groupType === "selection") return "视频选集";
@@ -3802,7 +3779,7 @@ export function mountWorkbench(SubBatch) {
   }
 
   /** Recursive folder/item HTML (supports 个人主页 UP → 选集/合集 nesting). */
-  function libraryRenderNodeHtml(node, depth = 0) {
+  function libraryRenderNodeHtml(node: LibraryRenderNode, depth = 0): string {
     if (node.type === "item") {
       return libraryItemRowHtml(node.entry.item, node.entry.index, {
         child: depth > 0,
@@ -3842,11 +3819,11 @@ export function mountWorkbench(SubBatch) {
 
   function renderList({ renderTranscript = true } = {}) {
     const root = document.getElementById(PANEL_ID);
-    const box = root?.querySelector('[data-role="list"]');
+    const box = root?.querySelector<HTMLElement>('[data-role="list"]');
     if (!box || !root) return;
     renderLibraryCounts(root);
     const entries = SubBatch.SubBatchMonorepo.ui.libraryController.filteredEntries(state.items, state.libraryQuery, state.libraryFilter);
-    const visible = root.querySelector('[data-role="library-visible-count"]');
+    const visible = root.querySelector<HTMLElement>('[data-role="library-visible-count"]');
     if (visible) visible.textContent = `${entries.length} / ${state.items.length}`;
 
     if (!state.items.length) {
@@ -3865,7 +3842,7 @@ export function mountWorkbench(SubBatch) {
     if (!state.libraryFolderCollapsed || typeof state.libraryFolderCollapsed !== "object") {
       state.libraryFolderCollapsed = {};
     }
-    let nodes = [];
+    let nodes: LibraryRenderNode[] = [];
     try {
       nodes = buildLibraryRenderNodes(entries, state.libraryFolderCollapsed);
     } catch (error) {
@@ -3876,7 +3853,7 @@ export function mountWorkbench(SubBatch) {
     }
     box.innerHTML = nodes.map((node) => libraryRenderNodeHtml(node, node.depth || 0)).join("");
     // 部分选中：父级勾选消失（不显示半选），与「全选才勾上」一致。
-    box.querySelectorAll('input[data-group-check][data-partial="1"]').forEach((el) => {
+    box.querySelectorAll<HTMLInputElement>('input[data-group-check][data-partial="1"]').forEach((el) => {
       el.checked = false;
       el.indeterminate = false;
     });
@@ -3884,12 +3861,12 @@ export function mountWorkbench(SubBatch) {
     if (renderTranscript) renderTranscriptPanel();
   }
 
-  function waitForPlayerElement(selector, timeout = 8000) {
-    return new Promise((resolve, reject) => {
-      const existing = document.querySelector(selector);
+  function waitForPlayerElement(selector: string, timeout = 8000) {
+    return new Promise<HTMLElement>((resolve, reject) => {
+      const existing = document.querySelector<HTMLElement>(selector);
       if (existing) return resolve(existing);
       const observer = new MutationObserver(() => {
-        const element = document.querySelector(selector);
+        const element = document.querySelector<HTMLElement>(selector);
         if (!element) return;
         observer.disconnect();
         clearTimeout(timer);
@@ -3903,18 +3880,18 @@ export function mountWorkbench(SubBatch) {
     });
   }
 
-  async function enablePlayerSubtitle(item) {
+  async function enablePlayerSubtitle(item: WorkbenchLibraryItem|null) {
     if (!state.autoEnablePlayerSubtitle) return;
     if (state.playerSubtitleOperation) return state.playerSubtitleOperation;
     state.playerSubtitleOperation = (async () => {
       const button = await waitForPlayerElement(PLAYER_SUBTITLE_SELECTORS.button, 9000);
-      let panel = document.querySelector(PLAYER_SUBTITLE_SELECTORS.panel);
+      let panel = document.querySelector<HTMLElement>(PLAYER_SUBTITLE_SELECTORS.panel);
       if (!panel || panel.offsetParent === null) {
         button.click();
         panel = await waitForPlayerElement(PLAYER_SUBTITLE_SELECTORS.panel, 2500);
         await sleep(100);
       }
-      const items = Array.from(panel.querySelectorAll(PLAYER_SUBTITLE_SELECTORS.item));
+      const items = Array.from(panel.querySelectorAll<HTMLElement>(PLAYER_SUBTITLE_SELECTORS.item));
       const activeLang = items.find((node) => node.classList.contains("bpx-state-active"));
       const closeOn = panel.querySelector(`${PLAYER_SUBTITLE_SELECTORS.close}.bpx-state-active`);
       if (!activeLang || closeOn) {
@@ -3924,12 +3901,12 @@ export function mountWorkbench(SubBatch) {
           || items.find((node) => /^(ai-zh|zh-CN|zh-Hans|zh)$/i.test(node.dataset.lan || ""))
           || items.find((node) => /中文/.test(node.textContent || ""))
           || items[0];
-        target.click();
+        target?.click();
         await sleep(140);
       }
       if (panel.offsetParent !== null) button.click();
     })().catch((error) => {
-      console.debug("[bili-subbatch] player subtitle not enabled", error?.message || error);
+      console.debug("[bili-subbatch] player subtitle not enabled", errorMessage(error));
     }).finally(() => {
       state.playerSubtitleOperation = null;
     });
@@ -3961,21 +3938,21 @@ export function mountWorkbench(SubBatch) {
     return first;
   }
 
-  function rememberTranscriptItem(item) {
+  function rememberTranscriptItem(item: WorkbenchLibraryItem) {
     if (!item) return null;
     state.transcriptItem = item;
     state.transcriptItemKey = routeVideoKey(item.bvid, item.page || 1);
     return item;
   }
 
-  function selectTranscriptItem(item, { focusSearch = false } = {}) {
+  function selectTranscriptItem(item: WorkbenchLibraryItem, { focusSearch = false } = {}) {
     if (!item) return;
     rememberTranscriptItem(item);
     state.transcriptQuery = "";
     state.transcriptFilteredIndexes = null;
     state.transcriptActiveCueIndex = -1;
     const root = ensurePanel();
-    const input = root.querySelector('[data-role="transcript-search"]');
+    const input = root.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-role="transcript-search"]');
     if (input) input.value = "";
     renderList();
     bindTranscriptVideoEvents();
@@ -3986,134 +3963,31 @@ export function mountWorkbench(SubBatch) {
     }
   }
 
-  function appendTranscriptHighlightedText(container, text, query) {
-    if (!query) {
-      container.textContent = text;
-      return;
-    }
-    const source = String(text || "");
-    const lower = source.toLocaleLowerCase();
-    const needle = query.toLocaleLowerCase();
-    let cursor = 0;
-    let index = lower.indexOf(needle);
-    while (index >= 0) {
-      if (index > cursor) container.append(document.createTextNode(source.slice(cursor, index)));
-      const mark = document.createElement("mark");
-      mark.textContent = source.slice(index, index + query.length);
-      container.append(mark);
-      cursor = index + query.length;
-      index = lower.indexOf(needle, cursor);
-    }
-    if (cursor < source.length) container.append(document.createTextNode(source.slice(cursor)));
-  }
-
-  function populateTranscriptTrackSelect(item) {
-    const select = document.querySelector(`#${PANEL_ID} [data-role="transcript-track"]`);
-    if (!select) return;
-    const tracks = Array.isArray(item?.tracks) ? item.tracks : [];
-    select.replaceChildren();
-    if (!tracks.length) {
-      select.appendChild(new Option(item?.lan_doc || item?.lan || "默认字幕", "0"));
-      select.disabled = true;
-      return;
-    }
-    tracks.forEach((track, index) => {
-      select.appendChild(new Option(track.lan_doc || track.lan || `字幕 ${index + 1}`, String(index)));
-    });
-    const active = Number.isInteger(item.activeTrackIndex) ? item.activeTrackIndex : bilibiliCall("subtitle.preferredIndex", tracks);
-    state.transcriptTrackIndex = active;
-    select.value = String(Math.max(0, active));
-    select.disabled = tracks.length <= 1;
-  }
-
   function renderTranscriptPanel() {
     const root = document.getElementById(PANEL_ID);
     if (!root) return;
-    const list = root.querySelector('[data-role="transcript-list"]');
-    const title = root.querySelector('[data-role="transcript-title"]');
-    const meta = root.querySelector('[data-role="transcript-meta"]');
-    const count = root.querySelector('[data-role="transcript-count"]');
-    if (!list || !title || !meta || !count) return;
-
-    const item = currentTranscriptItem();
-    if (!item || item.subStatus !== "ok" || !item.data?.length) {
-      title.textContent = item?.title || "当前视频字幕";
-      const status = item ? SubBatch.SubBatchMonorepo.ui.libraryController.status(item) : "";
-      meta.textContent = !item
-        ? "从左侧选择一个视频"
-        : status === "error"
-          ? `${item.bvid || ""}${item.page > 1 ? ` · P${item.page}` : ""} · 抓取失败`
-          : status === "empty"
-            ? `${item.bvid || ""}${item.page > 1 ? ` · P${item.page}` : ""} · 无字幕`
-            : `${item.bvid || ""}${item.page > 1 ? ` · P${item.page}` : ""} · 待抓取`;
-      count.textContent = "";
-      populateTranscriptTrackSelect(null);
-      list.innerHTML = item
-        ? `<div class="bsb-transcript-empty">${status === "error" ? "字幕抓取失败，可点击右上角刷新重试。" : status === "empty" ? "这个视频没有可读取字幕。" : "该视频尚未抓取字幕，可勾选后点击左侧「抓取所选」。"}</div>`
-        : `<div class="bsb-transcript-empty">从左侧选择一个视频。<br>已有字幕的项目会直接显示全文。</div>`;
-      return;
-    }
-
-    if (!state.transcriptItemKey) state.transcriptItemKey = routeVideoKey(item.bvid, item.page || 1);
-    title.textContent = item.title || `${item.bvid} 字幕`;
-    meta.textContent = `${item.cue_count || item.data.length} 条 · ${item.lan_doc || item.lan || "字幕"} · ${item.cachePath || item.source || "已加载"}`;
-    populateTranscriptTrackSelect(item);
-
-    const query = state.transcriptQuery.trim();
-    const indexes = SubBatch.SubBatchMonorepo.ui.transcriptController.filterIndexes(item.data, query);
-    state.transcriptFilteredIndexes = query ? indexes : null;
-    count.textContent = query ? `${indexes.length}/${item.data.length}` : String(item.data.length);
-
-    const epoch = ++state.transcriptRenderEpoch;
-    const fragment = document.createDocumentFragment();
-    for (const index of indexes) {
-      const cue = item.data[index];
-      const row = document.createElement("div");
-      row.className = "bsb-transcript-row";
-      if (index === state.transcriptActiveCueIndex) row.classList.add("active");
-      row.dataset.cueIndex = String(index);
-
-      const time = document.createElement("button");
-      time.type = "button";
-      time.className = "bsb-transcript-time";
-      time.dataset.transcriptTime = String(cue.from_sec ?? coreCall("parseSeconds", cue.from));
-      time.textContent = SubBatch.SubBatchMonorepo.ui.transcriptController.formatTime(cue.from_sec ?? coreCall("parseSeconds", cue.from));
-      time.title = `跳转到 ${SubBatch.SubBatchMonorepo.ui.transcriptController.formatTime(cue.from_sec ?? coreCall("parseSeconds", cue.from), true)}`;
-
-      const text = document.createElement("p");
-      text.className = "bsb-transcript-text";
-      appendTranscriptHighlightedText(text, cue.content || "", query);
-      row.append(time, text);
-      fragment.appendChild(row);
-    }
-    if (epoch !== state.transcriptRenderEpoch) return;
-    list.replaceChildren(fragment);
-    updateTranscriptActiveCue(currentVideoTime(), true);
+    const rendered = SubBatch.SubBatchMonorepo.ui.transcriptController.renderPanel(
+      root, currentTranscriptItem(), state, {
+        routeKey: routeVideoKey,
+        preferredTrack: (tracks) => bilibiliCall("subtitle.preferredIndex", tracks.map(track => ({ ...track }))),
+        parseSeconds: (value) => coreCall("parseSeconds", value),
+      },
+    );
+    if (rendered) updateTranscriptActiveCue(currentVideoTime(), true);
   }
 
   function currentVideoTime() {
     return Number(document.querySelector("video")?.currentTime || 0);
   }
 
-  function updateTranscriptActiveCue(time, force = false) {
-    const item = currentTranscriptItem();
-    if (!item?.data?.length) return;
-    const index = SubBatch.SubBatchMonorepo.ui.transcriptController.cueIndexAt(item.data, Number(time) || 0, (value) => coreCall("parseSeconds", value));
-    const root = document.getElementById(PANEL_ID);
-    if (index < 0) {
-      root?.querySelector(".bsb-transcript-row.active")?.classList.remove("active");
-      state.transcriptActiveCueIndex = -1;
-      return;
-    }
-    if (!force && index === state.transcriptActiveCueIndex) return;
-    root?.querySelector(".bsb-transcript-row.active")?.classList.remove("active");
-    state.transcriptActiveCueIndex = index;
-    const row = root?.querySelector(`.bsb-transcript-row[data-cue-index="${index}"]`);
-    row?.classList.add("active");
-    if (!row || !state.transcriptAutoFollow || state.ui?.view !== "subs") return;
-    if (!force && Date.now() < state.transcriptUserScrollUntil) return;
-    const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
-    row.scrollIntoView({ block: "center", behavior });
+  function updateTranscriptActiveCue(time: number, force = false) {
+    SubBatch.SubBatchMonorepo.ui.transcriptController.updateActiveCue(
+      document.getElementById(PANEL_ID), currentTranscriptItem()?.data || [], state, time, force, {
+        parseSeconds: (value) => coreCall("parseSeconds", value),
+        now: Date.now,
+        reducedMotion: () => matchMedia("(prefers-reduced-motion: reduce)").matches,
+      },
+    );
   }
 
   function bindTranscriptVideoEvents() {
@@ -4129,32 +4003,36 @@ export function mountWorkbench(SubBatch) {
     update();
   }
 
-  function seekTranscriptTime(seconds) {
+  function seekTranscriptTime(seconds: unknown) {
     const item = currentTranscriptItem();
-    if (!item || !Number.isFinite(seconds)) return;
+    if (!item || typeof seconds !== "number" || !Number.isFinite(seconds)) return;
     seekToVideoTimestamp(seconds, item.bvid, item.page || 1);
     updateTranscriptActiveCue(seconds, true);
   }
 
-  async function switchTranscriptTrack(index) {
+  async function switchTranscriptTrack(index: string|number) {
     const item = currentTranscriptItem();
-    if (!item?.tracks?.length || !item.tracks[index]) return;
+    const trackIndex = Number(index);
+    const track = Number.isInteger(trackIndex) ? item?.tracks?.[trackIndex] : undefined;
+    if (!item?.tracks?.length || !track || (typeof item.cid !== "string" && typeof item.cid !== "number")) return;
     state.transcriptSwitchAbort?.abort();
     const controller = new AbortController();
     state.transcriptSwitchAbort = controller;
-    setStatus(`正在切换到 ${item.tracks[index].lan_doc || item.tracks[index].lan || "字幕"}…`);
+    setStatus(`正在切换到 ${track.lan_doc || track.lan || "字幕"}…`);
     const base = {
-      bvid: item.bvid, aid: item.aid, cid: item.cid, title: item.title,
+      bvid: item.bvid,
+      aid: typeof item.aid === "string" || typeof item.aid === "number" ? item.aid : null,
+      cid: item.cid, title: item.title,
       author: item.author, pages: item.pages || [], page: item.page || 1,
     };
-    const result = await fetchTrackBodyFast(base, item.tracks, index, controller.signal);
+    const result = await fetchTrackBodyFast(base, item.tracks, trackIndex, controller.signal);
     if (controller.signal.aborted) return;
     Object.assign(item, result, { selected: item.selected !== false });
     rememberTranscriptItem(item);
     lruSet(state.fastSubtitleCache, `${item.bvid}:${item.cid}`, item);
     persistentCache.write(`subtitle:${item.bvid}:${item.cid}`, item, SUBTITLE_CACHE_TTL_MS).catch(() => {});
     state.transcriptQuery = "";
-    const input = ensurePanel().querySelector('[data-role="transcript-search"]');
+    const input = ensurePanel().querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-role="transcript-search"]');
     if (input) input.value = "";
     renderList();
     setStatus(`已切换 ${item.lan_doc || item.lan} · ${item.cue_count} 条`, "ok");
@@ -4174,14 +4052,14 @@ export function mountWorkbench(SubBatch) {
     await autoCaptureCurrentVideo("manual-refresh", { forceNetwork: true, requestedBvid: bvid, requestedPage: page });
   }
 
-  function escapeHtml(s) {
+  function escapeHtml(s: unknown) {
     return String(s || "")
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
   }
-  function escapeAttr(s) {
+  function escapeAttr(s: unknown) {
     return escapeHtml(s).replace(/'/g, "&#39;");
   }
 
@@ -4189,7 +4067,7 @@ export function mountWorkbench(SubBatch) {
     return state.items.filter((it) => it.selected);
   }
 
-  async function onAction(act) {
+  async function onAction(act: string|null) {
     if (act === "cancel" || act === "job-stop") {
       stopLibraryJob();
       return;
@@ -4234,11 +4112,12 @@ export function mountWorkbench(SubBatch) {
     }
     if (act === "post-task-add") {
       const prompts = state.promptProfiles?.length ? state.promptProfiles : loadPromptProfiles().prompts;
-      const posts = prompts.filter((p) => p.stage === "postprocess");
+      const posts = prompts.filter((p: { stage: string; }) => p.stage === "postprocess");
       if (!posts.length) { setStatus("请先在设置 → Prompt 新建一个后处理 Prompt", "err"); return; }
       const tasks = currentPostTasks().map((t) => ({ ...t, modelIds: [...(t.modelIds || [])] }));
       const used = new Set(tasks.map((t) => t.promptId));
-      const prompt = posts.find((p) => !used.has(p.id)) || posts.find((p) => p.id === state.activePromptId) || posts[0];
+      const prompt = posts.find((p: { id: string; }) => !used.has(p.id)) || posts.find((p: { id: string; }) => p.id === state.activePromptId) || posts[0];
+      if (!prompt) return;
       const modelIds = (state.aiProfiles?.length ? state.aiProfiles : loadAiProfiles()).filter((p) => p.enabled).map((p) => p.id);
       const task = normalizePostTask({ id: makePostTaskId(), promptId: prompt.id, modelIds, enabled: true, order: tasks.length }, tasks.length);
       tasks.push(task);
@@ -4249,9 +4128,9 @@ export function mountWorkbench(SubBatch) {
       return;
     }
     if (act === "prompt-save") {
-      const library = savePromptProfilesFromForm({ activeId: ensurePanel().querySelector('[data-role="prompt-select"]')?.value || state.activePromptId });
+      const library = savePromptProfilesFromForm({ activeId: ensurePanel().querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-role="prompt-select"]')?.value || state.activePromptId });
       fillPromptConfigForm(ensurePanel());
-      const current = library.prompts.find((p) => p.id === state.promptEditorId);
+      const current = library.prompts.find((p: { id: string; }) => p.id === state.promptEditorId);
       setStatus(`已保存 Prompt：${current?.name || getActivePromptProfile()?.name || "未命名"}`, "ok");
       return;
     }
@@ -4261,7 +4140,7 @@ export function mountWorkbench(SubBatch) {
       const next = coreCall("createPromptProfile", {
         id: coreCall("makePromptProfileId"),
         stage,
-        name: stage === "preprocess" ? `字幕预处理 ${library.prompts.filter((p) => p.stage === "preprocess").length + 1}` : stage === "knowledge" ? `知识追问 ${library.prompts.filter((p) => p.stage === "knowledge").length + 1}` : `后处理提示词 ${library.prompts.filter((p) => p.stage === "postprocess").length + 1}`,
+        name: stage === "preprocess" ? `字幕预处理 ${library.prompts.filter((p: { stage: string; }) => p.stage === "preprocess").length + 1}` : stage === "knowledge" ? `知识追问 ${library.prompts.filter((p: { stage: string; }) => p.stage === "knowledge").length + 1}` : `后处理提示词 ${library.prompts.filter((p: { stage: string; }) => p.stage === "postprocess").length + 1}`,
         hint: stage === "preprocess" ? "字幕预处理" : stage === "knowledge" ? "局部知识追问" : "后处理提示词",
         systemPrompt: "",
         userPromptTemplate: stage === "knowledge" ? "{{question}}" : "{{subtitle}}",
@@ -4282,7 +4161,7 @@ export function mountWorkbench(SubBatch) {
       const post = coreCall("createPromptProfile", DEFAULT_MERMAID_PROMPT, 1);
       const html = coreCall("createPromptProfile", DEFAULT_HTML_FOLIO_PROMPT, 2);
       const knowledge = coreCall("createPromptProfile", DEFAULT_KNOWLEDGE_PROMPT, 3);
-      const prompts = library.prompts.filter((p) => ![DEFAULT_PREPROCESS_PROMPT_ID, DEFAULT_PROMPT_ID, DEFAULT_HTML_FOLIO_PROMPT_ID, DEFAULT_KNOWLEDGE_PROMPT_ID].includes(p.id));
+      const prompts = library.prompts.filter((p: { id: string; }) => ![DEFAULT_PREPROCESS_PROMPT_ID, DEFAULT_PROMPT_ID, DEFAULT_HTML_FOLIO_PROMPT_ID, DEFAULT_KNOWLEDGE_PROMPT_ID].includes(p.id));
       prompts.unshift(knowledge);
       prompts.unshift(html);
       prompts.unshift(post);
@@ -4298,7 +4177,7 @@ export function mountWorkbench(SubBatch) {
     if (act === "ai-save") {
       const profiles = saveAiProfilesFromForm();
       fillAiConfigForm(ensurePanel());
-      const current = profiles.find((p) => p.id === state.aiEditorId);
+      const current = profiles.find((p: { id: string; }) => p.id === state.aiEditorId);
       setStatus(`已保存 LLM：${current?.name || "未命名"} · ${profiles.filter((x) => x.enabled).length}/${profiles.length} 启用`, "ok");
       if (state.autoAnalyzeEnabled) {
         const item = currentTranscriptItem();
@@ -4311,12 +4190,12 @@ export function mountWorkbench(SubBatch) {
     }
     if (act === "ai-reset") {
       const prev = loadAiProfiles();
-      const first = prev.find((x) => x.enabled) || prev[0] || {};
+      const first = prev.find((x) => x.enabled) || prev[0];
       const resetProfile = coreCall("createAiProfile", {
         ...AI_DEFAULTS,
         name: "默认模型",
-        apiKey: first.apiKey || "",
-        baseUrl: first.baseUrl || "",
+        apiKey: first?.apiKey || "",
+        baseUrl: first?.baseUrl || "",
       }, 0);
       saveAiProfiles([resetProfile]);
       state.aiEditorId = resetProfile.id;
@@ -4327,7 +4206,7 @@ export function mountWorkbench(SubBatch) {
     }
     if (act === "ai-profile-add") {
       const profiles = saveAiProfilesFromForm();
-      const source = profiles.find((p) => p.id === state.aiEditorId) || profiles[profiles.length - 1] || coreCall("createAiProfile", AI_DEFAULTS, 0);
+      const source = profiles.find((p: { id: string; }) => p.id === state.aiEditorId) || profiles[profiles.length - 1] || coreCall("createAiProfile", AI_DEFAULTS, 0);
       const next = coreCall("createAiProfile", {
         ...source,
         id: coreCall("makeAiProfileId"),
@@ -4393,7 +4272,7 @@ export function mountWorkbench(SubBatch) {
     if (act === "ai-stick") {
       if (state.aiStickBottom && !state.aiUserReading) {
         // 关跟随 → 进入阅读锁
-        detachAiFollow("toggle");
+        detachAiFollow();
         setStatus("已暂停跟随 · 可自由滚动 · 点「↓ 最新」回到底部");
       } else {
         resumeAiFollow();
@@ -4454,7 +4333,7 @@ export function mountWorkbench(SubBatch) {
     }
     if (act === "capture-toggle") {
       state.captureDrawerOpen = !state.captureDrawerOpen;
-      const drawer = ensurePanel().querySelector('[data-role="capture-drawer"]');
+      const drawer = ensurePanel().querySelector<HTMLElement>('[data-role="capture-drawer"]');
       if (drawer) drawer.hidden = !state.captureDrawerOpen;
       if (state.captureDrawerOpen) refreshContextUI();
       return;
@@ -4479,7 +4358,7 @@ export function mountWorkbench(SubBatch) {
       state.transcriptActiveCueIndex = -1;
       state.libraryQuery = "";
       state.libraryFilter = "all";
-      const librarySearch = ensurePanel().querySelector('[data-role="library-search"]');
+      const librarySearch = ensurePanel().querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-role="library-search"]');
       if (librarySearch) librarySearch.value = "";
       renderList();
       setStatus("已清空");
@@ -4492,7 +4371,7 @@ export function mountWorkbench(SubBatch) {
       return;
     }
     if (act === "folder-collapse-all") {
-      const collapsed = {};
+      const collapsed: Record<string, boolean> = {};
       state.items.forEach((item) => {
         const key = resolveLibraryGroupKey(item);
         if (key && !key.startsWith("single:")) collapsed[key] = true;
@@ -4532,42 +4411,41 @@ export function mountWorkbench(SubBatch) {
     }
   }
 
-  function clipboardWrite(text) {
+  function clipboardWrite(text: string) {
     if (typeof GM_setClipboard === "function") GM_setClipboard(text, "text");
     else if (navigator.clipboard) navigator.clipboard.writeText(text);
   }
 
   // ─── AI config / stream / render ────────────────────────────────────────
-  function storageGet(key, fallback) {
+  function storageGet(key: string, fallback: string|number|boolean|null) {
     try {
       if (typeof GM_getValue === "function") {
         const v = GM_getValue(key, null);
         if (v != null && v !== "") return v;
       }
-    } catch (_) { /* ignore */ }
+    } catch  { /* ignore */ }
     try {
       const legacy = localStorage.getItem(key);
       if (legacy != null) return legacy;
-    } catch (_) { /* ignore */ }
+    } catch  { /* ignore */ }
     return fallback;
   }
 
-  function storageSet(key, value) {
+  function storageSet(key: string, value: unknown) {
     let storedByGm = false;
     try {
       if (typeof GM_setValue === "function") {
         GM_setValue(key, value);
         storedByGm = true;
       }
-    } catch (_) { /* ignore */ }
+    } catch  { /* ignore */ }
     // 密钥优先只进入 userscript 隔离存储；仅无 GM API 时才退回页面 localStorage。
     if (!storedByGm) {
-      try { localStorage.setItem(key, value); } catch (_) { /* ignore */ }
+      try { localStorage.setItem(key, String(value)); } catch  { /* ignore */ }
     } else {
-      try { localStorage.removeItem(key); } catch (_) { /* migrate legacy */ }
+      try { localStorage.removeItem(key); } catch  { /* migrate legacy */ }
     }
   }
-
 
   function shortcutDefaults() {
     return {
@@ -4593,7 +4471,7 @@ export function mountWorkbench(SubBatch) {
       if (parsedSchemaVersion < 2 && parsedBindings["toggle-panel"] === "Ctrl+Alt+KeyB") {
         parsedBindings["toggle-panel"] = "Ctrl+KeyB";
       }
-      const bindings = { ...defaults.bindings };
+      const bindings: Record<string, string> = { ...defaults.bindings };
       for (const command of SHORTCUT_COMMANDS) {
         if (Object.prototype.hasOwnProperty.call(parsedBindings, command.id)) {
           bindings[command.id] = String(parsedBindings[command.id] || "");
@@ -4607,7 +4485,7 @@ export function mountWorkbench(SubBatch) {
         preferredDock: parsed.preferredDock === "left" ? "left" : "right",
         bindings,
       };
-    } catch (_) {
+    } catch  {
       return defaults;
     }
   }
@@ -4627,12 +4505,12 @@ export function mountWorkbench(SubBatch) {
     return next;
   }
 
-  function shortcutKeyLabel(code) {
+  function shortcutKeyLabel(code: string) {
     const c = String(code || "");
     if (/^Key[A-Z]$/.test(c)) return c.slice(3);
     if (/^Digit[0-9]$/.test(c)) return c.slice(5);
     if (/^Numpad[0-9]$/.test(c)) return `Num ${c.slice(6)}`;
-    const labels = {
+    const labels: Record<string, string> = {
       Space: "Space", Enter: "Enter", Tab: "Tab", Escape: "Esc", Backspace: "Backspace", Delete: "Delete",
       ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→",
       Minus: "-", Equal: "=", BracketLeft: "[", BracketRight: "]", Semicolon: ";", Quote: "'", Comma: ",", Period: ".", Slash: "/", Backslash: "\\", Backquote: "`",
@@ -4643,7 +4521,7 @@ export function mountWorkbench(SubBatch) {
     return c.replace(/^(Arrow|Numpad)/, "") || c;
   }
 
-  function shortcutChordFromEvent(event) {
+  function shortcutChordFromEvent(event: KeyboardEvent) {
     const code = String(event?.code || "");
     if (!code || /^(Control|Shift|Alt|Meta)(Left|Right)?$/.test(code)) return "";
     const parts = [];
@@ -4655,18 +4533,18 @@ export function mountWorkbench(SubBatch) {
     return parts.join("+");
   }
 
-  function shortcutDisplayChord(chord) {
+  function shortcutDisplayChord(chord: string) {
     const parts = String(chord || "").split("+").filter(Boolean);
     if (!parts.length) return "未绑定";
     return parts.map((part) => ["Ctrl", "Alt", "Shift", "Meta"].includes(part) ? part : shortcutKeyLabel(part)).join(" + ");
   }
 
-  function shortcutHasStrongModifier(chord) {
+  function shortcutHasStrongModifier(chord: string) {
     const parts = new Set(String(chord || "").split("+"));
     return parts.has("Ctrl") || parts.has("Alt") || parts.has("Meta");
   }
 
-  function shortcutConflictInfo(chord, commandId = "") {
+  function shortcutConflictInfo(chord: string, commandId = "") {
     const value = String(chord || "");
     if (!value) return { level: "off", text: "未绑定" };
     const duplicate = SHORTCUT_COMMANDS.find((command) => command.id !== commandId && state.shortcutConfig?.bindings?.[command.id] === value);
@@ -4689,7 +4567,7 @@ export function mountWorkbench(SubBatch) {
     return { level: "ok", text: "推荐组合" };
   }
 
-  function shortcutEditableTarget(target) {
+  function shortcutEditableTarget(target: EventTarget|null) {
     if (!(target instanceof Element)) return false;
     return !!target.closest('input, textarea, select, [contenteditable="true"], [contenteditable="plaintext-only"]');
   }
@@ -4699,13 +4577,13 @@ export function mountWorkbench(SubBatch) {
     if (!root) return;
     const toggle = state.shortcutConfig?.bindings?.["toggle-panel"] || "";
     const label = shortcutDisplayChord(toggle);
-    const fab = root.querySelector(".bsb-fab");
-    const dockTab = root.querySelector(".bsb-dock-tab");
+    const fab = root.querySelector<HTMLElement>(".bsb-fab");
+    const dockTab = root.querySelector<HTMLElement>(".bsb-dock-tab");
     if (fab) fab.title = toggle ? `SubBatch 工作台 · ${label}` : "SubBatch 工作台";
     if (dockTab) dockTab.title = toggle ? `展开 SubBatch 工作台 · ${label}` : "展开 SubBatch 工作台";
   }
 
-  function shortcutCommandHtml(command) {
+  function shortcutCommandHtml(command: { id: string; label: string; hint: string; }) {
     const chord = state.shortcutConfig?.bindings?.[command.id] || "";
     const conflict = shortcutConflictInfo(chord, command.id);
     const recording = state.shortcutRecordingId === command.id;
@@ -4713,7 +4591,7 @@ export function mountWorkbench(SubBatch) {
   }
 
   function renderShortcutSettings(root = document.getElementById(PANEL_ID)) {
-    const host = root?.querySelector('[data-role="shortcut-settings"]');
+    const host = root?.querySelector<HTMLElement>('[data-role="shortcut-settings"]');
     if (!host) return;
     const config = state.shortcutConfig || loadShortcutSettings();
     host.innerHTML = `<div class="bsb-shortcut-page"><div class="bsb-shortcut-hero"><div><span class="bsb-shortcut-kicker">QUICK SUMMON</span><h3>快捷召唤</h3><p>快捷键只在 Bilibili 页面生效。正在输入文字时默认不触发，避免干扰搜索、弹幕和表单。</p></div><label class="bsb-flow-switch"><input type="checkbox" data-shortcut-pref="enabled" ${config.enabled ? "checked" : ""}><span class="bsb-flow-switch-track" aria-hidden="true"></span><span class="bsb-flow-switch-text">${config.enabled ? "已开启" : "已关闭"}</span></label></div>
@@ -4721,7 +4599,7 @@ export function mountWorkbench(SubBatch) {
       <section class="bsb-shortcut-card"><div class="bsb-shortcut-section-title"><strong>命令快捷键</strong><span>点击快捷键框后直接按新的组合；Esc 取消，Backspace / Delete 清除。</span></div><div class="bsb-shortcut-list">${SHORTCUT_COMMANDS.map(shortcutCommandHtml).join("")}</div><div class="bsb-shortcut-foot"><span>建议使用 Ctrl + Alt + 字母/数字，避开 Chrome 与 B 站播放器常用键。</span><button type="button" class="bsb-btn ghost" data-shortcut-reset-all>恢复默认快捷键</button></div></section></div>`;
   }
 
-  function ensureBuiltinStagePrompts(prompts) {
+  function ensureBuiltinStagePrompts(prompts: PromptProfile[]) {
     const list = [...(prompts || [])];
     if (!list.some((p) => p.stage === "preprocess")) list.unshift(coreCall("createPromptProfile", DEFAULT_PREPROCESS_PROMPT, 0));
     if (!list.some((p) => p.id === DEFAULT_HTML_FOLIO_PROMPT_ID)) {
@@ -4734,7 +4612,7 @@ export function mountWorkbench(SubBatch) {
     return list;
   }
 
-  function migrateBuiltinPromptLanguageRules(prompts, storedVersion) {
+  function migrateBuiltinPromptLanguageRules(prompts: PromptProfile[], storedVersion: number) {
     if (Number(storedVersion || 0) >= 3) return { prompts, changed: false };
     let changed = false;
     const next = (prompts || []).map((prompt) => {
@@ -4755,7 +4633,7 @@ export function mountWorkbench(SubBatch) {
     return { prompts: next, changed };
   }
 
-  function migrateBuiltinPreprocessChunkRules(prompts, storedVersion) {
+  function migrateBuiltinPreprocessChunkRules(prompts: PromptProfile[], storedVersion: number) {
     if (Number(storedVersion || 0) >= 4) return { prompts, changed: false };
     let changed = false;
     const next = (prompts || []).map((prompt) => {
@@ -4778,7 +4656,7 @@ export function mountWorkbench(SubBatch) {
     return { prompts: next, changed };
   }
 
-  function migrateBuiltinKnowledgeHighlightRules(prompts, storedVersion) {
+  function migrateBuiltinKnowledgeHighlightRules(prompts: PromptProfile[], storedVersion: number) {
     if (Number(storedVersion || 0) >= 6) return { prompts, changed: false };
     let changed = false;
     const next = (prompts || []).map((prompt) => {
@@ -4798,7 +4676,7 @@ export function mountWorkbench(SubBatch) {
     return { prompts: next, changed };
   }
 
-  function migrateBuiltinHtmlFolioPrompt(prompts, storedVersion) {
+  function migrateBuiltinHtmlFolioPrompt(prompts: PromptProfile[], storedVersion: number) {
     if (Number(storedVersion || 0) >= 9) return { prompts, changed: false };
     let changed = false;
     const next = (prompts || []).map((prompt) => {
@@ -4847,7 +4725,7 @@ export function mountWorkbench(SubBatch) {
         if (migrated.changed) {
           try {
             storageSet(PROMPT_STORE_KEY, JSON.stringify({ version: PROMPT_SCHEMA_VERSION, activeId: ids.activeId, activePreprocessId: ids.activePreprocessId, activeKnowledgeId: ids.activeKnowledgeId, prompts }));
-          } catch (_) { /* ignore migration persistence failure */ }
+          } catch  { /* ignore migration persistence failure */ }
         }
         state.promptProfiles = prompts;
         state.activePromptId = ids.activeId;
@@ -4855,7 +4733,7 @@ export function mountWorkbench(SubBatch) {
         state.activeKnowledgePromptId = ids.activeKnowledgeId;
         return { prompts, ...ids };
       }
-    } catch (_) {
+    } catch  {
       /* fall through to first-run default */
     }
     const pre = coreCall("createPromptProfile", DEFAULT_PREPROCESS_PROMPT, 0);
@@ -4870,8 +4748,8 @@ export function mountWorkbench(SubBatch) {
     return { prompts, activeId: post.id, activePreprocessId: pre.id, activeKnowledgeId: knowledge.id };
   }
 
-  function savePromptProfiles(prompts, activeId, activePreprocessId = state.activePrePromptId, activeKnowledgeId = state.activeKnowledgePromptId) {
-    let normalized = coreCall("normalizePromptProfiles", prompts);
+  function savePromptProfiles(prompts: unknown, activeId: string, activePreprocessId = state.activePrePromptId, activeKnowledgeId = state.activeKnowledgePromptId) {
+    const normalized = coreCall("normalizePromptProfiles", prompts);
     const ids = coreCall("resolvePromptActiveIds", normalized, String(activeId || ""), String(activePreprocessId || ""), String(activeKnowledgeId || ""));
     try {
       storageSet(PROMPT_STORE_KEY, JSON.stringify({
@@ -4881,7 +4759,7 @@ export function mountWorkbench(SubBatch) {
         activeKnowledgeId: ids.activeKnowledgeId,
         prompts: normalized,
       }));
-    } catch (_) {
+    } catch  {
       /* ignore */
     }
     state.promptProfiles = normalized;
@@ -4898,45 +4776,43 @@ export function mountWorkbench(SubBatch) {
     const prompts = state.promptProfiles?.length || state.activeKnowledgePromptId
       ? state.promptProfiles
       : loadPromptProfiles().prompts;
-    return prompts.find((p) => p.id === state.activeKnowledgePromptId && p.stage === "knowledge")
-      || prompts.find((p) => p.stage === "knowledge") || null;
+    return prompts.find((p: { id: string; stage: string; }) => p.id === state.activeKnowledgePromptId && p.stage === "knowledge")
+      || prompts.find((p: { stage: string; }) => p.stage === "knowledge") || null;
   }
 
   function getActivePromptProfile() {
     const prompts = state.promptProfiles?.length || state.activePromptId
       ? state.promptProfiles
       : loadPromptProfiles().prompts;
-    return prompts.find((p) => p.id === state.activePromptId && p.stage === "postprocess")
-      || prompts.find((p) => p.stage === "postprocess") || null;
+    return prompts.find((p: { id: string; stage: string; }) => p.id === state.activePromptId && p.stage === "postprocess")
+      || prompts.find((p: { stage: string; }) => p.stage === "postprocess") || null;
   }
 
   function getActivePreprocessPromptProfile() {
     const prompts = state.promptProfiles?.length || state.activePrePromptId
       ? state.promptProfiles
       : loadPromptProfiles().prompts;
-    return prompts.find((p) => p.id === state.activePrePromptId && p.stage === "preprocess")
-      || prompts.find((p) => p.stage === "preprocess") || null;
+    return prompts.find((p: { id: string; stage: string; }) => p.id === state.activePrePromptId && p.stage === "preprocess")
+      || prompts.find((p: { stage: string; }) => p.stage === "preprocess") || null;
   }
-
-
 
   // ─── Knowledge Drill-down · v6 ─────────────────────────────────────────
   function makeKnowledgeId(prefix = "k") {
     return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
   }
 
-  let knowledgeRepository = null;
+  let knowledgeRepository: ReturnType<typeof createKnowledgeRepository> | null = null;
   function currentKnowledgeRepository() {
     if (!knowledgeRepository) {
       const factory = appFn("knowledge.createRepository");
       if (factory && globalThis.indexedDB) {
-        knowledgeRepository = factory(globalThis.indexedDB);
+        knowledgeRepository = SubBatch.SubBatchMonorepo.app.knowledge.createRepository(globalThis.indexedDB);
       }
     }
     return knowledgeRepository;
   }
 
-  function knowledgeStoreRequest(storeName, mode, handler) {
+  function knowledgeStoreRequest<T>(storeName: string, mode: IDBTransactionMode, handler: (store:IDBObjectStore)=>IDBRequest<T>) {
     const repository = currentKnowledgeRepository();
     if (!repository) return Promise.reject(new Error("IndexedDB unavailable"));
     return repository.request(storeName, mode, handler);
@@ -4948,9 +4824,9 @@ export function mountWorkbench(SubBatch) {
         knowledgeStoreRequest(KNOWLEDGE_ANCHOR_STORE, "readonly", (s) => s.getAll()),
         knowledgeStoreRequest(KNOWLEDGE_NODE_STORE, "readonly", (s) => s.getAll()),
       ]);
-      state.knowledgeAnchors = appCall("knowledge.sortAnchors", anchors);
-      const { nodes: reconciledNodes, recovered } = appCall(
-        "knowledge.reconcileNodes", nodes, state.knowledgeNodes, !!state.knowledgeBusy, knowledgeVisibleAnswer,
+      state.knowledgeAnchors = SubBatch.SubBatchMonorepo.app.knowledge.sortAnchors(anchors as KnowledgeAnchor[]);
+      const { nodes: reconciledNodes, recovered } = SubBatch.SubBatchMonorepo.app.knowledge.reconcileNodes(
+        nodes as WorkbenchKnowledgeNode[], state.knowledgeNodes, !!state.knowledgeBusy, knowledgeVisibleAnswer,
       );
       state.knowledgeNodes = reconciledNodes;
       if (recovered.length) Promise.all(recovered.map((node) => knowledgeStoreRequest(KNOWLEDGE_NODE_STORE, "readwrite", (s) => s.put(node)))).catch(() => {});
@@ -4962,21 +4838,21 @@ export function mountWorkbench(SubBatch) {
     return { anchors: state.knowledgeAnchors, nodes: state.knowledgeNodes };
   }
 
-  async function knowledgePutAnchor(anchor) {
-    return appCall("knowledge.saveAnchor", state.knowledgeAnchors, anchor,
+  async function knowledgePutAnchor(anchor: KnowledgeAnchor) {
+    return SubBatch.SubBatchMonorepo.app.knowledge.saveAnchor(state.knowledgeAnchors, anchor,
       (value) => knowledgeStoreRequest(KNOWLEDGE_ANCHOR_STORE, "readwrite", (store) => store.put(value)));
   }
 
-  async function knowledgePutNode(node) {
-    return appCall("knowledge.saveNode", state.knowledgeNodes, node,
+  async function knowledgePutNode(node: WorkbenchKnowledgeNode) {
+    return SubBatch.SubBatchMonorepo.app.knowledge.saveNode(state.knowledgeNodes, node,
       (value) => knowledgeStoreRequest(KNOWLEDGE_NODE_STORE, "readwrite", (store) => store.put(value)));
   }
 
-  async function knowledgeDeleteAnchor(anchorId) {
+  async function knowledgeDeleteAnchor(anchorId: string) {
     if (state.knowledgeRuntime && state.knowledgeActiveAnchorId === anchorId) abortKnowledgeRequest();
     const repository = currentKnowledgeRepository();
     if (!repository) throw new Error("IndexedDB unavailable");
-    const remaining = await appCall("knowledge.deleteAnchorCommitted",
+    const remaining = await SubBatch.SubBatchMonorepo.app.knowledge.deleteAnchorCommitted(
       state.knowledgeAnchors, state.knowledgeNodes, anchorId,
       (id) => repository.deleteAnchor(id));
     state.knowledgeAnchors = remaining.anchors;
@@ -4987,50 +4863,50 @@ export function mountWorkbench(SubBatch) {
     }
   }
 
-  function knowledgeSourceKey(bvid, page) {
+  function knowledgeSourceKey(bvid: string | undefined, page: number) {
     return `${String(bvid || "").toUpperCase()}:P${Math.max(1, Number(page) || 1)}`;
   }
 
   function currentKnowledgeSource() {
     const routeKey = currentRouteVideoKey();
     const current = routeKey
-      ? (state.items.find((it) => routeVideoKey(it.bvid, it.page || 1) === routeKey)
+      ? (state.items.find((it) => routeVideoKey(it.bvid, Number(it.page) || 1) === routeKey)
         || (routeVideoKey(state.transcriptItem?.bvid, state.transcriptItem?.page || 1) === routeKey ? state.transcriptItem : null))
       : (state.transcriptItem || selectedItems()[0] || null);
-    const bvid = current?.bvid || state.aiSessionInput?.vars?.bvid?.match(/BV[\w]+/i)?.[0] || "";
+    const bvid = current?.bvid || String(state.aiSessionInput?.vars?.bvid || "").match(/BV[\w]+/i)?.[0] || "";
     const page = Math.max(1, Number(current?.page || 1));
     return {
       sourceKey: knowledgeSourceKey(bvid, page),
       bvid,
       page,
-      title: current?.title || state.aiSessionInput?.vars?.title || document.title || bvid,
-      author: current?.author || state.aiSessionInput?.vars?.author || "",
+      title: current?.title || String(state.aiSessionInput?.vars?.title || document.title || bvid),
+      author: current?.author || String(state.aiSessionInput?.vars?.author || ""),
     };
   }
 
-  function knowledgeNodesForAnchor(anchorId) {
+  function knowledgeNodesForAnchor(anchorId: string) {
     return SubBatch.SubBatchMonorepo.ui.knowledgeNavigation.nodesForAnchor(state.knowledgeNodes || [], anchorId);
   }
 
-  function knowledgeAnchorById(id) {
+  function knowledgeAnchorById(id: string) {
     return SubBatch.SubBatchMonorepo.ui.knowledgeNavigation.anchorById(state.knowledgeAnchors || [], id);
   }
 
-  function knowledgeNodeById(id) {
+  function knowledgeNodeById(id: string) {
     return SubBatch.SubBatchMonorepo.ui.knowledgeNavigation.nodeById(state.knowledgeNodes || [], id);
   }
 
-  function parseKnowledgeOutput(raw) {
+  function parseKnowledgeOutput(raw: string) {
     const source = String(raw || "");
     const match = source.match(/<suggestions>([\s\S]*?)(?:<\/suggestions>|$)/i);
     const answer = source.replace(/\n?<suggestions>[\s\S]*$/i, "").trim();
     const suggestions = match
-      ? match[1].split(/\r?\n/).map((x) => x.replace(/^\s*[-*\d.)]+\s*/, "").trim()).filter(Boolean).slice(0, 4)
+      ? (match[1] || "").split(/\r?\n/).map((x) => x.replace(/^\s*[-*\d.)]+\s*/, "").trim()).filter(Boolean).slice(0, 4)
       : [];
     return { answer, suggestions };
   }
 
-  function knowledgeVisibleAnswer(raw) {
+  function knowledgeVisibleAnswer(raw: string) {
     return parseKnowledgeOutput(raw).answer || String(raw || "").replace(/<suggestions>[\s\S]*$/i, "").trim();
   }
 
@@ -5038,13 +4914,15 @@ export function mountWorkbench(SubBatch) {
    * Post-process sanitized HTML: turn ==phrase== into highlighter marks.
    * Tree-walk text nodes only (skip code/math/links) so `a == b` in code stays intact.
    */
-  function decorateMarkdownHighlights(html) {
+  function decorateMarkdownHighlights(html: string) {
     if (typeof document === "undefined") return String(html || "");
     const tpl = document.createElement("template");
     tpl.innerHTML = String(html || "");
     const walker = document.createTreeWalker(tpl.content, NodeFilter.SHOW_TEXT);
-    const nodes = [];
-    while (walker.nextNode()) nodes.push(walker.currentNode);
+    const nodes: Text[] = [];
+    while (walker.nextNode()) {
+      if (walker.currentNode instanceof Text) nodes.push(walker.currentNode);
+    }
 
     for (const node of nodes) {
       const parent = node.parentElement;
@@ -5096,19 +4974,13 @@ export function mountWorkbench(SubBatch) {
     return tpl.innerHTML;
   }
 
-  function knowledgeMarkdownHtml(text) {
-    const source = String(text || "");
-    const { md, maths } = prepareMarkdownMath(source);
-    return knowledgeChunkToHtml(md, maths);
-  }
-
   /**
    * Split pre-processed markdown into reading blocks.
    * Code fences must be protected first so blank lines inside ``` do not split cards.
    * Math should already be @@BSBMATHn@@ placeholders (from prepareMarkdownMath).
    */
-  function knowledgeAnswerReadingBlocks(text) {
-    const codes = [];
+  function knowledgeAnswerReadingBlocks(text: string) {
+    const codes: string[] = [];
     let source = String(text || "").replace(/\r\n?/g, "\n").trim();
     if (!source) return [];
     source = source.replace(/```[\s\S]*?```/g, (m) => {
@@ -5116,14 +4988,14 @@ export function mountWorkbench(SubBatch) {
       codes.push(m);
       return `@@BSBSPLITCODE${i}@@`;
     });
-    const restore = (chunk) =>
+    const restore = (chunk: string) =>
       String(chunk || "").replace(/@@BSBSPLITCODE(\d+)@@/g, (_, id) => {
         const i = Number(id);
         return codes[i] != null ? codes[i] : "";
       });
 
     const blocks = [];
-    let paragraph = [];
+    let paragraph: string[] = [];
     let topic = "";
     const flush = () => {
       const value = paragraph.join("\n").trim();
@@ -5147,7 +5019,7 @@ export function mountWorkbench(SubBatch) {
       const heading = trimmed.match(/^#{1,4}\s+(.+)$/);
       if (heading) {
         flush();
-        topic = heading[1].replace(/[*_`]+/g, "").trim();
+        topic = (heading[1] || "").replace(/[*_`]+/g, "").trim();
         blocks.push({ type: "heading", text: topic });
         continue;
       }
@@ -5169,7 +5041,7 @@ export function mountWorkbench(SubBatch) {
     if (hasCodeSyntax(source)) {
       try {
         await ensureHighlight();
-      } catch (_) {
+      } catch  {
         /* optional */
       }
     }
@@ -5179,14 +5051,14 @@ export function mountWorkbench(SubBatch) {
    * Parse one knowledge markdown chunk with shared maths table.
    * Order: marked → KaTeX placeholders → sanitize → ==highlight==.
    */
-  function knowledgeChunkToHtml(chunk, maths) {
+  function knowledgeChunkToHtml(chunk: string, maths: readonly {tex:string;display:boolean}[]) {
     let html = "";
     try {
       html =
         typeof marked !== "undefined" && marked?.parse
           ? marked.parse(String(chunk || ""))
           : simpleMarkdownFallback(String(chunk || ""));
-    } catch (_) {
+    } catch  {
       html = simpleMarkdownFallback(String(chunk || ""));
     }
     if (maths?.length) html = replaceMathPlaceholders(html, maths, katexToHtml);
@@ -5197,7 +5069,7 @@ export function mountWorkbench(SubBatch) {
    * Render knowledge answers as segmented cards matching AI 处理字幕 reading UI.
    * Full-document prepareMarkdownMath first so multi-line $$ / code fences stay intact.
    */
-  function renderKnowledgeAnswerCards(text, { streaming = false } = {}) {
+  function renderKnowledgeAnswerCards(text: string, { streaming = false } = {}) {
     return SubBatch.SubBatchMonorepo.ui.knowledgeAnswerView.answerCardsHtml(text, {
       streaming,
       prepare: prepareMarkdownMath,
@@ -5207,15 +5079,15 @@ export function mountWorkbench(SubBatch) {
     });
   }
 
-  async function hydrateKnowledgeAnswerDom(scope, epoch = state.renderEpoch) {
+  async function hydrateKnowledgeAnswerDom(scope: Element, epoch = state.renderEpoch) {
     if (!scope) return;
-    scope.querySelectorAll("a[href]").forEach((a) => {
+    scope.querySelectorAll<HTMLAnchorElement>("a[href]").forEach((a) => {
       a.target = "_blank";
       a.rel = "noopener noreferrer";
     });
     try {
       await enhanceCodeBlocks(scope, epoch);
-    } catch (_) {
+    } catch  {
       /* ignore highlight failures */
     }
   }
@@ -5223,7 +5095,7 @@ export function mountWorkbench(SubBatch) {
   function knowledgeGetModelConfig() {
     const profiles = state.aiProfiles?.length ? state.aiProfiles : loadAiProfiles();
     const ready = profiles.filter((p) => p.enabled !== false && p.apiKey && p.baseUrl && p.model);
-    let model = ready.find((p) => p.id === state.knowledgeModelId);
+    let model: AiProfile | null | undefined = ready.find((p) => p.id === state.knowledgeModelId);
     if (!model) model = ready.find((p) => p.enabled) || ready[0] || null;
     if (model && state.knowledgeModelId !== model.id) {
       state.knowledgeModelId = model.id;
@@ -5240,13 +5112,13 @@ export function mountWorkbench(SubBatch) {
     return ready.map((p) => `<option value="${escapeAttr(p.id)}"${selected?.id === p.id ? " selected" : ""}>${escapeHtml(p.name || p.model)}</option>`).join("");
   }
 
-  function knowledgeContextHtml(anchor) {
+  function knowledgeContextHtml(anchor: KnowledgeEvidence|null|undefined) {
     return SubBatch.SubBatchMonorepo.ui.knowledgeAnswerView.evidenceHtml(
       anchor, state.ui?.knowledgeContextOpen === true, escapeHtml,
     );
   }
 
-  function knowledgeAnswerBodyHtml(activeNode) {
+  function knowledgeAnswerBodyHtml(activeNode: KnowledgeAnswerNode|null|undefined) {
     return SubBatch.SubBatchMonorepo.ui.knowledgeAnswerView.answerBodyHtml(activeNode, {
       escapeHtml,
       visibleAnswer: knowledgeVisibleAnswer,
@@ -5261,18 +5133,18 @@ export function mountWorkbench(SubBatch) {
     );
   }
 
-  function knowledgeRailBodyHtml(anchor, activeNode, { showTree = state.knowledgeTreeOpen } = {}) {
+  function knowledgeRailBodyHtml(anchor: KnowledgeAnchor, activeNode: WorkbenchKnowledgeNode|null|undefined, { showTree = state.knowledgeTreeOpen } = {}) {
     const treeOpen = !!showTree;
     const treePane = treeOpen
       ? `<aside class="bsb-knowledge-tree-pane" data-role="knowledge-tree-pane"><div class="bsb-knowledge-pane-head"><span class="bsb-knowledge-kicker">追问树</span><button type="button" class="bsb-icon-btn" data-knowledge-tree-toggle title="收起追问树">‹</button></div><div class="bsb-knowledge-tree">${SubBatch.SubBatchMonorepo.ui.knowledgeTreeRenderer.treeHtml(anchor.id, activeNode?.id || "", state.knowledgeNodes || [], escapeHtml, escapeAttr)}</div></aside>`
       : "";
     return `${knowledgeContextHtml(anchor)}
-      <div class="bsb-knowledge-crumbs">${SubBatch.SubBatchMonorepo.ui.knowledgeTreeRenderer.breadcrumbHtml(activeNode, activeNode ? appCall("knowledge.ancestorNodes", activeNode, state.knowledgeNodes || []) : [], escapeHtml, escapeAttr)}${!treeOpen ? `<button type="button" class="bsb-mini" data-knowledge-tree-toggle title="展开追问树" style="margin-left:auto">☷ 追问树</button>` : ""}</div>
+      <div class="bsb-knowledge-crumbs">${SubBatch.SubBatchMonorepo.ui.knowledgeTreeRenderer.breadcrumbHtml(activeNode, activeNode ? SubBatch.SubBatchMonorepo.app.knowledge.ancestorNodes(activeNode, state.knowledgeNodes || []) : [], escapeHtml, escapeAttr)}${!treeOpen ? `<button type="button" class="bsb-mini" data-knowledge-tree-toggle title="展开追问树" style="margin-left:auto">☷ 追问树</button>` : ""}</div>
       <div class="bsb-knowledge-rail-split${treeOpen ? " with-tree" : ""}">${treePane}<div class="bsb-knowledge-split-main"><div class="bsb-knowledge-panel-main">${knowledgeAnswerBodyHtml(activeNode)}</div>${knowledgeComposerHtml()}</div></div>`;
   }
 
   /** Baseline name retained for golden function-name parity. */
-  function knowledgeAnchorListItemHtml(anchor, activeAnchorId = state.knowledgeActiveAnchorId) {
+  function knowledgeAnchorListItemHtml(anchor: KnowledgeAnchor, activeAnchorId = state.knowledgeActiveAnchorId) {
     const count = knowledgeNodesForAnchor(anchor.id).length;
     const active = anchor.id === activeAnchorId;
     return `<button type="button" class="bsb-knowledge-list-item${active ? " active" : ""}" data-knowledge-anchor-list="${escapeAttr(anchor.id)}">
@@ -5282,7 +5154,7 @@ export function mountWorkbench(SubBatch) {
     </button>`;
   }
 
-  function knowledgeNavigatorHtml(anchors, activeAnchorId, activeNodeId) {
+  function knowledgeNavigatorHtml(anchors: KnowledgeAnchor[], activeAnchorId: string|undefined, activeNodeId: string) {
     if (!anchors.length) {
       return '<div class="bsb-knowledge-library-empty">没有匹配的知识锚点。<br>去 AI → 预处理 → AI 处理字幕中选中概念开始。</div>';
     }
@@ -5302,7 +5174,7 @@ export function mountWorkbench(SubBatch) {
     }).join("");
   }
 
-  function knowledgeReaderHtml(anchor, activeNode, { isSmall = false } = {}) {
+  function knowledgeReaderHtml(anchor: KnowledgeAnchor|KnowledgeReaderAnchor, activeNode: WorkbenchKnowledgeNode|null|undefined, { isSmall = false } = {}) {
     return SubBatch.SubBatchMonorepo.ui.knowledgeReader.readerHtml(anchor, {
       isSmall,
       escapeAttr,
@@ -5311,7 +5183,7 @@ export function mountWorkbench(SubBatch) {
       contextHtml: knowledgeContextHtml(anchor),
       breadcrumbHtml: SubBatch.SubBatchMonorepo.ui.knowledgeTreeRenderer.breadcrumbHtml(
         activeNode,
-        activeNode ? appCall("knowledge.ancestorNodes", activeNode, state.knowledgeNodes || []) : [],
+        activeNode ? SubBatch.SubBatchMonorepo.app.knowledge.ancestorNodes(activeNode, state.knowledgeNodes || []) : [],
         escapeHtml, escapeAttr,
       ),
       answerHtml: knowledgeAnswerBodyHtml(activeNode),
@@ -5322,7 +5194,7 @@ export function mountWorkbench(SubBatch) {
   function pinKnowledgeScrollTop(top = 0) {
     const root = document.getElementById(PANEL_ID);
     if (!root) return;
-    root.querySelectorAll(".bsb-knowledge-panel-main, [data-role=\"knowledge-reader-scroll\"]").forEach((el) => {
+    root.querySelectorAll<HTMLElement>(".bsb-knowledge-panel-main, [data-role=\"knowledge-reader-scroll\"]").forEach((el) => {
       el.scrollTop = top;
     });
   }
@@ -5338,18 +5210,18 @@ export function mountWorkbench(SubBatch) {
 
   async function renderKnowledgeRail() {
     const root = document.getElementById(PANEL_ID);
-    const rail = root?.querySelector('[data-role="knowledge-rail"]');
-    const aiView = root?.querySelector('[data-view-panel="ai"]');
+    const rail = root?.querySelector<HTMLElement>('[data-role="knowledge-rail"]');
+    const aiView = root?.querySelector<HTMLElement>('[data-view-panel="ai"]');
     if (!rail || !aiView) return;
     applyKnowledgeLayoutVars(root);
-    const oldPanel = rail.querySelector('.bsb-knowledge-panel-main');
+    const oldPanel = rail.querySelector<HTMLElement>('.bsb-knowledge-panel-main');
     const oldScroll = state.knowledgeResetScroll ? 0 : (oldPanel?.scrollTop || 0);
     aiView.classList.toggle("knowledge-open", !!state.knowledgeRailOpen);
     rail.classList.toggle("open", !!state.knowledgeRailOpen);
     rail.setAttribute("aria-hidden", state.knowledgeRailOpen ? "false" : "true");
     if (!state.knowledgeRailOpen) return;
     if (!state.knowledgeAnchors.length) {
-      try { await knowledgeRefreshCache(); } catch (_) { /* render empty */ }
+      try { await knowledgeRefreshCache(); } catch  { /* render empty */ }
     }
     const anchor = knowledgeAnchorById(state.knowledgeActiveAnchorId);
     if (!anchor) {
@@ -5357,7 +5229,7 @@ export function mountWorkbench(SubBatch) {
       return;
     }
     const nodes = knowledgeNodesForAnchor(anchor.id);
-    if (!nodes.some((n) => n.id === state.knowledgeActiveNodeId)) {
+    if (!nodes.some((n: { id: string; }) => n.id === state.knowledgeActiveNodeId)) {
       const latest = [...nodes].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))[0];
       state.knowledgeActiveNodeId = latest?.id || "";
     }
@@ -5365,22 +5237,22 @@ export function mountWorkbench(SubBatch) {
     const answerText = knowledgeVisibleAnswer(activeNode?.answer || activeNode?.preview || "");
     try {
       await ensureKnowledgeRenderLibs(answerText);
-    } catch (_) {
+    } catch  {
       /* fall back to simple markdown */
     }
     rail.innerHTML = `<button type="button" class="bsb-knowledge-rail-resize" data-role="knowledge-rail-resize" title="拖拽调整 Knowledge 宽度" aria-label="调整 Knowledge 宽度"></button>
       <div class="bsb-knowledge-rail-head">
-        <div class="bsb-knowledge-anchor-title"><span class="bsb-knowledge-kicker">KNOWLEDGE ANCHOR</span><strong>${escapeHtml(anchor.selectedText)}</strong><small>${escapeHtml(anchor.title || anchor.bvid)} · ${anchor.timeStart != null ? coreCall("formatClock", anchor.timeStart) : "局部字幕"}${anchor.timeEnd > anchor.timeStart ? `–${coreCall("formatClock", anchor.timeEnd)}` : ""}</small></div>
+        <div class="bsb-knowledge-anchor-title"><span class="bsb-knowledge-kicker">KNOWLEDGE ANCHOR</span><strong>${escapeHtml(anchor.selectedText)}</strong><small>${escapeHtml(anchor.title || anchor.bvid)} · ${anchor.timeStart != null ? coreCall("formatClock", anchor.timeStart) : "局部字幕"}${Number(anchor.timeEnd) > Number(anchor.timeStart) ? `–${coreCall("formatClock", anchor.timeEnd || 0)}` : ""}</small></div>
         <div class="bsb-knowledge-rail-actions">${state.knowledgeBusy ? '<button type="button" class="bsb-icon-btn" data-knowledge-stop title="停止回答">■</button>' : ''}<button type="button" class="bsb-icon-btn${anchor.starred ? " active" : ""}" data-knowledge-star-anchor title="${anchor.starred ? "取消收藏锚点" : "收藏锚点"}">${anchor.starred ? "★" : "☆"}</button><button type="button" class="bsb-icon-btn" data-knowledge-new-root title="新建独立根问题">＋</button><button type="button" class="bsb-icon-btn${state.knowledgeTreeOpen ? " active" : ""}" data-knowledge-tree-toggle title="${state.knowledgeTreeOpen ? "收起追问树" : "展开追问树（并排）"}">☷</button><button type="button" class="bsb-icon-btn" data-knowledge-open-workspace title="在 Knowledge 工作区打开">↗</button><button type="button" class="bsb-icon-btn" data-knowledge-close title="关闭">×</button></div>
       </div>
       <div class="bsb-knowledge-rail-body">${knowledgeRailBodyHtml(anchor, activeNode)}</div>`;
-    const nextPanel = rail.querySelector('.bsb-knowledge-panel-main');
+    const nextPanel = rail.querySelector<HTMLElement>('.bsb-knowledge-panel-main');
     if (nextPanel) nextPanel.scrollTop = oldScroll;
-    await hydrateKnowledgeAnswerDom(rail.querySelector(".bsb-knowledge-rail-body") || rail, state.renderEpoch);
+    await hydrateKnowledgeAnswerDom(rail.querySelector<HTMLElement>(".bsb-knowledge-rail-body") || rail, state.renderEpoch);
   }
 
-  async function openKnowledgeAnchor(anchorId, { workspace = false } = {}) {
-    try { await knowledgeRefreshCache(); } catch (error) { setStatus(`知识库读取失败：${error.message || error}`, "err"); }
+  async function openKnowledgeAnchor(anchorId: string, { workspace = false } = {}) {
+    try { await knowledgeRefreshCache(); } catch (error) { setStatus(`知识库读取失败：${errorMessage(error)}`, "err"); }
     const anchor = knowledgeAnchorById(anchorId);
     if (!anchor) return;
     const selection = appCall("knowledge.selectAnchor", anchor.id, state.knowledgeNodes);
@@ -5400,21 +5272,22 @@ export function mountWorkbench(SubBatch) {
     renderKnowledgeRail().catch(() => {});
   }
 
-  function bindKnowledgeLayoutInteractions(root) {
+  function bindKnowledgeLayoutInteractions(root: WorkbenchPanelElement|null|undefined) {
     if (!root || root._bsbKnowledgeLayoutBound) return;
     root._bsbKnowledgeLayoutBound = true;
 
-    const startResize = (kind, event) => {
+    const startResize = (kind: string, event: PointerEvent) => {
       if (!state.ui || event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
       const startX = event.clientX;
       const startRail = clampKnowledgeRailW(state.ui.knowledgeRailW, state.ui.w);
       const startNav = clampKnowledgeNavW(state.ui.knowledgeNavW, state.ui.w);
-      const rail = root.querySelector('[data-role="knowledge-rail"]');
+      const rail = root.querySelector<HTMLElement>('[data-role="knowledge-rail"]');
       root.classList.add("knowledge-resizing");
       rail?.classList.add("resizing");
-      const onMove = (ev) => {
+      const onMove = (ev: { clientX: number; }) => {
+        if (!state.ui) return;
         if (kind === "rail") {
           // Drag left edge: move left = wider rail.
           state.ui.knowledgeRailW = clampKnowledgeRailW(startRail + (startX - ev.clientX), state.ui.w);
@@ -5452,39 +5325,39 @@ export function mountWorkbench(SubBatch) {
       if (!q) return;
       knowledgeAsk(state.knowledgeActiveAnchorId, state.knowledgeActiveNodeId || null, q)
         .then(() => { area.value = ""; })
-        .catch((error) => setStatus(`Knowledge 追问失败：${error?.message || error}`, "err"));
+        .catch((error) => setStatus(`Knowledge 追问失败：${errorMessage(error)}`, "err"));
     });
   }
 
   function hideKnowledgeSelectionToolbar() {
     const root = document.getElementById(PANEL_ID);
-    const toolbar = root?.querySelector('[data-role="knowledge-selection-toolbar"]');
+    const toolbar = root?.querySelector<HTMLElement>('[data-role="knowledge-selection-toolbar"]');
     if (toolbar) toolbar.hidden = true;
   }
 
   function captureKnowledgeSelection() {
     const root = document.getElementById(PANEL_ID);
-    const toolbar = root?.querySelector('[data-role="knowledge-selection-toolbar"]');
+    const toolbar = root?.querySelector<HTMLElement>('[data-role="knowledge-selection-toolbar"]');
     if (!root || !toolbar || currentAiWorkbenchStage() !== "preprocess" || state.aiInputView !== "processed") return hideKnowledgeSelectionToolbar();
     const sel = window.getSelection?.();
     if (!sel || sel.isCollapsed || !sel.rangeCount) return hideKnowledgeSelectionToolbar();
     const text = sel.toString().trim();
     if (text.length < KNOWLEDGE_SELECTION_MIN || text.length > KNOWLEDGE_SELECTION_MAX) return hideKnowledgeSelectionToolbar();
     const range = sel.getRangeAt(0);
-    const node = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
+    const node = range.commonAncestorContainer instanceof Element ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
     const body = node?.closest?.(".bsb-preprocess-block-body");
-    const article = body?.closest?.(".bsb-preprocess-block");
+    const article = body?.closest<HTMLElement>(".bsb-preprocess-block");
     if (!body || !article || !root.contains(body)) return hideKnowledgeSelectionToolbar();
     const source = currentKnowledgeSource();
     const articleSourceKey = article.dataset.knowledgeSourceKey || source.sourceKey;
-    const cards = Array.from(article.parentElement?.querySelectorAll?.(".bsb-preprocess-block") || [])
+    const cards = Array.from(article.parentElement?.querySelectorAll<HTMLElement>(".bsb-preprocess-block") || [])
       .filter((card) => (card.dataset.knowledgeSourceKey || articleSourceKey) === articleSourceKey);
     const idx = cards.indexOf(article);
     const contextCards = cards.slice(Math.max(0, idx - 1), Math.min(cards.length, idx + 2));
     const contextText = contextCards.map((card) => {
       const topic = card.dataset.knowledgeTopic || "";
       const clock = card.dataset.knowledgeClock || "";
-      const value = card.querySelector(".bsb-preprocess-block-body")?.textContent?.trim() || "";
+      const value = card.querySelector<HTMLElement>(".bsb-preprocess-block-body")?.textContent?.trim() || "";
       return `${clock ? `[${clock}] ` : ""}${topic ? `${topic}：` : ""}${value}`;
     }).join("\n\n");
     const rect = range.getBoundingClientRect();
@@ -5502,7 +5375,8 @@ export function mountWorkbench(SubBatch) {
       sourceHash: coreCall("md5", currentInputPreviewText("processed") || ""),
     };
     const compactSelection = text.replace(/\s+/g, " ");
-    toolbar.querySelector('[data-role="knowledge-selection-text"]').textContent = compactSelection.length > 42 ? `${compactSelection.slice(0, 42)}…` : compactSelection;
+    const selectionLabel = toolbar.querySelector<HTMLElement>('[data-role="knowledge-selection-text"]');
+    if (selectionLabel) selectionLabel.textContent = compactSelection.length > 42 ? `${compactSelection.slice(0, 42)}…` : compactSelection;
     const width = 300;
     const left = Math.min(window.innerWidth - width - 10, Math.max(10, rect.left + rect.width / 2 - width / 2));
     const top = Math.max(10, rect.top - 48);
@@ -5520,23 +5394,23 @@ export function mountWorkbench(SubBatch) {
     if (!anchor) {
       anchor = {
         id: makeKnowledgeId("anchor"),
-        sourceKey: sel.sourceKey,
-        bvid: sel.bvid,
-        page: sel.page,
-        title: sel.title,
-        author: sel.author,
-        segmentId: sel.segmentId,
+        sourceKey: sel.sourceKey || "",
+        bvid: sel.bvid || "",
+        page: sel.page || 1,
+        title: sel.title || "",
+        author: sel.author || "",
+        segmentId: sel.segmentId || "",
         selectedText: sel.selectedText,
-        timeStart: sel.timeStart,
-        timeEnd: sel.timeEnd,
-        contextText: sel.contextText,
-        sourceHash: sel.sourceHash,
+        timeStart: sel.timeStart || 0,
+        timeEnd: sel.timeEnd || 0,
+        contextText: sel.contextText || "",
+        sourceHash: sel.sourceHash || "",
         starred: !!starred,
         createdAt: now,
         updatedAt: now,
       };
     } else {
-      anchor = { ...anchor, contextText: sel.contextText || anchor.contextText, sourceHash: sel.sourceHash || anchor.sourceHash, starred: anchor.starred || !!starred, updatedAt: now };
+      anchor = { ...anchor, contextText: sel.contextText || anchor.contextText || "", sourceHash: sel.sourceHash || anchor.sourceHash || "", starred: anchor.starred || !!starred, updatedAt: now };
     }
     await knowledgePutAnchor(anchor);
     state.knowledgeActiveAnchorId = anchor.id;
@@ -5549,9 +5423,9 @@ export function mountWorkbench(SubBatch) {
     return anchor;
   }
 
-  let knowledgeController = null;
+  let knowledgeController: ReturnType<typeof createKnowledgeController> | null = null;
 
-  async function knowledgeAsk(anchorId, parentId, question) {
+  async function knowledgeAsk(anchorId: string, parentId: string|null, question: string) {
     const q = String(question || "").trim();
     if (!q || state.knowledgeBusy) return;
     if (!state.knowledgeAnchors.length) await knowledgeRefreshCache();
@@ -5563,7 +5437,7 @@ export function mountWorkbench(SubBatch) {
     if (!prompt || (!prompt.systemPrompt.trim() && !prompt.userPromptTemplate.trim())) throw new Error("没有可用的 Knowledge Prompt");
     const parent = parentId ? knowledgeNodeById(parentId) : null;
     const now = Date.now();
-    const node = {
+    const node: WorkbenchKnowledgeNode = {
       id: makeKnowledgeId("node"),
       anchorId: anchor.id,
       parentId: parent?.id || null,
@@ -5591,14 +5465,14 @@ export function mountWorkbench(SubBatch) {
     state.knowledgeResetScroll = false;
     const vars = {
       title: anchor.title || "",
-      bvid: `${anchor.bvid || ""}${anchor.page > 1 ? ` P${anchor.page}` : ""}`,
+      bvid: `${anchor.bvid || ""}${(anchor.page || 1) > 1 ? ` P${anchor.page}` : ""}`,
       author: anchor.author || "",
       anchorText: anchor.selectedText || "",
       sourceContext: anchor.contextText || anchor.selectedText || "",
       ancestorPath: appCall("knowledge.branchContext", parent, state.knowledgeNodes || []),
       question: q,
     };
-    const messages = [];
+    const messages: ChatCompletionOptions["messages"] = [];
     const systemPrompt = renderPromptTemplate(prompt.systemPrompt, vars).trim();
     const userPrompt = renderPromptTemplate(prompt.userPromptTemplate, vars).trim();
     if (systemPrompt) messages.push({ role: "system", content: systemPrompt });
@@ -5615,9 +5489,9 @@ export function mountWorkbench(SubBatch) {
     const request = knowledgeController.begin(node.id);
     let latest = "";
     let lastPreviewPersistAt = 0;
-    await appCall("knowledge.runAnswer", {
+    await SubBatch.SubBatchMonorepo.app.knowledge.runAnswer({
       node,
-      generate: () => request.stage(() => new Promise((resolve, reject) => {
+      generate: () => request.stage(() => new Promise<void>((resolve, reject) => {
       requestChatCompletion({
         runtime,
         baseUrl: model.baseUrl,
@@ -5628,7 +5502,7 @@ export function mountWorkbench(SubBatch) {
         messages,
         stream: model.stream !== false,
         onStatus() {},
-        onDelta(_delta, full) {
+        onDelta(_delta, full: unknown) {
           if (!knowledgeAnchorById(anchor.id)) return;
           const preview = appCall("knowledge.updateStreamPreview", node, full, lastPreviewPersistAt, Date.now());
           latest = preview.latest;
@@ -5653,14 +5527,14 @@ export function mountWorkbench(SubBatch) {
       exists: () => !!knowledgeAnchorById(anchor.id),
       persist: (answer) => knowledgePutNode(answer),
       onSuccess: async () => {
-        request.finish(node.status);
+        request.finish(node.status === "stopped" ? "stopped" : node.status === "error" ? "error" : "done");
         anchor.updatedAt = node.updatedAt;
         await knowledgePutAnchor(anchor);
         await ensureKnowledgeRenderLibs(node.answer).catch(() => {});
         setStatus(node.status === "stopped" ? "Knowledge 已停止" : `Knowledge · 已回答：${q.slice(0, 28)}${q.length > 28 ? "…" : ""}`, node.status === "stopped" ? "" : "ok");
       },
       onFailure: () => {
-        request.finish(node.status);
+        request.finish(node.status === "stopped" ? "stopped" : node.status === "error" ? "error" : "done");
         setStatus(node.status === "stopped" ? "Knowledge 已停止" : `Knowledge 失败：${node.error}`, node.status === "stopped" ? "" : "err");
       },
       cleanup: async () => {
@@ -5679,13 +5553,13 @@ export function mountWorkbench(SubBatch) {
     const runtime = state.knowledgeRuntime;
     if (!runtime) return;
     runtime.abort = true;
-    try { runtime.abortController?.abort(); } catch (_) { /* noop */ }
-    try { runtime.xhr?.abort?.(); } catch (_) { /* noop */ }
+    try { runtime.abortController?.abort(); } catch  { /* noop */ }
+    try { runtime.xhr?.abort?.(); } catch  { /* noop */ }
     setStatus("正在停止 Knowledge 回答…");
   }
 
   /** Unwrap existing knowledge-anchor marks so re-decoration stays idempotent. */
-  function unwrapKnowledgeAnchorMarks(root) {
+  function unwrapKnowledgeAnchorMarks(root: Element) {
     if (!root) return;
     root.querySelectorAll("mark.bsb-knowledge-anchor-mark").forEach((mark) => {
       const parent = mark.parentNode;
@@ -5699,12 +5573,14 @@ export function mountWorkbench(SubBatch) {
    * Wrap the first occurrence of `needle` in a text node under root.
    * Skips code/math/links so rich Markdown bodies keep structure.
    */
-  function wrapFirstTextOccurrence(root, needle, createMark) {
+  function wrapFirstTextOccurrence(root: Node, needle: string|undefined, createMark:(text: string)=>HTMLElement) {
     const value = String(needle || "");
     if (!root || !value) return false;
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    const nodes = [];
-    while (walker.nextNode()) nodes.push(walker.currentNode);
+    const nodes: Text[] = [];
+    while (walker.nextNode()) {
+      if (walker.currentNode instanceof Text) nodes.push(walker.currentNode);
+    }
     for (const node of nodes) {
       const parent = node.parentElement;
       if (!parent) continue;
@@ -5729,19 +5605,19 @@ export function mountWorkbench(SubBatch) {
     return false;
   }
 
-  async function decorateKnowledgeAnchors(host = null) {
+  async function decorateKnowledgeAnchors(host: Element | null = null) {
     const root = document.getElementById(PANEL_ID);
-    const scope = host || root?.querySelector('[data-role="ai-content"]');
-    if (!scope || !scope.querySelector(".bsb-preprocess-reading")) return;
-    try { await knowledgeRefreshCache(); } catch (_) { return; }
+    const scope = host || root?.querySelector<HTMLElement>('[data-role="ai-content"]');
+    if (!scope || !scope.querySelector<HTMLElement>(".bsb-preprocess-reading")) return;
+    try { await knowledgeRefreshCache(); } catch  { return; }
     const anchors = state.knowledgeAnchors;
-    const bodies = Array.from(scope.querySelectorAll(".bsb-preprocess-block-body"));
+    const bodies = Array.from(scope.querySelectorAll<HTMLElement>(".bsb-preprocess-block-body"));
     for (const body of bodies) {
-      const article = body.closest(".bsb-preprocess-block");
+      const article = body.closest<HTMLElement>(".bsb-preprocess-block");
       const rich = body.classList.contains("bsb-md-rich");
       const original = body.getAttribute("data-knowledge-plain") || body.textContent || "";
       const articleSourceKey = article?.dataset.knowledgeSourceKey || currentKnowledgeSource().sourceKey;
-      const relevant = anchors.filter((a) => a.sourceKey === articleSourceKey && original.includes(a.selectedText));
+      const relevant = anchors.filter((a) => a.sourceKey === articleSourceKey && !!a.selectedText && original.includes(a.selectedText));
       if (!relevant.length) {
         if (article) article.classList.remove("has-knowledge");
         continue;
@@ -5749,8 +5625,8 @@ export function mountWorkbench(SubBatch) {
       const ranges = relevant
         .map((a) => ({
           a,
-          start: original.indexOf(a.selectedText),
-          end: original.indexOf(a.selectedText) + a.selectedText.length,
+          start: original.indexOf(a.selectedText || ""),
+          end: original.indexOf(a.selectedText || "") + (a.selectedText || "").length,
         }))
         .filter((x) => x.start >= 0)
         .sort((x, y) => x.start - y.start || y.end - x.end);
@@ -5765,7 +5641,7 @@ export function mountWorkbench(SubBatch) {
         // Keep Markdown/math HTML; only wrap text nodes for anchor marks.
         unwrapKnowledgeAnchorMarks(body);
         for (const r of accepted) {
-          wrapFirstTextOccurrence(body, r.a.selectedText, (mid) => {
+          wrapFirstTextOccurrence(body, r.a.selectedText || "", (mid: string|null) => {
             const mark = document.createElement("mark");
             mark.className = "bsb-knowledge-anchor-mark";
             mark.dataset.knowledgeAnchorId = r.a.id;
@@ -5791,19 +5667,19 @@ export function mountWorkbench(SubBatch) {
 
   async function renderKnowledgeWorkspace() {
     const root = document.getElementById(PANEL_ID);
-    const workspace = root?.querySelector('[data-role="knowledge-workspace"]') || root?.querySelector(".bsb-knowledge-workspace");
-    const list = root?.querySelector('[data-role="knowledge-list"]');
-    const detail = root?.querySelector('[data-role="knowledge-detail"]');
-    const count = root?.querySelector('[data-role="knowledge-count"]');
+    const workspace = root?.querySelector<HTMLElement>('[data-role="knowledge-workspace"]') || root?.querySelector<HTMLElement>(".bsb-knowledge-workspace");
+    const list = root?.querySelector<HTMLElement>('[data-role="knowledge-list"]');
+    const detail = root?.querySelector<HTMLElement>('[data-role="knowledge-detail"]');
+    const count = root?.querySelector<HTMLElement>('[data-role="knowledge-count"]');
     if (!list || !detail) return;
     applyKnowledgeLayoutVars(root);
     const isSmall = root?.getAttribute("data-panel-size") === "small";
-    const oldScrollEl = detail.querySelector('[data-role="knowledge-reader-scroll"]');
+    const oldScrollEl = detail.querySelector<HTMLElement>('[data-role="knowledge-reader-scroll"]');
     const oldScroll = state.knowledgeResetScroll ? 0 : (oldScrollEl?.scrollTop || 0);
     try {
       if (!state.knowledgeBusy) await knowledgeRefreshCache();
     } catch (error) {
-      detail.innerHTML = `<div class="bsb-empty"><strong>知识库不可用</strong><span>${escapeHtml(error.message || error)}</span></div>`;
+      detail.innerHTML = `<div class="bsb-empty"><strong>知识库不可用</strong><span>${escapeHtml(errorMessage(error))}</span></div>`;
       return;
     }
     const anchors = SubBatch.SubBatchMonorepo.ui.knowledgeNavigation.filterAnchors(
@@ -5820,7 +5696,7 @@ export function mountWorkbench(SubBatch) {
     const answerText = knowledgeVisibleAnswer(activeNode?.answer || activeNode?.preview || "");
     try {
       await ensureKnowledgeRenderLibs(answerText);
-    } catch (_) {
+    } catch  {
       /* fall back to simple markdown */
     }
     list.innerHTML = knowledgeNavigatorHtml(anchors, state.knowledgeActiveAnchorId, state.knowledgeActiveNodeId);
@@ -5830,7 +5706,7 @@ export function mountWorkbench(SubBatch) {
       return;
     }
     detail.innerHTML = knowledgeReaderHtml(anchor, activeNode, { isSmall });
-    const nextScroll = detail.querySelector('[data-role="knowledge-reader-scroll"]');
+    const nextScroll = detail.querySelector<HTMLElement>('[data-role="knowledge-reader-scroll"]');
     if (nextScroll) nextScroll.scrollTop = oldScroll;
     await hydrateKnowledgeAnswerDom(detail, state.renderEpoch);
   }
@@ -5843,8 +5719,9 @@ export function mountWorkbench(SubBatch) {
     return `output-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
-  function normalizePostTask(seed, index = 0) {
-    const o = seed && typeof seed === "object" ? seed : {};
+  function normalizePostTask(seed: unknown, index = 0) {
+    const o = seed && typeof seed === "object" && !Array.isArray(seed)
+      ? seed as Record<string, unknown> : {};
     return {
       id: String(o.id || makePostTaskId()),
       promptId: String(o.promptId || ""),
@@ -5854,8 +5731,9 @@ export function mountWorkbench(SubBatch) {
     };
   }
 
-  function sanitizePostTasks(tasks, prompts, profiles, { createDefault = true } = {}) {
-    const posts = (prompts || []).filter((p) => p.stage === "postprocess");
+  function sanitizePostTasks(tasks: readonly unknown[] | null | undefined, prompts: readonly PromptProfile[],
+    profiles: readonly AiProfile[], { createDefault = true } = {}) {
+    const posts = (prompts || []).filter((p: { stage: string; }) => p.stage === "postprocess");
     const postIds = new Set(posts.map((p) => p.id));
     const profileIds = new Set((profiles || []).map((p) => p.id));
     let out = (Array.isArray(tasks) ? tasks : [])
@@ -5863,8 +5741,9 @@ export function mountWorkbench(SubBatch) {
       .filter((t) => postIds.has(t.promptId))
       .map((t, i) => ({ ...t, modelIds: t.modelIds.filter((id) => profileIds.has(id)), order: i }));
     if (!out.length && createDefault && posts.length) {
-      const preferred = posts.find((p) => p.id === state.activePromptId) || posts[0];
+      const preferred = posts.find((p: { id: string; }) => p.id === state.activePromptId) || posts[0];
       const enabledModels = (profiles || []).filter((p) => p.enabled).map((p) => p.id);
+      if (!preferred) return out;
       out = [normalizePostTask({ promptId: preferred.id, modelIds: enabledModels, enabled: true, order: 0 }, 0)];
     }
     return out;
@@ -5882,9 +5761,9 @@ export function mountWorkbench(SubBatch) {
         tasks = Array.isArray(parsed) ? parsed : parsed?.tasks;
         storedTaskVersion = Array.isArray(parsed) ? 1 : Number(parsed?.version || 1);
       }
-    } catch (_) { /* use default */ }
+    } catch  { /* use default */ }
     tasks = sanitizePostTasks(tasks, prompts, profiles, { createDefault: true });
-    const htmlPrompt = prompts.find((p) => p.id === DEFAULT_HTML_FOLIO_PROMPT_ID && p.stage === "postprocess");
+    const htmlPrompt = prompts.find((p: { id: string; stage: string; }) => p.id === DEFAULT_HTML_FOLIO_PROMPT_ID && p.stage === "postprocess");
     if (htmlPrompt && storedTaskVersion < 2 && !tasks.some((t) => t.promptId === htmlPrompt.id)) {
       const modelIds = tasks[0]?.modelIds?.length
         ? [...tasks[0].modelIds]
@@ -5899,20 +5778,20 @@ export function mountWorkbench(SubBatch) {
     if (storedTaskVersion < POST_TASKS_SCHEMA_VERSION) {
       try {
         storageSet(POST_TASKS_STORE_KEY, JSON.stringify({ version: POST_TASKS_SCHEMA_VERSION, tasks }));
-      } catch (_) { /* ignore */ }
+      } catch  { /* ignore */ }
     }
     state.postTasks = tasks;
     if (!tasks.some((t) => t.id === state.aiActiveTaskId)) state.aiActiveTaskId = tasks[0]?.id || "";
     return tasks;
   }
 
-  function savePostTasks(tasks) {
+  function savePostTasks(tasks: ({ modelIds: unknown[]; order: number; id: string; promptId: string; enabled: boolean; }|{ modelIds: unknown[]; id: string; promptId?: string; })[]) {
     const prompts = state.promptProfiles?.length ? state.promptProfiles : loadPromptProfiles().prompts;
     const profiles = state.aiProfiles?.length ? state.aiProfiles : loadAiProfiles();
     const normalized = sanitizePostTasks(tasks, prompts, profiles, { createDefault: true });
     try {
       storageSet(POST_TASKS_STORE_KEY, JSON.stringify({ version: POST_TASKS_SCHEMA_VERSION, tasks: normalized }));
-    } catch (_) { /* ignore */ }
+    } catch  { /* ignore */ }
     state.postTasks = normalized;
     if (!normalized.some((t) => t.id === state.aiActiveTaskId)) state.aiActiveTaskId = normalized[0]?.id || "";
     renderAiFlowDrawer();
@@ -5925,11 +5804,11 @@ export function mountWorkbench(SubBatch) {
     return state.postTasks?.length ? state.postTasks : loadPostTasks();
   }
 
-  function promptForTask(task) {
+  function promptForTask(task: { promptId?: string; }) {
     return (state.promptProfiles || []).find((p) => p.id === task?.promptId && p.stage === "postprocess") || null;
   }
 
-  function promptListItemHtml(prompt, { draggable = true } = {}) {
+  function promptListItemHtml(prompt: PromptProfile, { draggable = true } = {}) {
     const selected = prompt.id === state.promptEditorId;
     const active = prompt.stage === "preprocess" ? prompt.id === state.activePrePromptId : prompt.stage === "knowledge" ? prompt.id === state.activeKnowledgePromptId : prompt.id === state.activePromptId;
     const dragAttr = draggable ? 'draggable="true"' : 'draggable="false"';
@@ -5947,7 +5826,7 @@ export function mountWorkbench(SubBatch) {
     </div>`;
   }
 
-  function promptEditorHtml(prompt, index) {
+  function promptEditorHtml(prompt: { stage: unknown; id: unknown; name: unknown; hint: unknown; systemPrompt: unknown; userPromptTemplate: unknown; } | null | undefined, index: number) {
     if (!prompt) {
       return '<div class="bsb-config-editor-empty">没有可编辑的 Prompt。<br>请从左侧新建，或恢复内置 Prompt。</div>';
     }
@@ -5994,9 +5873,8 @@ export function mountWorkbench(SubBatch) {
     </section>`;
   }
 
-  function readPromptEditor(editor, index) {
-    if (!editor) return null;
-    const get = (key) => editor.querySelector(`[data-prompt-field="${key}"]`);
+  function readPromptEditor(editor: HTMLElement, index: number) {
+    const get = (key: string) => editor.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[data-prompt-field="${key}"]`);
     return coreCall("createPromptProfile", {
       id: editor.dataset.promptId || coreCall("makePromptProfileId"),
       stage: editor.dataset.promptStage === "preprocess" ? "preprocess" : editor.dataset.promptStage === "knowledge" ? "knowledge" : "postprocess",
@@ -6007,26 +5885,26 @@ export function mountWorkbench(SubBatch) {
     }, index);
   }
 
-  function savePromptProfilesFromForm({ activeId } = {}) {
+  function savePromptProfilesFromForm({ activeId }: { activeId?: string } = {}) {
     const root = ensurePanel();
     const current = state.promptProfiles?.length || state.activePromptId
       ? [...state.promptProfiles]
       : [...loadPromptProfiles().prompts];
-    const editor = root.querySelector('[data-role="prompt-editor"] [data-prompt-id]');
+    const editor = root.querySelector<HTMLElement>('[data-role="prompt-editor"] [data-prompt-id]');
     if (editor) {
       const index = current.findIndex((p) => p.id === editor.dataset.promptId);
       if (index >= 0) current[index] = readPromptEditor(editor, index);
     }
     const selected = activeId != null
       ? String(activeId)
-      : String(root.querySelector('[data-role="prompt-select"]')?.value || state.activePromptId || "");
+      : String(root.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-role="prompt-select"]')?.value || state.activePromptId || "");
     return savePromptProfiles(current, selected, state.activePrePromptId, state.activeKnowledgePromptId);
   }
 
-  function refreshPromptSelector(root) {
+  function refreshPromptSelector(root: HTMLElement|null) {
     if (!root) return;
-    const postSelect = root.querySelector('[data-role="prompt-select"]');
-    const preSelect = root.querySelector('[data-role="preprocess-prompt-select"]');
+    const postSelect = root.querySelector<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>('[data-role="prompt-select"]');
+    const preSelect = root.querySelector<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>('[data-role="preprocess-prompt-select"]');
     const prompts = state.promptProfiles || [];
     const posts = prompts.filter((p) => p.stage === "postprocess");
     const pres = prompts.filter((p) => p.stage === "preprocess");
@@ -6049,21 +5927,21 @@ export function mountWorkbench(SubBatch) {
       state.activePrePromptId = active;
       preSelect.value = active;
     }
-    const toggle = root.querySelector('[data-role="preprocess-enabled"]');
+    const toggle = root.querySelector<HTMLInputElement>('[data-role="preprocess-enabled"]');
     if (toggle) toggle.checked = !!state.preprocessEnabled;
     updatePromptUi(root, getActivePromptProfile());
   }
 
-  function commitConfigListReorder(kind, fromId, toId) {
+  function commitConfigListReorder(kind: string, fromId: string, toId: string) {
     if (!fromId || !toId || fromId === toId) return false;
     const root = ensurePanel();
     if (kind === "llm") {
-      try { saveAiProfilesFromForm(); } catch (_) { /* use memory/storage */ }
+      try { saveAiProfilesFromForm(); } catch  { /* use memory/storage */ }
       const profiles = state.aiProfiles?.length ? state.aiProfiles.slice() : loadAiProfiles();
       const ids = profiles.map((p) => p.id);
       const nextIds = appCall("ordering.reorderIds", ids, fromId, toId);
       if (nextIds.join("\0") === ids.join("\0")) return false;
-      const next = appCall("ordering.applyConfigIdOrder", profiles, nextIds);
+      const next = SubBatch.SubBatchMonorepo.app.ordering.applyConfigIdOrder(profiles, nextIds);
       saveAiProfiles(next);
       state.aiEditorId = fromId;
       fillAiConfigForm(root);
@@ -6072,7 +5950,7 @@ export function mountWorkbench(SubBatch) {
       return true;
     }
     if (kind === "prompt") {
-      try { savePromptProfilesFromForm({ activeId: state.activePromptId }); } catch (_) { /* use memory/storage */ }
+      try { savePromptProfilesFromForm({ activeId: state.activePromptId }); } catch  { /* use memory/storage */ }
       const library = state.promptProfiles?.length
         ? {
             prompts: state.promptProfiles.slice(),
@@ -6086,10 +5964,10 @@ export function mountWorkbench(SubBatch) {
         : state.ui?.promptStage === "knowledge"
           ? "knowledge"
           : "preprocess";
-      const stageIds = library.prompts.filter((p) => p.stage === stage).map((p) => p.id);
+      const stageIds = library.prompts.filter((p: { stage: string; }) => p.stage === stage).map((p) => p.id);
       const nextStageIds = appCall("ordering.reorderIds", stageIds, fromId, toId);
       if (nextStageIds.join("\0") === stageIds.join("\0")) return false;
-      const prompts = appCall("ordering.applyPromptStageOrder", library.prompts, stage, nextStageIds);
+      const prompts = SubBatch.SubBatchMonorepo.app.ordering.applyPromptStageOrder(library.prompts, stage, nextStageIds);
       savePromptProfiles(prompts, library.activeId, library.activePreprocessId, library.activeKnowledgeId);
       state.promptEditorId = fromId;
       fillPromptConfigForm(root);
@@ -6100,7 +5978,7 @@ export function mountWorkbench(SubBatch) {
     return false;
   }
 
-  function commitFlowModelReorder(taskId, fromId, toId) {
+  function commitFlowModelReorder(taskId: string, fromId: string, toId: string) {
     if (!fromId || !toId || fromId === toId) return;
     const tasks = currentPostTasks().map((task) => ({
       ...task, modelIds: [...(task.modelIds || [])],
@@ -6111,8 +5989,8 @@ export function mountWorkbench(SubBatch) {
     savePostTasks(tasks);
   }
 
-  function renderPromptList(root) {
-    const host = root?.querySelector('[data-role="prompt-list"]');
+  function renderPromptList(root: HTMLElement) {
+    const host = root?.querySelector<HTMLElement>('[data-role="prompt-list"]');
     if (!host) return;
     const q = String(state.promptSearch || "").trim().toLocaleLowerCase();
     const stage = state.ui?.promptStage === "postprocess" ? "postprocess" : state.ui?.promptStage === "knowledge" ? "knowledge" : "preprocess";
@@ -6127,34 +6005,35 @@ export function mountWorkbench(SubBatch) {
       : `<div class="bsb-config-list-empty">${prompts.length ? "没有匹配的 Prompt" : (stage === "preprocess" ? "还没有预处理 Prompt" : stage === "knowledge" ? "还没有 Knowledge Prompt" : "还没有后处理 Prompt")}</div>`;
   }
 
-  function fillPromptConfigForm(root) {
+  function fillPromptConfigForm(root: HTMLElement) {
     if (!root) return;
     const library = loadPromptProfiles();
     const stage = state.ui?.promptStage === "postprocess" ? "postprocess" : state.ui?.promptStage === "knowledge" ? "knowledge" : "preprocess";
-    if (!library.prompts.some((p) => p.id === state.promptEditorId && p.stage === stage)) {
+    if (!library.prompts.some((p: { id: string; stage: string; }) => p.id === state.promptEditorId && p.stage === stage)) {
       const preferredId = stage === "preprocess" ? library.activePreprocessId : stage === "knowledge" ? library.activeKnowledgeId : library.activeId;
       state.promptEditorId = library.prompts.find((p) => p.id === preferredId && p.stage === stage)?.id
-        || library.prompts.find((p) => p.stage === stage)?.id || "";
+        || library.prompts.find((p: { stage: string; }) => p.stage === stage)?.id || "";
     }
-    const search = root.querySelector('[data-role="prompt-search"]');
+    const search = root.querySelector<HTMLInputElement>('[data-role="prompt-search"]');
     if (search && search.value !== state.promptSearch) search.value = state.promptSearch;
     renderPromptList(root);
-    const editorHost = root.querySelector('[data-role="prompt-editor"]');
+    const editorHost = root.querySelector<HTMLElement>('[data-role="prompt-editor"]');
     if (editorHost) {
-      const index = library.prompts.findIndex((p) => p.id === state.promptEditorId);
+      const index = library.prompts.findIndex((p: { id: string; }) => p.id === state.promptEditorId);
       editorHost.innerHTML = promptEditorHtml(index >= 0 ? library.prompts[index] : null, Math.max(0, index));
     }
     refreshPromptSelector(root);
   }
 
-  function handlePromptProfileAction(button) {
-    const editor = button.closest?.("[data-prompt-id]");
+  function handlePromptProfileAction(button: HTMLElement) {
+    const editor = button.closest<HTMLElement>("[data-prompt-id]");
     const action = button.dataset.promptAct;
     if (!editor || !action) return;
     const library = savePromptProfilesFromForm({ activeId: state.activePromptId });
     const index = library.prompts.findIndex((p) => p.id === editor.dataset.promptId);
     if (index < 0) return;
     const current = library.prompts[index];
+    if (!current) return;
     if (action === "use") {
       if (current.stage === "preprocess") savePromptProfiles(library.prompts, library.activeId, current.id, library.activeKnowledgeId);
       else if (current.stage === "knowledge") savePromptProfiles(library.prompts, library.activeId, library.activePreprocessId, current.id);
@@ -6177,6 +6056,7 @@ export function mountWorkbench(SubBatch) {
     if (action === "delete") {
       const prompts = [...library.prompts];
       const [removed] = prompts.splice(index, 1);
+      if (!removed) return;
       const sameStage = prompts.filter((p) => p.stage === removed.stage);
       let nextActiveId = library.activeId;
       let nextPreId = library.activePreprocessId;
@@ -6191,21 +6071,21 @@ export function mountWorkbench(SubBatch) {
     }
   }
 
-  function updatePromptUi(root, prompt) {
-    const hint = root?.querySelector('[data-role="prompt-hint"]');
+  function updatePromptUi(root: HTMLElement, prompt: { hint: string; } | null) {
+    const hint = root?.querySelector<HTMLElement>('[data-role="prompt-hint"]');
     if (hint) hint.textContent = prompt?.hint || "请在设置中新增或恢复提示词";
   }
 
-  function renderPromptTemplate(template, vars) {
+  function renderPromptTemplate(template: string, vars: Record<string,unknown>) {
     try {
       const api =
         typeof SubBatch !== "undefined" ? SubBatch?.SubBatchMonorepo : null;
-      const pure = api?.core?.renderPromptTemplate || api?.renderPromptTemplate;
+      const pure = api?.core?.renderPromptTemplate;
       if (typeof pure === "function") return pure(template, vars);
-    } catch (_) {
+    } catch  {
       /* monorepo unavailable — local fallback */
     }
-    const values = {
+    const values: Record<string, string> = {
       title: String(vars?.title || ""),
       bvid: String(vars?.bvid || ""),
       author: String(vars?.author || ""),
@@ -6222,7 +6102,7 @@ export function mountWorkbench(SubBatch) {
       ancestorPath: String(vars?.ancestorPath || ""),
       question: String(vars?.question || ""),
     };
-    return String(template || "").replace(/\{\{\s*(title|bvid|author|subtitle|rawSubtitle|processedSubtitle|chunkIndex|chunkCount|chunkStart|coreStart|chunkEnd|anchorText|sourceContext|ancestorPath|question)\s*\}\}/g, (_, key) => values[key] ?? "");
+    return String(template || "").replace(/\{\{\s*(title|bvid|author|subtitle|rawSubtitle|processedSubtitle|chunkIndex|chunkCount|chunkStart|coreStart|chunkEnd|anchorText|sourceContext|ancestorPath|question)\s*\}\}/g, (_, key: string) => values[key] ?? "");
   }
 
   function loadAiProfiles() {
@@ -6251,7 +6131,7 @@ export function mountWorkbench(SubBatch) {
           return normalized;
         }
       }
-    } catch (_) {
+    } catch  {
       /* fall through to legacy migration */
     }
 
@@ -6266,17 +6146,17 @@ export function mountWorkbench(SubBatch) {
           return migrated;
         }
       }
-    } catch (_) {
+    } catch  {
       /* ignore */
     }
     return [coreCall("createAiProfile", { ...AI_DEFAULTS, name: "默认模型" }, 0)];
   }
 
-  function saveAiProfiles(profiles) {
+  function saveAiProfiles(profiles: unknown) {
     const normalized = coreCall("normalizeAiProfiles", profiles);
     try {
       storageSet(AI_PROFILES_STORE_KEY, JSON.stringify({ version: AI_PROFILES_SCHEMA_VERSION, profiles: normalized }));
-    } catch (_) {
+    } catch  {
       /* ignore */
     }
     state.aiProfiles = normalized;
@@ -6296,9 +6176,9 @@ export function mountWorkbench(SubBatch) {
 
   // 兼容脚本中“取一个配置”的辅助功能（例如 Mermaid 修复）：优先当前结果对应配置。
 
-  function refreshPreprocessModelSelector(root) {
+  function refreshPreprocessModelSelector(root: HTMLElement|null) {
     root = root || document.getElementById(PANEL_ID);
-    const select = root?.querySelector('[data-role="preprocess-model-select"]');
+    const select = root?.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-role="preprocess-model-select"]');
     if (!select) return;
     const profiles = state.aiProfiles?.length ? state.aiProfiles : loadAiProfiles();
     const ready = profiles.filter((p) => p.apiKey && p.baseUrl && p.model);
@@ -6312,24 +6192,24 @@ export function mountWorkbench(SubBatch) {
     }
     select.disabled = !state.preprocessEnabled;
     select.innerHTML = ready.map((p) => `<option value="${escapeAttr(p.id)}">${escapeHtml(p.name || p.model)}</option>`).join("");
-    if (!ready.some((p) => p.id === state.preprocessModelId)) {
-      state.preprocessModelId = fallback?.id || ready[0].id;
+    if (!ready.some((p: { id: string; }) => p.id === state.preprocessModelId)) {
+      state.preprocessModelId = fallback?.id || "";
       storageSet(PREPROCESS_MODEL_STORE_KEY, state.preprocessModelId);
     }
     select.value = state.preprocessModelId;
   }
 
-  function getPreprocessModelConfig(profiles) {
+  function getPreprocessModelConfig(profiles?: AiProfile[]) {
     const all = Array.isArray(profiles) && profiles.length ? profiles : (state.aiProfiles?.length ? state.aiProfiles : loadAiProfiles());
     const ready = all.filter((p) => p.apiKey && p.baseUrl && p.model);
-    const selected = ready.find((p) => p.id === state.preprocessModelId);
+    const selected = ready.find((p: { id: string; }) => p.id === state.preprocessModelId);
     return selected || ready.find((p) => p.enabled) || ready[0] || null;
   }
 
-  function getStudioModelConfig(profiles) {
+  function getStudioModelConfig(profiles?: AiProfile[]) {
     const all = Array.isArray(profiles) && profiles.length ? profiles : (state.aiProfiles?.length ? state.aiProfiles : loadAiProfiles());
     const ready = all.filter((p) => p.apiKey && p.baseUrl && p.model);
-    const selected = ready.find((p) => p.id === state.studioModelId);
+    const selected = ready.find((p: { id: string; }) => p.id === state.studioModelId);
     const fallback = selected || getPreprocessModelConfig(all) || knowledgeGetModelConfig() || ready.find((p) => p.enabled) || ready[0] || null;
     if (fallback && state.studioModelId !== fallback.id) {
       state.studioModelId = fallback.id;
@@ -6338,22 +6218,7 @@ export function mountWorkbench(SubBatch) {
     return fallback;
   }
 
-  function loadAiConfig() {
-    const active = getActiveAiRun();
-    if (active?.config) return active.config;
-    const profiles = state.aiProfiles?.length ? state.aiProfiles : loadAiProfiles();
-    return profiles.find((x) => x.enabled) || profiles[0] || coreCall("createAiProfile", AI_DEFAULTS, 0);
-  }
-
-  function saveAiConfig(cfg) {
-    const profiles = state.aiProfiles?.length ? [...state.aiProfiles] : loadAiProfiles();
-    const index = Math.max(0, profiles.findIndex((x) => x.id === cfg?.id));
-    profiles[index] = coreCall("createAiProfile", { ...(profiles[index] || {}), ...(cfg || {}) }, index);
-    saveAiProfiles(profiles);
-    return profiles[index];
-  }
-
-  function aiListItemHtml(profile, { draggable = true } = {}) {
+  function aiListItemHtml(profile: AiProfile, { draggable = true } = {}) {
     const selected = profile.id === state.aiEditorId;
     const name = profile.name || profile.model || "未命名模型";
     const dragAttr = draggable ? 'draggable="true"' : 'draggable="false"';
@@ -6371,7 +6236,7 @@ export function mountWorkbench(SubBatch) {
     </div>`;
   }
 
-  function aiEditorHtml(profile, index) {
+  function aiEditorHtml(profile: AiProfile|null|undefined, index: number) {
     if (!profile) return '<div class="bsb-config-editor-empty">没有可编辑的 LLM 配置。</div>';
     const summary = [profile.baseUrl || "未填写 Base URL", profile.model || "未填写 model"].join(" · ");
     return `<section data-ai-profile-id="${escapeAttr(profile.id)}">
@@ -6419,8 +6284,8 @@ export function mountWorkbench(SubBatch) {
     </section>`;
   }
 
-  function renderAiList(root) {
-    const host = root?.querySelector('[data-role="ai-list"]');
+  function renderAiList(root: HTMLElement) {
+    const host = root?.querySelector<HTMLElement>('[data-role="ai-list"]');
     if (!host) return;
     const q = String(state.aiSearch || "").trim().toLocaleLowerCase();
     const profiles = state.aiProfiles || [];
@@ -6434,41 +6299,41 @@ export function mountWorkbench(SubBatch) {
       : `<div class="bsb-config-list-empty">${profiles.length ? "没有匹配的 LLM" : "还没有 LLM 配置"}</div>`;
   }
 
-  function fillAiConfigForm(root) {
+  function fillAiConfigForm(root: HTMLElement) {
     if (!root) return;
     state.aiProfiles = loadAiProfiles();
     state.ai = state.aiProfiles.find((x) => x.enabled) || state.aiProfiles[0] || null;
     if (!state.aiProfiles.some((p) => p.id === state.aiEditorId)) {
       state.aiEditorId = state.aiProfiles.find((p) => p.enabled)?.id || state.aiProfiles[0]?.id || "";
     }
-    const search = root.querySelector('[data-role="ai-search"]');
+    const search = root.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-role="ai-search"]');
     if (search && search.value !== state.aiSearch) search.value = state.aiSearch;
     renderAiList(root);
-    const host = root.querySelector('[data-role="ai-editor"]');
+    const host = root.querySelector<HTMLElement>('[data-role="ai-editor"]');
     if (!host) return;
     const index = state.aiProfiles.findIndex((p) => p.id === state.aiEditorId);
     host.innerHTML = aiEditorHtml(index >= 0 ? state.aiProfiles[index] : null, Math.max(0, index));
   }
 
-  function readAiProfileCard(card, index) {
-    const get = (key) => card.querySelector(`[data-ai-field="${key}"]`);
+  function readAiProfileCard(card: HTMLElement, index: number) {
+    const get = (key: string) => card.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[data-ai-field="${key}"]`);
     return coreCall("createAiProfile", {
       id: card.dataset.aiProfileId || coreCall("makeAiProfileId"),
-      enabled: !!get("enabled")?.checked,
+      enabled: !!card.querySelector<HTMLInputElement>('[data-ai-field="enabled"]')?.checked,
       name: String(get("name")?.value || `模型 ${index + 1}`),
       baseUrl: String(get("baseUrl")?.value || "").trim().replace(/\/+$/, ""),
       apiKey: String(get("apiKey")?.value || "").trim(),
       model: String(get("model")?.value || AI_DEFAULTS.model).trim(),
       temperature: Number(get("temperature")?.value),
       maxTokens: Number(get("maxTokens")?.value) || AI_DEFAULTS.maxTokens,
-      stream: !!get("stream")?.checked,
+      stream: !!card.querySelector<HTMLInputElement>('[data-ai-field="stream"]')?.checked,
     }, index);
   }
 
   function saveAiProfilesFromForm() {
     const root = ensurePanel();
     const profiles = state.aiProfiles?.length ? [...state.aiProfiles] : [...loadAiProfiles()];
-    const editor = root.querySelector('[data-role="ai-editor"] [data-ai-profile-id]');
+    const editor = root.querySelector<HTMLElement>('[data-role="ai-editor"] [data-ai-profile-id]');
     if (editor) {
       const index = profiles.findIndex((x) => x.id === editor.dataset.aiProfileId);
       if (index >= 0) profiles[index] = readAiProfileCard(editor, index);
@@ -6476,20 +6341,17 @@ export function mountWorkbench(SubBatch) {
     return saveAiProfiles(profiles);
   }
 
-  function saveAiConfigFromForm() {
-    const profiles = saveAiProfilesFromForm();
-    return profiles.find((x) => x.enabled) || profiles[0];
-  }
-
-  function handleAiProfileAction(button) {
-    const editor = button.closest?.("[data-ai-profile-id]");
+  function handleAiProfileAction(button: HTMLElement) {
+    const editor = button.closest<HTMLElement>("[data-ai-profile-id]");
     const action = button.dataset.aiProfileAct;
     if (!editor || !action) return;
     const profiles = saveAiProfilesFromForm();
     const index = profiles.findIndex((x) => x.id === editor.dataset.aiProfileId);
     if (index < 0) return;
+    const current = profiles[index];
+    if (!current) return;
     if (action === "duplicate") {
-      const copy = coreCall("createAiProfile", { ...profiles[index], id: coreCall("makeAiProfileId"), name: `${profiles[index].name} 副本` }, index + 1);
+      const copy = coreCall("createAiProfile", { ...current, id: coreCall("makeAiProfileId"), name: `${current.name} 副本` }, index + 1);
       profiles.splice(index + 1, 0, copy);
       saveAiProfiles(profiles);
       state.aiEditorId = copy.id;
@@ -6501,6 +6363,7 @@ export function mountWorkbench(SubBatch) {
         return;
       }
       const [removed] = profiles.splice(index, 1);
+      if (!removed) return;
       const next = profiles[Math.min(index, profiles.length - 1)] || profiles[0];
       saveAiProfiles(profiles);
       state.aiEditorId = next?.id || "";
@@ -6509,8 +6372,8 @@ export function mountWorkbench(SubBatch) {
     }
   }
 
-  function toggleAiPanel(forceShow) {
-    const root = ensurePanel();
+  function toggleAiPanel(forceShow?: boolean) {
+    ensurePanel();
     // v0.7：AI 是独立全高工作区，不再挤在底部小条
     if (forceShow === false) {
       setWorkspace("subs");
@@ -6528,7 +6391,7 @@ export function mountWorkbench(SubBatch) {
     // 不在这里重绘设置表单：否则“送去 AI”会先用存储值覆盖用户刚输入的 Key / maxTokens。
   }
 
-  function createAiRuntime(label = "AI") {
+  function createAiRuntime(label = "AI"): WorkbenchAiRuntime {
     return {
       label,
       abort: false,
@@ -6537,7 +6400,10 @@ export function mountWorkbench(SubBatch) {
     };
   }
 
-  function createAiRun(profile, sessionId, task = null, promptProfile = null) {
+  function createAiRun(
+    profile: BatchModel, sessionId: number,
+    task: WorkbenchPostTask | BatchTask | null = null, promptProfile: PromptProfile | null = null,
+  ): WorkbenchAiRun {
     const taskId = String(task?.id || "legacy-output");
     const prompt = promptProfile ? coreCall("createPromptProfile", promptProfile, 0) : null;
     return {
@@ -6577,15 +6443,15 @@ export function mountWorkbench(SubBatch) {
     return !!getActiveAiRun()?.busy;
   }
 
-  function aggregateRunStatus(runs) {
+  function aggregateRunStatus(runs: WorkbenchAiRun[]) {
     if (runs.some((r) => r.busy || r.status === "running")) return "running";
-    if (runs.some((r) => r.status === "error")) return "error";
-    if (runs.length && runs.every((r) => r.status === "done")) return "done";
-    if (runs.some((r) => r.status === "stopped")) return "stopped";
+    if (runs.some((r: { status: string; }) => r.status === "error")) return "error";
+    if (runs.length && runs.every((r: { status: string; }) => r.status === "done")) return "done";
+    if (runs.some((r: { status: string; }) => r.status === "stopped")) return "stopped";
     return "queued";
   }
 
-  function taskDisplayName(task) {
+  function taskDisplayName(task: { modelIds: unknown[]; order: number; id: string; promptId: string; enabled: boolean; }|WorkbenchPostTask) {
     const run = state.aiRunOrder.map((id) => state.aiRuns.get(id)).find((r) => r?.taskId === task?.id);
     return run?.promptName || promptForTask(task)?.name || "未命名产物";
   }
@@ -6594,14 +6460,14 @@ export function mountWorkbench(SubBatch) {
     const parseStore = appFn("studio.parseStore");
     if (parseStore) {
       try { return parseStore(storageGet(STUDIO_CHAT_STORE_KEY, null)); }
-      catch (_) { return {}; }
+      catch  { return {}; }
     }
     try {
       const raw = storageGet(STUDIO_CHAT_STORE_KEY, null);
       if (!raw) return {};
       const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
       return parsed && typeof parsed === "object" ? parsed : {};
-    } catch (_) {
+    } catch  {
       return {};
     }
   }
@@ -6612,7 +6478,7 @@ export function mountWorkbench(SubBatch) {
     const persist = appFn("studio.persist");
     if (persist) {
       const store = persist(loadStudioChatStore(), key, state, Date.now());
-      try { storageSet(STUDIO_CHAT_STORE_KEY, JSON.stringify(store)); } catch (_) { /* ignore */ }
+      try { storageSet(STUDIO_CHAT_STORE_KEY, JSON.stringify(store)); } catch  { /* ignore */ }
       return;
     }
     const store = loadStudioChatStore();
@@ -6626,7 +6492,7 @@ export function mountWorkbench(SubBatch) {
     };
     const keys = Object.keys(store).sort((a, b) => (store[b].updatedAt || 0) - (store[a].updatedAt || 0));
     for (const extra of keys.slice(24)) delete store[extra];
-    try { storageSet(STUDIO_CHAT_STORE_KEY, JSON.stringify(store)); } catch (_) { /* ignore */ }
+    try { storageSet(STUDIO_CHAT_STORE_KEY, JSON.stringify(store)); } catch  { /* ignore */ }
   }
 
   function loadStudioChat(routeKey = currentRouteVideoKey()) {
@@ -6650,20 +6516,16 @@ export function mountWorkbench(SubBatch) {
       currentInputPreviewText("raw"), currentInputPreviewText("processed"), state.studioContextPref);
   }
 
-  function clipStudioContext(text) {
-    return appCall("studio.compressTranscript", text, "", STUDIO_CHAT_CONTEXT_CHARS).text;
-  }
-
   function refreshStudioMemory() {
     return appCall("studio.refreshMemory", state, STUDIO_CHAT_KEEP_RECENT, STUDIO_CHAT_MEMORY_CHARS);
   }
 
-  function matchStudioSlash(query) {
+  function matchStudioSlash(query: string) {
     const q = String(query || "").replace(/^\//, "").trim().toLowerCase();
     return STUDIO_SLASH_COMMANDS.filter((cmd) => !q || cmd.aliases.some((a) => a.startsWith(q) || a.includes(q)));
   }
 
-  function parseStudioSlashInput(text) {
+  function parseStudioSlashInput(text: string) {
     const hit = String(text || "").trim().match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/);
     if (!hit) return null;
     const token = String(hit[1] || "").toLowerCase();
@@ -6673,8 +6535,8 @@ export function mountWorkbench(SubBatch) {
 
   function renderStudioSlashMenu() {
     const root = document.getElementById(PANEL_ID);
-    const menu = root?.querySelector('[data-role="studio-slash"]');
-    const input = root?.querySelector('[data-role="studio-input"]');
+    const menu = root?.querySelector<HTMLElement>('[data-role="studio-slash"]');
+    const input = root?.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-role="studio-input"]');
     if (!menu || !input) return;
     const value = String(input.value || "");
     const typingCommand = /^\/[^\s]*$/.test(value);
@@ -6695,11 +6557,11 @@ export function mountWorkbench(SubBatch) {
   }
 
   function hideStudioSlashMenu() {
-    const menu = document.getElementById(PANEL_ID)?.querySelector('[data-role="studio-slash"]');
+    const menu = document.getElementById(PANEL_ID)?.querySelector<HTMLElement>('[data-role="studio-slash"]');
     if (menu) menu.hidden = true;
   }
 
-  function studioMessageHtml(msg) {
+  function studioMessageHtml(msg: StudioMessage) {
     const role = msg.role === "user" ? "user" : msg.role === "system" ? "system" : "assistant";
     if (role === "system") {
       return `<div class="bsb-studio-msg system">${escapeHtml(msg.content || "")}</div>`;
@@ -6716,7 +6578,7 @@ export function mountWorkbench(SubBatch) {
     return `<div class="bsb-studio-msg assistant" data-studio-msg="${escapeAttr(msg.id || "")}"><span class="bsb-studio-role">研读</span><div class="bsb-studio-answer" data-role="studio-answer">${body}</div></div>`;
   }
 
-  function paintStudioAnswer(msgId, text, streaming) {
+  function paintStudioAnswer(msgId: string|undefined, text: string, streaming: boolean) {
     const cards = document.querySelector(`#${PANEL_ID} [data-studio-msg="${msgId}"] [data-role="studio-answer"]`);
     if (!cards) return false;
     cards.innerHTML = String(text || "").trim()
@@ -6729,14 +6591,14 @@ export function mountWorkbench(SubBatch) {
     const root = ensurePanel();
     if (state.ui) state.ui.aiStage = "chat";
     applyAiWorkbenchStageUi();
-    const host = root.querySelector('[data-role="ai-content"]');
-    const meta = root.querySelector('[data-role="ai-canvas-meta"]');
+    const host = root.querySelector<HTMLElement>('[data-role="ai-content"]');
+    const meta = root.querySelector<HTMLElement>('[data-role="ai-canvas-meta"]');
     const ctx = studioTranscriptContext();
     const route = currentRouteVideoRef();
     const pack = state.studioLastContextMeta;
     const bits = [ctx.source];
     if (route?.bvid) bits.push(route.bvid);
-    if (pack?.compressed) bits.push(`字幕 ${Math.round(pack.original / 100) / 10}k→${Math.round(pack.kept / 100) / 10}k`);
+    if (pack?.compressed) bits.push(`字幕 ${Math.round(Number(pack.original) / 100) / 10}k→${Math.round(Number(pack.kept) / 100) / 10}k`);
     if (state.studioMemoryTurns) bits.push(`记忆 ${state.studioMemoryTurns} 轮`);
     if (meta) meta.textContent = bits.join(" · ");
     if (!host) return;
@@ -6745,12 +6607,12 @@ export function mountWorkbench(SubBatch) {
       return;
     }
     const joined = (state.studioMessages || []).map((m) => m.content || "").join("\n");
-    try { await ensureKnowledgeRenderLibs(joined); } catch (_) { /* fallback inside cards */ }
+    try { await ensureKnowledgeRenderLibs(joined); } catch  { /* fallback inside cards */ }
     if (currentAiWorkbenchStage() !== "chat") return;
-    const box = root.querySelector('[data-role="ai-md"]');
+    const box = root.querySelector<HTMLElement>('[data-role="ai-md"]');
     const prevTop = box?.scrollTop || 0;
     host.innerHTML = `<div class="bsb-studio-thread">${state.studioMessages.map(studioMessageHtml).join("")}</div>`;
-    try { linkifyTimestamps(host); } catch (_) { /* ignore */ }
+    try { linkifyTimestamps(host); } catch  { /* ignore */ }
     await hydrateKnowledgeAnswerDom(host, state.renderEpoch);
     if (box) {
       state.aiProgScroll = true;
@@ -6763,10 +6625,10 @@ export function mountWorkbench(SubBatch) {
     const root = document.getElementById(PANEL_ID);
     if (!root) return;
     const show = !!(state.aiBusy || state.studioBusy);
-    root.querySelectorAll('[data-act="ai-stop"]').forEach((b) => {
+    root.querySelectorAll<HTMLElement>('[data-act="ai-stop"]').forEach((b) => {
       b.style.display = show ? "" : "none";
     });
-    const stream = root.querySelector('[data-role="ai-stream"]');
+    const stream = root.querySelector<HTMLElement>('[data-role="ai-stream"]');
     if (stream) stream.classList.toggle("streaming", !!(state.studioBusy || (typeof activeAiRunBusy === "function" && activeAiRunBusy())));
   }
 
@@ -6774,8 +6636,8 @@ export function mountWorkbench(SubBatch) {
     const runtime = state.studioRuntime;
     if (!runtime) return;
     runtime.abort = true;
-    try { runtime.abortController?.abort(); } catch (_) { /* noop */ }
-    try { runtime.xhr?.abort?.(); } catch (_) { /* noop */ }
+    try { runtime.abortController?.abort(); } catch  { /* noop */ }
+    try { runtime.xhr?.abort?.(); } catch  { /* noop */ }
   }
 
   function studioClearChat() {
@@ -6853,7 +6715,7 @@ export function mountWorkbench(SubBatch) {
     setStatus("正在精炼压缩记忆…");
     let latest = "";
     try {
-      await new Promise((resolve, reject) => {
+      await new Promise<void>((resolve, reject) => {
         requestChatCompletion({
           runtime,
           baseUrl: model.baseUrl,
@@ -6884,7 +6746,7 @@ export function mountWorkbench(SubBatch) {
     } catch (error) {
       if (state.studioRuntime !== runtime) return;
       if (runtime.abort) setStatus("已停止记忆压缩");
-      else setStatus(`记忆精炼失败，仍保留抽取稿：${error?.message || error}`, "err");
+      else setStatus(`记忆精炼失败，仍保留抽取稿：${errorMessage(error)}`, "err");
     } finally {
       if (state.studioRuntime === runtime) {
         state.studioBusy = false;
@@ -6894,7 +6756,7 @@ export function mountWorkbench(SubBatch) {
     }
   }
 
-  function runStudioSlash(commandId) {
+  function runStudioSlash(commandId: string) {
     if (commandId === "clear") return studioClearChat();
     if (commandId === "stop") {
       abortStudioRequest();
@@ -6933,7 +6795,7 @@ export function mountWorkbench(SubBatch) {
     }
   }
 
-  async function sendStudioChat(rawText) {
+  async function sendStudioChat(rawText: string) {
     const text = String(rawText || "").trim();
     if (!text || state.studioBusy) return;
     const slash = parseStudioSlashInput(text);
@@ -6975,14 +6837,14 @@ export function mountWorkbench(SubBatch) {
       "</transcript>",
     ].filter(Boolean).join("\n");
     const messages = appCall("studio.buildChatMessages",
-      system, state.studioMessages, userMsg.id, text, STUDIO_CHAT_KEEP_RECENT);
+      system, state.studioMessages, userMsg.id || "", text, STUDIO_CHAT_KEEP_RECENT);
     const runtime = createAiRuntime(`对话 · ${model.name || model.model}`);
     state.studioRuntime = runtime;
     state.studioBusy = true;
     refreshStudioStopUi();
     let latest = "";
     try {
-      await new Promise((resolve, reject) => {
+      await new Promise<void>((resolve, reject) => {
         requestChatCompletion({
           runtime,
           baseUrl: model.baseUrl,
@@ -6993,7 +6855,7 @@ export function mountWorkbench(SubBatch) {
           stream: model.stream !== false,
           messages,
           onStatus() {},
-          onDelta(_delta, full) {
+          onDelta(_delta, full: unknown) {
             if (state.studioRuntime !== runtime) return;
             latest = appCall("studio.updateTurn", botMsg, full);
             if (!paintStudioAnswer(botMsg.id, latest, true)) renderStudioCanvas();
@@ -7009,7 +6871,7 @@ export function mountWorkbench(SubBatch) {
       if (state.studioRuntime !== runtime) return;
       const stopped = !!runtime.abort;
       appCall("studio.failTurn", botMsg, latest, error, stopped);
-      setStatus(stopped ? "对话已停止" : `对话失败：${error?.message || error}`, stopped ? "" : "err");
+      setStatus(stopped ? "对话已停止" : `对话失败：${errorMessage(error)}`, stopped ? "" : "err");
     } finally {
       if (state.studioRuntime === runtime) {
         state.studioBusy = false;
@@ -7039,26 +6901,26 @@ export function mountWorkbench(SubBatch) {
       refreshStudioStopUi();
       return;
     }
-    root.querySelectorAll("[data-ai-stage]").forEach((button) => {
+    root.querySelectorAll<HTMLElement>("[data-ai-stage]").forEach((button) => {
       const active = button.dataset.aiStage === stage;
       button.classList.toggle("active", active);
       button.setAttribute("aria-selected", active ? "true" : "false");
     });
-    const preNav = root.querySelector('[data-role="ai-preprocess-nav"]');
-    const postNav = root.querySelector('[data-role="ai-postprocess-nav"]');
-    const dock = root.querySelector('[data-role="studio-dock"]');
-    const wrap = root.querySelector(".bsb-ai-canvas-wrap");
+    const preNav = root.querySelector<HTMLElement>('[data-role="ai-preprocess-nav"]');
+    const postNav = root.querySelector<HTMLElement>('[data-role="ai-postprocess-nav"]');
+    const dock = root.querySelector<HTMLElement>('[data-role="studio-dock"]');
+    const wrap = root.querySelector<HTMLElement>(".bsb-ai-canvas-wrap");
     if (preNav) preNav.hidden = stage !== "preprocess";
     if (postNav) postNav.hidden = stage !== "postprocess";
     if (dock) dock.hidden = stage !== "chat";
     wrap?.classList.toggle("is-studio", stage === "chat");
-    root.querySelectorAll("[data-preprocess-action]").forEach((el) => { el.hidden = stage !== "preprocess"; });
-    root.querySelectorAll("[data-postprocess-action]").forEach((el) => { el.hidden = stage !== "postprocess"; });
-    root.querySelectorAll("[data-studio-action]").forEach((el) => { el.hidden = stage !== "chat"; });
-    root.querySelectorAll("[data-pipeline-action]").forEach((el) => { el.hidden = stage === "chat"; });
-    const label = root.querySelector('[data-role="ai-canvas-stage-label"]');
+    root.querySelectorAll<HTMLElement>("[data-preprocess-action]").forEach((el) => { el.hidden = stage !== "preprocess"; });
+    root.querySelectorAll<HTMLElement>("[data-postprocess-action]").forEach((el) => { el.hidden = stage !== "postprocess"; });
+    root.querySelectorAll<HTMLElement>("[data-studio-action]").forEach((el) => { el.hidden = stage !== "chat"; });
+    root.querySelectorAll<HTMLElement>("[data-pipeline-action]").forEach((el) => { el.hidden = stage === "chat"; });
+    const label = root.querySelector<HTMLElement>('[data-role="ai-canvas-stage-label"]');
     if (label) label.textContent = stage === "preprocess" ? "预处理" : stage === "chat" ? "对话" : "后处理";
-    root.querySelectorAll("[data-ai-preprocess-view]").forEach((button) => {
+    root.querySelectorAll<HTMLElement>("[data-ai-preprocess-view]").forEach((button) => {
       const active = button.dataset.aiPreprocessView === state.aiInputView;
       button.classList.toggle("active", active);
       button.setAttribute("aria-selected", active ? "true" : "false");
@@ -7067,14 +6929,14 @@ export function mountWorkbench(SubBatch) {
   }
 
   /** Render one preprocess paragraph with the same MD/math/highlight stack as Knowledge. */
-  function renderProcessedTranscriptBodyHtml(plain) {
+  function renderProcessedTranscriptBodyHtml(plain: string) {
     const source = String(plain || "").trim();
     if (!source) return "";
     const { md, maths } = prepareMarkdownMath(source);
     return knowledgeChunkToHtml(md, maths);
   }
 
-  function renderProcessedTranscriptCards(text) {
+  function renderProcessedTranscriptCards(text: unknown) {
     const blocks = appCall("preprocess.readingBlocks", text);
     if (!blocks.length) return `<pre class="bsb-main-input-preview">${escapeHtml(text)}</pre>`;
     let paragraphIndex = 0;
@@ -7117,7 +6979,8 @@ export function mountWorkbench(SubBatch) {
       const segmentId = `seg-${kbvid || "local"}-p${kpage}-${Math.round(kstart * 10)}-${coreCall("md5", clean || block.text).slice(0, 7)}`;
       const sourceKey = knowledgeSourceKey(kbvid, kpage);
       const bodyHtml = renderProcessedTranscriptBodyHtml(clean || block.text);
-      return `<article class="bsb-preprocess-block" data-preprocess-block="${paragraphIndex}" data-knowledge-segment="${escapeAttr(segmentId)}" data-knowledge-source-key="${escapeAttr(sourceKey)}" data-knowledge-bvid="${escapeAttr(kbvid)}" data-knowledge-page="${kpage}" data-knowledge-start="${kstart}" data-knowledge-end="${kend}" data-knowledge-clock="${escapeAttr(first?.clock || "")}" data-knowledge-topic="${escapeAttr(block.topic || "")}" data-knowledge-title="${escapeAttr(fallbackSource.title || "")}" data-knowledge-author="${escapeAttr(fallbackSource.author || "")}"><div class="bsb-preprocess-block-head"><span class="bsb-preprocess-block-index">${String(paragraphIndex).padStart(2, "0")}</span>${block.topic ? `<span class="bsb-preprocess-block-topic">${escapeHtml(block.topic)}</span>` : ""}${warning}${timeHtml}</div><div class="bsb-preprocess-block-body bsb-md-rich" data-knowledge-plain="${escapeAttr(clean || block.text)}">${bodyHtml}</div></article>`;
+      const topic = "topic" in block ? block.topic : "";
+      return `<article class="bsb-preprocess-block" data-preprocess-block="${paragraphIndex}" data-knowledge-segment="${escapeAttr(segmentId)}" data-knowledge-source-key="${escapeAttr(sourceKey)}" data-knowledge-bvid="${escapeAttr(kbvid)}" data-knowledge-page="${kpage}" data-knowledge-start="${kstart}" data-knowledge-end="${kend}" data-knowledge-clock="${escapeAttr(first?.clock || "")}" data-knowledge-topic="${escapeAttr(topic || "")}" data-knowledge-title="${escapeAttr(fallbackSource.title || "")}" data-knowledge-author="${escapeAttr(fallbackSource.author || "")}"><div class="bsb-preprocess-block-head"><span class="bsb-preprocess-block-index">${String(paragraphIndex).padStart(2, "0")}</span>${topic ? `<span class="bsb-preprocess-block-topic">${escapeHtml(topic)}</span>` : ""}${warning}${timeHtml}</div><div class="bsb-preprocess-block-body bsb-md-rich" data-knowledge-plain="${escapeAttr(clean || block.text)}">${bodyHtml}</div></article>`;
     }).join("");
     return `<div class="bsb-preprocess-reading">${html}</div>`;
   }
@@ -7135,7 +6998,7 @@ export function mountWorkbench(SubBatch) {
     applyAiWorkbenchStageUi();
     const kind = state.aiInputView === "processed" ? "processed" : "raw";
     const text = kind === "processed" ? processed : raw;
-    const status = root.querySelector('[data-role="ai-preprocess-status"]');
+    const status = root.querySelector<HTMLElement>('[data-role="ai-preprocess-status"]');
     if (status) {
       if (!raw) status.textContent = "当前视频暂无字幕";
       else if (!state.preprocessEnabled) status.textContent = "预处理已关闭";
@@ -7143,11 +7006,11 @@ export function mountWorkbench(SubBatch) {
       else if (processed) status.textContent = state.preprocessRun?.statusText || "AI 字幕已就绪";
       else status.textContent = "原始字幕已就绪 · 尚未生成 AI 字幕";
     }
-    const meta = root.querySelector('[data-role="ai-canvas-meta"]');
+    const meta = root.querySelector<HTMLElement>('[data-role="ai-canvas-meta"]');
     if (meta) meta.textContent = kind === "processed" ? "AI 处理字幕" : "原始字幕";
     state.renderEpoch += 1;
     state.aiViewingPreprocess = kind === "processed";
-    const content = root.querySelector('[data-role="ai-content"]');
+    const content = root.querySelector<HTMLElement>('[data-role="ai-content"]');
     if (!content) return;
     if (kind === "processed" && state.preprocessRun?.busy) {
       content.innerHTML = `<div class="bsb-empty"><div class="bsb-empty-ico">◌</div><strong>AI 正在处理字幕…</strong><span>${escapeHtml(state.preprocessRun.statusText || "正在规范化、翻译并整理字幕")}</span></div>`;
@@ -7155,7 +7018,7 @@ export function mountWorkbench(SubBatch) {
       if (kind === "processed") {
         try {
           await ensureKnowledgeRenderLibs(text);
-        } catch (_) {
+        } catch  {
           /* simple markdown fallback */
         }
         content.innerHTML = renderProcessedTranscriptCards(text);
@@ -7180,7 +7043,7 @@ export function mountWorkbench(SubBatch) {
     if (state.ui) state.ui.aiStage = "postprocess";
     applyAiWorkbenchStageUi();
     renderAiResultTabs();
-    const meta = root.querySelector('[data-role="ai-canvas-meta"]');
+    const meta = root.querySelector<HTMLElement>('[data-role="ai-canvas-meta"]');
     const activeRun = getActiveAiRun();
     if (activeRun) {
       if (meta) meta.textContent = `${activeRun.promptName || "产物"} · ${activeRun.config.name || activeRun.config.model}`;
@@ -7194,13 +7057,13 @@ export function mountWorkbench(SubBatch) {
       await selectAiOutputTask(task.id);
       return;
     }
-    const content = root.querySelector('[data-role="ai-content"]');
+    const content = root.querySelector<HTMLElement>('[data-role="ai-content"]');
     if (meta) meta.textContent = "暂无后处理产物";
     if (content) content.innerHTML = '<div class="bsb-empty"><div class="bsb-empty-ico">◇</div><strong>还没有后处理产物</strong><span>打开“处理方案”添加全 Mermaid 学习图谱或其他 POST Prompt。</span></div>';
     saveUiGeom();
   }
 
-  async function setAiWorkbenchStage(stage, opts = {}) {
+  async function setAiWorkbenchStage(stage: string, opts: { silent?: boolean; render?: boolean } = {}) {
     const next = stage === "postprocess" ? "postprocess" : stage === "chat" ? "chat" : "preprocess";
     if (state.ui) state.ui.aiStage = next;
     applyAiWorkbenchStageUi();
@@ -7215,8 +7078,8 @@ export function mountWorkbench(SubBatch) {
 
   function renderAiResultTabs() {
     const root = document.getElementById(PANEL_ID);
-    const outputHost = root?.querySelector('[data-role="ai-result-tabs"]');
-    const modelHost = root?.querySelector('[data-role="ai-model-tabs"]');
+    const outputHost = root?.querySelector<HTMLElement>('[data-role="ai-result-tabs"]');
+    const modelHost = root?.querySelector<HTMLElement>('[data-role="ai-model-tabs"]');
     if (!outputHost || !modelHost) return;
     const tasks = currentPostTasks().filter((t) => t.enabled !== false);
     if (!tasks.some((t) => t.id === state.aiActiveTaskId)) state.aiActiveTaskId = tasks[0]?.id || "";
@@ -7227,7 +7090,7 @@ export function mountWorkbench(SubBatch) {
     }
 
     outputHost.innerHTML = tasks.map((task) => {
-      const runs = state.aiRunOrder.map((id) => state.aiRuns.get(id)).filter((r) => r?.taskId === task.id);
+      const runs = state.aiRunOrder.map((id) => state.aiRuns.get(id)).filter((r): r is WorkbenchAiRun => !!r && r.taskId === task.id);
       const status = aggregateRunStatus(runs);
       const active = task.id === state.aiActiveTaskId ? " active" : "";
       const configuredModels = task.modelIds?.length || 0;
@@ -7235,11 +7098,13 @@ export function mountWorkbench(SubBatch) {
     }).join("");
 
     const activeTask = tasks.find((t) => t.id === state.aiActiveTaskId) || tasks[0];
-    const runs = state.aiRunOrder.map((id) => state.aiRuns.get(id)).filter((r) => r?.taskId === activeTask.id);
+    if (!activeTask) return;
+    const runs = state.aiRunOrder.map((id) => state.aiRuns.get(id)).filter((r): r is WorkbenchAiRun => !!r && r.taskId === activeTask.id);
     if (runs.length) {
-      if (!runs.some((r) => r.id === state.aiActiveRunId)) {
-        state.aiActiveRunId = runs[0].id;
-        syncActiveRunBridge(runs[0]);
+      const firstRun = runs[0];
+      if (firstRun && !runs.some((r) => r.id === state.aiActiveRunId)) {
+        state.aiActiveRunId = firstRun.id;
+        syncActiveRunBridge(firstRun);
       }
       modelHost.innerHTML = runs.map((run) => {
         const active = run.id === state.aiActiveRunId ? " active" : "";
@@ -7249,26 +7114,26 @@ export function mountWorkbench(SubBatch) {
       }).join("");
     } else {
       const profiles = state.aiProfiles?.length ? state.aiProfiles : loadAiProfiles();
-      const modelNames = (activeTask.modelIds || []).map((id) => profiles.find((p) => p.id === id)).filter(Boolean);
+      const modelNames = (activeTask.modelIds || []).map((id) => profiles.find((p: { id: unknown; }) => p.id === id)).filter((p): p is AiProfile => !!p);
       modelHost.innerHTML = modelNames.length
         ? modelNames.map((p) => `<span class="bsb-model-tab queued"><span class="dot"></span><span>${escapeHtml(p.name || p.model)}</span></span>`).join("")
         : '<span class="bsb-ai-result-empty">这个产物还没有选择 LLM</span>';
     }
   }
 
-  function flowSelectHtml(dataAttr, optionsHtml, disabled = false) {
+  function flowSelectHtml(dataAttr: string, optionsHtml: string, disabled = false) {
     return `<div class="bsb-flow-select"><select ${dataAttr} ${disabled ? "disabled" : ""}>${optionsHtml}</select><span class="bsb-flow-select-icon" aria-hidden="true">⌄</span></div>`;
   }
 
-  function flowStepperHtml(dataAttr, value, min, max, step, unit = "", disabled = false) {
+  function flowStepperHtml(dataAttr: string, value: number, min: number, max: number, step: number, unit = "", disabled = false) {
     const off = disabled ? "disabled" : "";
     return `<div class="bsb-flow-stepper ${disabled ? "disabled" : ""}"><button type="button" data-flow-step="-1" ${off} aria-label="减少">−</button><div class="bsb-flow-stepper-value"><input type="number" min="${min}" max="${max}" step="${step}" value="${escapeAttr(value)}" ${dataAttr} ${off}>${unit ? `<span class="bsb-flow-stepper-unit">${escapeHtml(unit)}</span>` : ""}</div><button type="button" data-flow-step="1" ${off} aria-label="增加">＋</button></div>`;
   }
 
-  function flowTaskModelsHtml(task, profiles) {
+  function flowTaskModelsHtml(task: WorkbenchPostTask, profiles: AiProfile[]) {
     const list = Array.isArray(profiles) ? profiles : [];
     const selectedIds = (task.modelIds || []).filter((id) => list.some((p) => p.id === id));
-    const ranked = selectedIds.map((id, i) => {
+    const ranked = selectedIds.map((id: unknown, i: number) => {
       const profile = list.find((p) => p.id === id);
       const name = profile?.name || profile?.model || id;
       const off = profile && profile.enabled === false ? " · 停用" : "";
@@ -7288,10 +7153,10 @@ export function mountWorkbench(SubBatch) {
     </div>`;
   }
 
-  function flowTaskCardHtml(task, index, prompts, profiles) {
-    const posts = prompts.filter((p) => p.stage === "postprocess");
+  function flowTaskCardHtml(task: WorkbenchPostTask, index: number, prompts: PromptProfile[], profiles: AiProfile[]) {
+    const posts = prompts.filter((p: { stage: string; }) => p.stage === "postprocess");
     const prompt = posts.find((p) => p.id === task.promptId) || posts[0] || null;
-    const promptOptions = posts.map((p) => `<option value="${escapeAttr(p.id)}"${p.id === task.promptId ? " selected" : ""}>${escapeHtml(p.name)}</option>`).join("");
+    const promptOptions = posts.map((p: { id: unknown; name: unknown; }) => `<option value="${escapeAttr(p.id)}"${p.id === task.promptId ? " selected" : ""}>${escapeHtml(p.name)}</option>`).join("");
     return `<article class="bsb-output-task-card" data-flow-task-id="${escapeAttr(task.id)}">
       <div class="bsb-output-task-head"><span class="bsb-output-task-index">${String(index + 1).padStart(2, "0")}</span><span class="bsb-output-task-name">${escapeHtml(prompt?.name || "未命名产物")}</span><button type="button" class="bsb-mini" data-flow-task-remove="${escapeAttr(task.id)}" title="移除这个产物">移除</button></div>
       <div class="bsb-flow-field"><span class="bsb-flow-label">产物 Prompt</span>${flowSelectHtml("data-flow-task-prompt", promptOptions || '<option value="">没有 POST Prompt</option>')}</div>
@@ -7301,13 +7166,13 @@ export function mountWorkbench(SubBatch) {
 
   function renderAiFlowDrawer() {
     const root = document.getElementById(PANEL_ID);
-    const host = root?.querySelector('[data-role="ai-flow-drawer"]');
+    const host = root?.querySelector<HTMLElement>('[data-role="ai-flow-drawer"]');
     if (!host) return;
     const prompts = state.promptProfiles?.length ? state.promptProfiles : loadPromptProfiles().prompts;
     const profiles = state.aiProfiles?.length ? state.aiProfiles : loadAiProfiles();
     const tasks = state.postTasks?.length ? state.postTasks : loadPostTasks();
-    const pres = prompts.filter((p) => p.stage === "preprocess");
-    const preOptions = pres.map((p) => `<option value="${escapeAttr(p.id)}"${p.id === state.activePrePromptId ? " selected" : ""}>${escapeHtml(p.name)}</option>`).join("");
+    const pres = prompts.filter((p: { stage: string; }) => p.stage === "preprocess");
+    const preOptions = pres.map((p: { id: unknown; name: unknown; }) => `<option value="${escapeAttr(p.id)}"${p.id === state.activePrePromptId ? " selected" : ""}>${escapeHtml(p.name)}</option>`).join("");
     const readyProfiles = profiles.filter((p) => p.apiKey && p.baseUrl && p.model);
     const preModelOptions = readyProfiles.map((p) => `<option value="${escapeAttr(p.id)}"${p.id === state.preprocessModelId ? " selected" : ""}>${escapeHtml(p.name || p.model)}</option>`).join("");
     const studioModel = getStudioModelConfig();
@@ -7354,13 +7219,13 @@ export function mountWorkbench(SubBatch) {
       </div>`;
   }
 
-  function currentInputPreviewText(kind) {
+  function currentInputPreviewText(kind: string) {
     const input = state.aiSessionInput;
     if (kind === "processed") return String(input?.vars?.processedSubtitle || state.preprocessRun?.text || "");
     if (input?.vars?.rawSubtitle) return String(input.vars.rawSubtitle);
     const routeKey = currentRouteVideoKey();
     const current = routeKey
-      ? (state.items.find((it) => routeVideoKey(it.bvid, it.page || 1) === routeKey)
+      ? (state.items.find((it) => routeVideoKey(it.bvid, Number(it.page) || 1) === routeKey)
         || (routeVideoKey(state.transcriptItem?.bvid, state.transcriptItem?.page || 1) === routeKey ? state.transcriptItem : null))
       : null;
     if (current?.subStatus === "ok" && current.data?.length) return buildSubtitlePayload([current]);
@@ -7370,7 +7235,7 @@ export function mountWorkbench(SubBatch) {
 
   function renderAiInputDrawer() {
     const root = document.getElementById(PANEL_ID);
-    const host = root?.querySelector('[data-role="ai-input-drawer"]');
+    const host = root?.querySelector<HTMLElement>('[data-role="ai-input-drawer"]');
     if (!host) return;
     const raw = currentInputPreviewText("raw");
     const processed = currentInputPreviewText("processed");
@@ -7388,9 +7253,9 @@ export function mountWorkbench(SubBatch) {
     const root = document.getElementById(PANEL_ID);
     if (!root) return;
     state.aiDrawer = ["flow", "input"].includes(kind) ? kind : "";
-    const flow = root.querySelector('[data-role="ai-flow-drawer"]');
-    const input = root.querySelector('[data-role="ai-input-drawer"]');
-    const backdrop = root.querySelector('[data-role="ai-drawer-backdrop"]');
+    const flow = root.querySelector<HTMLElement>('[data-role="ai-flow-drawer"]');
+    const input = root.querySelector<HTMLElement>('[data-role="ai-input-drawer"]');
+    const backdrop = root.querySelector<HTMLElement>('[data-role="ai-drawer-backdrop"]');
     if (state.aiDrawer === "flow") renderAiFlowDrawer();
     if (state.aiDrawer === "input") renderAiInputDrawer();
     flow?.classList.toggle("open", state.aiDrawer === "flow");
@@ -7400,29 +7265,29 @@ export function mountWorkbench(SubBatch) {
     if (backdrop) backdrop.hidden = !state.aiDrawer;
   }
 
-  async function selectAiOutputTask(taskId) {
+  async function selectAiOutputTask(taskId: string) {
     if (state.ui) state.ui.aiStage = "postprocess";
     applyAiWorkbenchStageUi();
     const task = currentPostTasks().find((t) => t.id === String(taskId || ""));
     if (!task) return;
     state.aiActiveTaskId = task.id;
-    const runs = state.aiRunOrder.map((id) => state.aiRuns.get(id)).filter((r) => r?.taskId === task.id);
+    const runs = state.aiRunOrder.map((id) => state.aiRuns.get(id)).filter((r): r is WorkbenchAiRun => !!r && r.taskId === task.id);
     renderAiResultTabs();
-    if (runs.length) await selectAiRun(runs[0].id);
+    if (runs[0]) await selectAiRun(runs[0].id);
     else {
       const root = ensurePanel();
-      const content = root.querySelector('[data-role="ai-content"]');
+      const content = root.querySelector<HTMLElement>('[data-role="ai-content"]');
       if (content) content.innerHTML = `<div class="bsb-empty"><div class="bsb-empty-ico">◇</div><strong>${escapeHtml(taskDisplayName(task))}</strong><span>这个产物还没有运行结果。点击“运行全部”按照当前处理方案生成。</span></div>`;
     }
   }
 
-  function syncActiveRunBridge(run) {
+  function syncActiveRunBridge(run: WorkbenchAiRun | null | undefined) {
     state.aiRaw = run?.raw || "";
     state.aiSourceBvids = run?.sourceBvids || [];
     state.ai = run?.config || state.ai;
   }
 
-  async function selectAiRun(runId) {
+  async function selectAiRun(runId: string) {
     if (state.ui) state.ui.aiStage = "postprocess";
     applyAiWorkbenchStageUi();
     const run = state.aiRuns.get(String(runId || ""));
@@ -7430,7 +7295,7 @@ export function mountWorkbench(SubBatch) {
     state.aiViewingPreprocess = false;
     if (run.taskId) state.aiActiveTaskId = run.taskId;
     const root = ensurePanel();
-    const box = root.querySelector('[data-role="ai-md"]');
+    const box = root.querySelector<HTMLElement>('[data-role="ai-md"]');
     const previous = getActiveAiRun();
     if (previous && box) {
       previous.scrollTop = box.scrollTop;
@@ -7450,7 +7315,7 @@ export function mountWorkbench(SubBatch) {
     refreshAiChips();
     setAiBusy(anyAiRunBusy());
 
-    const content = root.querySelector('[data-role="ai-content"]');
+    const content = root.querySelector<HTMLElement>('[data-role="ai-content"]');
     if (run.busy) {
       if (content && !run.raw) {
         content.innerHTML = `<div class="bsb-empty"><div class="bsb-empty-ico">◌</div><strong>${escapeHtml(run.config.name || run.config.model)} 正在生成…</strong><span>${escapeHtml(run.statusText || "正在连接模型")}</span></div>`;
@@ -7466,11 +7331,11 @@ export function mountWorkbench(SubBatch) {
     setStatus(`${run.promptName || "产物"} · ${run.config.name || run.config.model} · ${run.statusText || run.status}`, run.status === "error" ? "err" : run.status === "done" ? "ok" : undefined);
   }
 
-  function abortAiRun(run) {
+  function abortAiRun(run: WorkbenchAiRun | null | undefined) {
     if (!run) return;
     run.abort = true;
-    try { run.abortController?.abort(); } catch (_) { /* noop */ }
-    try { if (run.xhr && typeof run.xhr.abort === "function") run.xhr.abort(); } catch (_) { /* noop */ }
+    try { run.abortController?.abort(); } catch  { /* noop */ }
+    try { if (run.xhr && typeof run.xhr.abort === "function") run.xhr.abort(); } catch  { /* noop */ }
   }
 
   function abortAllAiRuns() {
@@ -7478,24 +7343,24 @@ export function mountWorkbench(SubBatch) {
     state.aiRunOrder.forEach((id) => abortAiRun(state.aiRuns.get(id)));
     if (state.preprocessRun?.runtime) {
       state.preprocessRun.runtime.abort = true;
-      try { state.preprocessRun.runtime.abortController?.abort(); } catch (_) { /* noop */ }
-      try { state.preprocessRun.runtime.xhr?.abort?.(); } catch (_) { /* noop */ }
+      try { state.preprocessRun.runtime.abortController?.abort(); } catch  { /* noop */ }
+      try { state.preprocessRun.runtime.xhr?.abort?.(); } catch  { /* noop */ }
       for (const child of state.preprocessRun.childRuntimes || []) abortPreprocessChildRuntime(child);
     }
   }
 
-  function latestAiConfigForRun(run) {
+  function latestAiConfigForRun(run: { profileId: string; config: unknown }) {
     let profiles = [];
     try {
       profiles = saveAiProfilesFromForm();
-    } catch (_) {
+    } catch  {
       profiles = loadAiProfiles();
     }
     const latest = profiles.find((profile) => profile.id === run?.profileId);
     return coreCall("createAiProfile", latest || run?.config || AI_DEFAULTS, 0);
   }
 
-  function validateAiRunConfigs(configs) {
+  function validateAiRunConfigs(configs: readonly (BatchModel & Partial<AiProfile>)[]) {
     const invalid = (configs || []).filter((cfg) => !cfg?.apiKey || !cfg?.baseUrl || !cfg?.model);
     if (!invalid.length) return true;
     setStatus(`以下模型配置不完整：${invalid.map((cfg) => cfg?.name || cfg?.model || "未命名模型").join("、")}`, "err");
@@ -7505,9 +7370,11 @@ export function mountWorkbench(SubBatch) {
   function summarizeAiRuns(prefix = "全部产物生成结束") {
     setAiBusy(anyAiRunBusy());
     if (anyAiRunBusy()) return;
-    const runs = state.aiRunOrder.map((id) => state.aiRuns.get(id)).filter(Boolean);
+    const runs = state.aiRunOrder.map((id) => state.aiRuns.get(id)).filter((run): run is WorkbenchAiRun => !!run);
     if (!runs.length) return;
-    const { done, failed, stopped } = appCall("ai.summarizeRuns", runs);
+    const summary = appCall("ai.summarizeRuns", runs);
+    if (!summary) return;
+    const { done, failed, stopped } = summary;
     persistAiSessionCache().catch(() => {});
     setStatus(`${prefix} · 成功 ${done} · 失败 ${failed} · 停止 ${stopped}`, failed ? "err" : "ok");
   }
@@ -7540,7 +7407,7 @@ export function mountWorkbench(SubBatch) {
     state.aiActiveRunId = runId;
     syncActiveRunBridge(replacement);
     renderAiResultTabs();
-    await selectAiRun(runId);
+    await selectAiRun(runId || "");
     setStatus(`${replacement.promptName} · ${config.name || config.model} · 仅重新生成当前版本 · 复用现有${input.preprocessEnabled ? "规范化稿" : "原始字幕"}`);
 
     await runAiProfile(replacement, input.vars, replacement.promptProfile, input.commonMeta);
@@ -7549,7 +7416,7 @@ export function mountWorkbench(SubBatch) {
 
   async function regenerateAllAiRuns() {
     const input = appCall("ai.cloneSessionInput", state.aiSessionInput);
-    const oldRuns = state.aiRunOrder.map((id) => state.aiRuns.get(id)).filter(Boolean);
+    const oldRuns = state.aiRunOrder.map((id) => state.aiRuns.get(id)).filter((run): run is WorkbenchAiRun => !!run);
     if (!input || !oldRuns.length) {
       setStatus("当前没有可重新生成的批次，请先完成一次分析", "err");
       return;
@@ -7590,12 +7457,13 @@ export function mountWorkbench(SubBatch) {
 
     await Promise.allSettled(state.aiRunOrder.map((id) => {
       const run = state.aiRuns.get(id);
-      return runAiProfile(run, state.aiSessionInput.vars, run.promptProfile, state.aiSessionInput.commonMeta);
+      if (!run) return;
+      return runAiProfile(run, input.vars, run.promptProfile, input.commonMeta);
     }));
     if (sessionId === state.aiSessionSeq) summarizeAiRuns("全部模型重新生成结束");
   }
 
-  function setAiBusy(busy) {
+  function setAiBusy(busy: boolean|null) {
     const anyBusy = busy == null ? anyAiRunBusy() : !!busy;
     state.aiBusy = anyBusy;
     const root = ensurePanel();
@@ -7608,8 +7476,8 @@ export function mountWorkbench(SubBatch) {
   function updateJumpLatestBtn() {
     const root = document.getElementById(PANEL_ID);
     if (!root) return;
-    const jump = root.querySelector('[data-act="ai-jump"]');
-    const stickBtn = root.querySelector('[data-act="ai-stick"]');
+    const jump = root.querySelector<HTMLElement>('[data-act="ai-jump"]');
+    const stickBtn = root.querySelector<HTMLElement>('[data-act="ai-stick"]');
     // 粘底按钮：仅在真正跟随中亮
     if (stickBtn) {
       stickBtn.classList.toggle(
@@ -7625,14 +7493,14 @@ export function mountWorkbench(SubBatch) {
     jump.classList.toggle("show", show);
   }
 
-  function applyAiScrollResolved(r) {
+  function applyAiScrollResolved(r: {stick:boolean;userReading:boolean;allowPaintScroll:boolean}) {
     state.aiStickBottom = r.stick;
     state.aiUserReading = r.userReading;
     updateJumpLatestBtn();
   }
 
   /** 用户主动离开底部：进入阅读锁，后续 paint 绝对不改 scrollTop */
-  function detachAiFollow(_reason) {
+  function detachAiFollow() {
     applyAiScrollResolved(
       resolveAiScrollState(
         {
@@ -7673,8 +7541,8 @@ export function mountWorkbench(SubBatch) {
    * 4) 阅读锁期间 paint **完全不碰** scrollTop
    * 5) 用户自己滚到真正贴底（gap<=12）才解除阅读锁并恢复跟随
    */
-  function bindAiScrollBehavior(root) {
-    const box = root.querySelector('[data-role="ai-md"]');
+  function bindAiScrollBehavior(root: HTMLElement) {
+    const box = root.querySelector<HTMLElement>('[data-role="ai-md"]');
     if (!box || box.dataset.bsbScrollBound === "1") return;
     box.dataset.bsbScrollBound = "1";
 
@@ -7683,23 +7551,25 @@ export function mountWorkbench(SubBatch) {
         updateJumpLatestBtn();
         return;
       }
-      detachAiFollow("gesture");
+      detachAiFollow();
     };
 
     // 捕获：向上意图优先于任何 paint
     box.addEventListener(
       "wheel",
-      (e) => {
+      (e: { deltaY: number; }) => {
         if (e.deltaY < 0) onLeaveBottom();
       },
       { passive: true, capture: true },
     );
     // 触控板/手指：touchmove 向上
+    let touchY: number | null = null;
+    let pointerY: number | null = null;
     box.addEventListener(
       "touchstart",
       (e) => {
         const t = e.touches && e.touches[0];
-        box._bsbTouchY = t ? t.clientY : null;
+        touchY = t ? t.clientY : null;
       },
       { passive: true, capture: true },
     );
@@ -7707,33 +7577,33 @@ export function mountWorkbench(SubBatch) {
       "touchmove",
       (e) => {
         const t = e.touches && e.touches[0];
-        if (!t || box._bsbTouchY == null) return;
-        if (t.clientY - box._bsbTouchY > 8) onLeaveBottom();
-        box._bsbTouchY = t.clientY;
+        if (!t || touchY == null) return;
+        if (t.clientY - touchY > 8) onLeaveBottom();
+        touchY = t.clientY;
       },
       { passive: true, capture: true },
     );
     box.addEventListener(
       "pointerdown",
       () => {
-        box._bsbPtrY = null;
+        pointerY = null;
       },
       { passive: true },
     );
     box.addEventListener(
       "pointermove",
-      (e) => {
+      (e: { buttons: number; pointerType: string; clientY: number; }) => {
         if (e.buttons === 0 && e.pointerType === "mouse") return;
-        if (box._bsbPtrY != null && e.clientY - box._bsbPtrY > 8) {
+        if (pointerY != null && e.clientY - pointerY > 8) {
           onLeaveBottom();
         }
-        box._bsbPtrY = e.clientY;
+        pointerY = e.clientY;
       },
       { passive: true },
     );
     box.addEventListener(
       "keydown",
-      (e) => {
+      (e: { key: string; }) => {
         if (
           e.key === "ArrowUp" ||
           e.key === "PageUp" ||
@@ -7763,7 +7633,7 @@ export function mountWorkbench(SubBatch) {
     );
   }
 
-  function scrollAiToBottom(force) {
+  function scrollAiToBottom(force: boolean) {
     if (!force && (!state.aiStickBottom || state.aiUserReading)) {
       updateJumpLatestBtn();
       return;
@@ -7791,11 +7661,11 @@ export function mountWorkbench(SubBatch) {
         state.aiProgScroll = false;
       });
     }
-    detachAiFollow("top");
+    detachAiFollow();
   }
 
   /** 流式绘制：只更新 text；非跟随模式零碰 scrollTop */
-  function paintAiStreamText(full) {
+  function paintAiStreamText(full: unknown) {
     state.aiPendingText = String(full || "");
     if (state.aiPaintRaf || state.aiPaintTimer) return;
 
@@ -7804,12 +7674,12 @@ export function mountWorkbench(SubBatch) {
       state.aiPaintRaf = requestAnimationFrame(() => {
         state.aiPaintRaf = 0;
         const root = ensurePanel();
-        const box = root.querySelector('[data-role="ai-md"]');
-        const content = root.querySelector('[data-role="ai-content"]') || box;
+        const box = root.querySelector<HTMLElement>('[data-role="ai-md"]');
+        const content = root.querySelector<HTMLElement>('[data-role="ai-content"]') || box;
         if (!box || !content) return;
         const text = state.aiPendingText || "…";
-        let pre = content.querySelector(".bsb-ai-stream-body");
-        let caret = content.querySelector(".bsb-ai-caret");
+        let pre = content.querySelector<HTMLElement>(".bsb-ai-stream-body");
+        let caret = content.querySelector<HTMLElement>(".bsb-ai-caret");
         if (!pre) {
           content.replaceChildren();
           pre = document.createElement("pre");
@@ -7820,7 +7690,7 @@ export function mountWorkbench(SubBatch) {
           state.aiRenderedText = "";
         }
         if (!state.aiStreamTextNode || state.aiStreamTextNode.parentNode !== pre) {
-          state.aiStreamTextNode = pre.firstChild || pre.appendChild(document.createTextNode(""));
+          state.aiStreamTextNode = pre.firstChild instanceof Text ? pre.firstChild : pre.appendChild(document.createTextNode(""));
           state.aiRenderedText = state.aiStreamTextNode.data || "";
         }
         if (activeAiRunBusy() && !caret) {
@@ -7859,17 +7729,18 @@ export function mountWorkbench(SubBatch) {
     state.aiPaintTimer = window.setTimeout(run, STREAM_PAINT_INTERVAL_MS);
   }
 
-  function buildSubtitlePayload(items) {
+  function buildSubtitlePayload(items: WorkbenchLibraryItem[]) {
     return items
       .map((it) => {
-        const head = `=== ${it.bvid}${it.page > 1 ? " P" + it.page : ""} ${it.title || ""} ===`;
+        const head = `=== ${it.bvid}${(it.page || 1) > 1 ? " P" + it.page : ""} ${it.title || ""} ===`;
         return `${head}\n${coreCall("cuesToAiText", it.data || [], it.bvid, it.page || 1)}`;
       })
       .join("\n\n");
   }
 
-  function loadScriptOnce(src, globalCheck) {
-    return new Promise((resolve, reject) => {
+  function loadScriptOnce(src: string|undefined, globalCheck:()=>boolean) {
+    return new Promise<void>((resolve, reject) => {
+      if (!src) return reject(new Error("Missing script URL"));
       if (globalCheck && globalCheck()) return resolve();
       const existed = document.querySelector(`script[data-bsb-src="${src}"]`);
       if (existed) {
@@ -7886,7 +7757,8 @@ export function mountWorkbench(SubBatch) {
     });
   }
 
-  function loadCssOnce(href) {
+  function loadCssOnce(href: string|undefined) {
+    if (!href) return;
     if (document.querySelector(`link[data-bsb-href="${href}"]`)) return;
     const l = document.createElement("link");
     l.rel = "stylesheet"; l.href = href; l.dataset.bsbHref = href;
@@ -7956,38 +7828,39 @@ export function mountWorkbench(SubBatch) {
     state.renderLibs.mermaid = true;
   }
 
-  function hasMathSyntax(md) {
+  function hasMathSyntax(md: string) {
     return /```(?:math|latex|tex)|\$\$[\s\S]+?\$\$|\\\[|\\\(|\$[^\n$]+\$/.test(md);
   }
 
-  function hasCodeSyntax(md) {
+  function hasCodeSyntax(md: string) {
     return /```(?!mermaid|math|latex|tex)[^\n]*\n/i.test(md);
   }
 
-  function hasMermaidSyntax(md) {
+  function hasMermaidSyntax(md: string) {
     return /```mermaid\s*\n/i.test(md);
   }
 
   async function yieldToMain() {
-    if (globalThis.scheduler && typeof globalThis.scheduler.yield === "function") {
-      await globalThis.scheduler.yield();
+    const scheduler: unknown = Reflect.get(globalThis, "scheduler");
+    if (scheduler && typeof scheduler === "object" && "yield" in scheduler && typeof scheduler.yield === "function") {
+      await scheduler.yield();
     } else {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
   }
 
   /** KaTeX → HTML；失败返回 null 走 fallback */
-  function katexToHtml(tex, display) {
+  function katexToHtml(tex: string, display: boolean) {
     if (typeof katex === "undefined" || !katex.renderToString) return null;
     try {
       const html = katex.renderToString(String(tex || ""), {
         displayMode: !!display, throwOnError: false, strict: "ignore", trust: false, output: "html",
       });
       return display ? `<div class="bsb-katex-display">${html}</div>` : `<span class="bsb-katex-inline">${html}</span>`;
-    } catch (_) { return null; }
+    } catch  { return null; }
   }
 
-  function simpleMarkdownFallback(md) {
+  function simpleMarkdownFallback(md: string) {
     let html = escapeHtml(md);
     html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
       `<pre><span class="bsb-code-lang">${escapeHtml(lang || "text")}</span><code>${escapeHtml(code)}</code></pre>`);
@@ -8001,7 +7874,7 @@ export function mountWorkbench(SubBatch) {
     return `<p>${html}</p>`;
   }
 
-  function sanitizeRenderedHtml(html) {
+  function sanitizeRenderedHtml(html: string) {
     if (typeof DOMPurify === "undefined") return simpleMarkdownFallback(stripHtml(html));
     return DOMPurify.sanitize(html, {
       USE_PROFILES: { html: true },
@@ -8031,7 +7904,7 @@ export function mountWorkbench(SubBatch) {
     });
   }
 
-  async function replaceHostInBatches(host, html, epoch) {
+  async function replaceHostInBatches(host: Element, html: string, epoch: number) {
     const tpl = document.createElement("template");
     tpl.innerHTML = html;
     const nodes = Array.from(tpl.content.childNodes);
@@ -8046,10 +7919,11 @@ export function mountWorkbench(SubBatch) {
     return true;
   }
 
-  function linkifyTimestamps(host) {
+  function linkifyTimestamps(host: Node) {
     const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
-    const nodes = [];
+    const nodes: Text[] = [];
     while (walker.nextNode()) {
+      if (!(walker.currentNode instanceof Text)) continue;
       const p = walker.currentNode.parentElement;
       if (!p || p.closest("pre,code,a,button,.katex,.mermaid,.bsb-toc")) continue;
       if (/\[(?:BV[\w]+\s+)?(?:P\d+\s+)?(?:\d{1,2}:)?\d{1,2}:\d{2}\]/i.test(walker.currentNode.data)) nodes.push(walker.currentNode);
@@ -8059,8 +7933,7 @@ export function mountWorkbench(SubBatch) {
       const text = node.data; let last = 0; let m; const frag = document.createDocumentFragment();
       while ((m = re.exec(text))) {
         if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
-        const parts = m[4].split(":").map(Number);
-        const sec = parts.length === 3 ? parts[0] * 3600 + parts[1] * 60 + parts[2] : parts[0] * 60 + parts[1];
+        const sec = (m[4] || "").split(":").map(Number).reduce((seconds, part) => seconds * 60 + part, 0);
         const btn = document.createElement("button");
         btn.type = "button"; btn.className = "bsb-time-link";
         btn.dataset.seconds = String(sec); btn.dataset.bvid = m[2] || ""; btn.dataset.page = m[3] || "1";
@@ -8072,11 +7945,11 @@ export function mountWorkbench(SubBatch) {
     }
   }
 
-  function seekToVideoTimestamp(seconds, bvid, page) {
-    if (!Number.isFinite(seconds)) return;
+  function seekToVideoTimestamp(seconds: unknown, bvid: string, page: number) {
+    if (typeof seconds !== "number" || !Number.isFinite(seconds)) return;
     const currentBvid = extractBvid(location.href);
     let currentPage = 1;
-    try { currentPage = Math.max(1, Number(new URL(location.href).searchParams.get("p")) || 1); } catch (_) { /* ignore */ }
+    try { currentPage = Math.max(1, Number(new URL(location.href).searchParams.get("p")) || 1); } catch  { /* ignore */ }
     const targetPage = Math.max(1, Number(page) || 1);
     const sameVideo = !bvid || !currentBvid || bvid.toLowerCase() === currentBvid.toLowerCase();
     const video = document.querySelector("video");
@@ -8094,7 +7967,7 @@ export function mountWorkbench(SubBatch) {
     }
   }
 
-  function buildToc(host) {
+  function buildToc(host: Element) {
     const headings = Array.from(host.querySelectorAll("h1,h2,h3")).filter((h) => !h.closest(".bsb-toc"));
     if (headings.length < 2) return;
     const details = document.createElement("details"); details.className = "bsb-toc"; details.open = true;
@@ -8110,102 +7983,22 @@ export function mountWorkbench(SubBatch) {
     details.append(summary, nav); host.prepend(details);
   }
 
-  async function enhanceCodeBlocks(host, epoch) {
+  async function enhanceCodeBlocks(host: Element, epoch: number) {
     const blocks = Array.from(host.querySelectorAll("pre code"));
     if (!blocks.length) return;
     try { await ensureHighlight(); } catch (e) { console.warn("[bili-subbatch] highlight load", e); return; }
     for (let i = 0; i < blocks.length; i++) {
       if (epoch !== state.renderEpoch) return;
-      const block = blocks[i]; const pre = block.parentElement;
+      const block = blocks[i];
+      if (!block) continue;
+      const pre = block.parentElement;
       const m = (block.className || "").match(/language-([\w#+-]+)/i);
-      if (m && pre && !pre.querySelector(".bsb-code-lang")) {
-        const tag = document.createElement("span"); tag.className = "bsb-code-lang"; tag.textContent = m[1]; pre.insertBefore(tag, block);
+      if (m && pre && !pre.querySelector<HTMLElement>(".bsb-code-lang")) {
+        const tag = document.createElement("span"); tag.className = "bsb-code-lang"; tag.textContent = m[1] || ""; pre.insertBefore(tag, block);
       }
-      try { if (typeof hljs !== "undefined") hljs.highlightElement(block); } catch (_) { /* unknown language */ }
+      try { if (typeof hljs !== "undefined") hljs.highlightElement(block); } catch  { /* unknown language */ }
       if (i % 5 === 4) await yieldToMain();
     }
-  }
-
-  function parseMermaidViewBox(svg) {
-    const raw = String(svg?.getAttribute("viewBox") || "").trim();
-    const values = raw.split(/[\s,]+/).map(Number);
-    if (values.length === 4 && values.every(Number.isFinite) && values[2] > 0 && values[3] > 0) {
-      return { x: values[0], y: values[1], width: values[2], height: values[3] };
-    }
-    const width = Number.parseFloat(svg?.getAttribute("width")) || 960;
-    const height = Number.parseFloat(svg?.getAttribute("height")) || 540;
-    return { x: 0, y: 0, width, height };
-  }
-
-  function getMermaidScale(card) {
-    const scale = Number(card?.dataset?.scale);
-    return Number.isFinite(scale) && scale > 0 ? scale : 1;
-  }
-
-  function updateMermaidScaleLabel(card) {
-    const label = card?.querySelector(".bsb-mermaid-scale");
-    if (label) label.textContent = `${Math.round(getMermaidScale(card) * 100)}%`;
-  }
-
-  function setMermaidScale(card, scale, mode = "manual") {
-    if (!card) return;
-    const stage = card.querySelector(".bsb-mermaid-stage");
-    if (!stage) return;
-    const baseWidth = Number(stage.dataset.baseWidth) || 760;
-    const next = Math.max(0.35, Math.min(3, Number(scale) || 1));
-    card.dataset.scale = String(next);
-    card.dataset.fit = mode;
-    stage.style.setProperty("--bsb-mermaid-width", `${Math.max(240, Math.round(baseWidth * next))}px`);
-    updateMermaidScaleLabel(card);
-  }
-
-  function fitMermaidToViewport(card) {
-    const viewport = card?.querySelector(".bsb-mermaid-viewport");
-    const stage = card?.querySelector(".bsb-mermaid-stage");
-    if (!viewport || !stage) return;
-    const baseWidth = Number(stage.dataset.baseWidth) || 760;
-    const available = Math.max(240, viewport.clientWidth - 36);
-    setMermaidScale(card, Math.min(1.5, available / baseWidth), "fit");
-    viewport.scrollLeft = 0;
-    viewport.scrollTop = 0;
-  }
-
-  function closeMermaidFullscreen() {
-    const root = document.getElementById(PANEL_ID);
-    const modal = root?.querySelector(".bsb-mermaid-modal");
-    if (!modal) return;
-    const card = modal.querySelector(".bsb-mermaid-card");
-    const placeholder = card?._bsbMermaidPlaceholder;
-    if (card && placeholder?.parentNode) {
-      card.classList.remove("is-fullscreen");
-      placeholder.replaceWith(card);
-      card._bsbMermaidPlaceholder = null;
-      const full = card.querySelector('[data-mmd-act="fullscreen"]');
-      if (full) { full.textContent = "全屏"; full.title = "全屏查看"; }
-    }
-    modal.remove();
-  }
-
-  function openMermaidFullscreen(card) {
-    if (!card || card.closest(".bsb-mermaid-modal")) return;
-    closeMermaidFullscreen();
-    const root = document.getElementById(PANEL_ID);
-    if (!root) return;
-    const placeholder = document.createComment("bsb-mermaid-placeholder");
-    card.before(placeholder);
-    card._bsbMermaidPlaceholder = placeholder;
-    const modal = document.createElement("div");
-    modal.className = "bsb-mermaid-modal";
-    modal.setAttribute("role", "dialog");
-    modal.setAttribute("aria-modal", "true");
-    modal.setAttribute("aria-label", "Mermaid 图表全屏查看");
-    modal.addEventListener("click", (e) => { if (e.target === modal) closeMermaidFullscreen(); });
-    card.classList.add("is-fullscreen");
-    const full = card.querySelector('[data-mmd-act="fullscreen"]');
-    if (full) { full.textContent = "退出"; full.title = "退出全屏"; }
-    modal.appendChild(card);
-    root.appendChild(modal);
-    requestAnimationFrame(() => fitMermaidToViewport(card));
   }
 
   /**
@@ -8213,7 +8006,7 @@ export function mountWorkbench(SubBatch) {
    * 因此在渲染、修复和持久化前统一移除图内 BV/P 时间戳。
    * 普通 Markdown 正文中的时间戳完全不受影响。
    */
-  function stripMermaidTimestampCitations(code) {
+  function stripMermaidTimestampCitations(code: string) {
     return String(code || "")
       // [BV1xxx P1 03:21] / [BV号 P号 mm:ss] / [P2 01:02:03]
       .replace(
@@ -8229,17 +8022,17 @@ export function mountWorkbench(SubBatch) {
       .trim();
   }
 
-  function sanitizeMermaidTimestampCitationsInMarkdown(markdown) {
+  function sanitizeMermaidTimestampCitationsInMarkdown(markdown: string) {
     return String(markdown || "").replace(
       /```mermaid\s*\r?\n([\s\S]*?)```/gi,
       (_, code) => `\`\`\`mermaid\n${stripMermaidTimestampCitations(code)}\n\`\`\``,
     );
   }
 
-  function extractMermaidCode(text) {
+  function extractMermaidCode(text: string) {
     let source = String(text || "").trim();
     const fenced = source.match(/```(?:mermaid)?[ \t]*\r?\n([\s\S]*?)```/i);
-    if (fenced) source = fenced[1];
+    if (fenced) source = fenced[1] || "";
     source = source
       .replace(/^\s*```(?:mermaid)?\s*/i, "")
       .replace(/```\s*$/i, "")
@@ -8248,7 +8041,7 @@ export function mountWorkbench(SubBatch) {
     return stripMermaidTimestampCitations(source);
   }
 
-  function replaceMermaidBlockAt(markdown, targetIdx, nextCode) {
+  function replaceMermaidBlockAt(markdown: string, targetIdx: number, nextCode: string) {
     const fn = coreFn("replaceMermaidBlockAt");
     if (fn) return fn(markdown, targetIdx, nextCode);
     let current = -1;
@@ -8276,8 +8069,8 @@ export function mountWorkbench(SubBatch) {
     const payload = buildFn({
       routeKey,
       sessionInput: appCall("ai.cloneSessionInput", state.aiSessionInput, state.aiSessionInput?.sessionId),
-      preprocessRun: state.preprocessRun,
-      runs: state.aiRunOrder.map((id) => state.aiRuns.get(id)).filter(Boolean),
+      preprocessRun: state.preprocessRun ? { ...state.preprocessRun, settings: { ...state.preprocessRun.settings } } : null,
+      runs: state.aiRunOrder.flatMap((id) => { const run = state.aiRuns.get(id); return run ? [{ ...run, config: { ...run.config } }] : []; }),
       activeRunId: state.aiActiveRunId,
       activeTaskId: state.aiActiveTaskId,
     });
@@ -8286,7 +8079,7 @@ export function mountWorkbench(SubBatch) {
     return true;
   }
 
-  async function hydrateAiSessionFromCache(payload, routeKey) {
+  async function hydrateAiSessionFromCache(payload: AiSessionCachePayload, routeKey: string) {
     if (currentRouteVideoKey() && currentRouteVideoKey() !== routeKey) return false;
     const sessionId = ++state.aiSessionSeq;
     state.aiAbort = false;
@@ -8299,10 +8092,10 @@ export function mountWorkbench(SubBatch) {
       const run = createAiRun(
         latestAiConfigForRun({ profileId: draft.profileId, config: draft.config }),
         sessionId,
-        draft.taskSnapshot,
-        draft.promptProfile,
+        draft.taskSnapshot ? normalizePostTask(draft.taskSnapshot) : null,
+        draft.promptProfile ? coreCall("createPromptProfile", draft.promptProfile, 0) : null,
       );
-      Object.assign(run, draft);
+      applyRestoredRunOutput(run, draft);
       state.aiRuns.set(run.id, run);
       state.aiRunOrder.push(run.id);
     }
@@ -8315,11 +8108,11 @@ export function mountWorkbench(SubBatch) {
       savedActive,
       state.aiActiveTaskId,
     );
-    state.aiSessionInput = appCall("ai.cloneSessionInput", payload.sessionInput, sessionId);
+    state.aiSessionInput = appCall("ai.cloneSessionInput", normalizeCachedSessionInput(payload.sessionInput), sessionId);
     if (state.aiSessionInput) state.aiSessionInput.routeKey = routeKey;
     const preprocess = coreCall("draftHydratedPreprocessRun", payload.preprocessRun);
     state.preprocessRun = preprocess
-      ? { runtime: null, childRuntimes: new Set(), ...preprocess }
+      ? restorePreprocessRun(preprocess, createAiRuntime("缓存预处理"))
       : null;
     state.aiSessionRouteKey = routeKey;
     state.autoAnalyzeKey = routeKey;
@@ -8337,7 +8130,7 @@ export function mountWorkbench(SubBatch) {
     return true;
   }
 
-  async function restoreAiSessionForRoute(routeKey) {
+  async function restoreAiSessionForRoute(routeKey: string) {
     const key = String(routeKey || "").trim();
     if (!key || state.aiBusy) return false;
     if (
@@ -8355,9 +8148,9 @@ export function mountWorkbench(SubBatch) {
       try {
         const cacheKey = coreCall("aiSessionCacheKey", key);
         if (!cacheKey) return false;
-        const cached = await persistentCache.read(cacheKey);
+        const cached = await persistentCache.read<AiSessionCachePayload>(cacheKey);
         if (currentRouteVideoKey() && currentRouteVideoKey() !== key) return false;
-        if (!coreCall("isUsableAiSessionCache", cached?.value)) return false;
+        if (!cached || !coreCall("isUsableAiSessionCache", cached.value)) return false;
         return await hydrateAiSessionFromCache(cached.value, key);
       } catch (error) {
         console.warn("[bili-subbatch] restore ai session", error);
@@ -8372,7 +8165,7 @@ export function mountWorkbench(SubBatch) {
     return state.aiSessionRestorePromise;
   }
 
-  function persistRepairedMermaid(targetRun, idx, nextCode) {
+  function persistRepairedMermaid(targetRun: WorkbenchAiRun|null, idx: number, nextCode: string) {
     // targetRun 必须由点击“重绘”时捕获，不能在异步修复结束后重新读取当前标签。
     const run = targetRun || getActiveAiRun();
     const source = run?.raw ?? state.aiRaw;
@@ -8396,7 +8189,7 @@ export function mountWorkbench(SubBatch) {
     return true;
   }
 
-  function currentMermaidRepairResolution(targetRun, preferredProfileId) {
+  function currentMermaidRepairResolution(targetRun: WorkbenchAiRun|null, preferredProfileId = "") {
     const run = targetRun || getActiveAiRun();
     const profiles = state.aiProfiles?.length ? state.aiProfiles : loadAiProfiles();
     const fn = coreFn("resolveMermaidRepairConfig");
@@ -8417,18 +8210,16 @@ export function mountWorkbench(SubBatch) {
     };
   }
 
-  function mermaidSetupError(resolution) {
+  function mermaidSetupError(resolution: { missing: string[]; }) {
     const hintFn = coreFn("mermaidRepairSetupHint");
     const message = typeof hintFn === "function"
-      ? hintFn(resolution?.missing)
+      ? hintFn(resolution.missing.filter((key): key is "apiKey" | "baseUrl" | "model" => key === "apiKey" || key === "baseUrl" || key === "model"))
       : "还没有可用的 LLM。打开 设置 → LLM 填写 API Key。";
-    const err = new Error(message);
-    err.mermaidSetup = true;
-    err.missing = resolution?.missing || [];
+    const err = Object.assign(new Error(message), { mermaidSetup: true, missing: resolution?.missing || [] });
     return err;
   }
 
-  function openSettingsLlm(profileId) {
+  function openSettingsLlm(profileId: string) {
     const root = ensurePanel();
     if (profileId) state.aiEditorId = profileId;
     toggleAiPanel(true);
@@ -8436,9 +8227,9 @@ export function mountWorkbench(SubBatch) {
     setSettingsTab("llm");
     fillAiConfigForm(root);
     requestAnimationFrame(() => {
-      const field = root.querySelector('[data-ai-field="apiKey"]');
+      const field = root.querySelector<HTMLElement>('[data-ai-field="apiKey"]');
       const label = field?.closest("label");
-      root.querySelectorAll(".bsb-llm-field-focus").forEach((el) => el.classList.remove("bsb-llm-field-focus"));
+      root.querySelectorAll<HTMLElement>(".bsb-llm-field-focus").forEach((el) => el.classList.remove("bsb-llm-field-focus"));
       if (label) label.classList.add("bsb-llm-field-focus");
       field?.focus();
       field?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -8446,8 +8237,8 @@ export function mountWorkbench(SubBatch) {
     setStatus("API Key 在「设置 → LLM」这一栏。填好后点保存，再回到笔记重绘。", "ok");
   }
 
-  function saveInlineMermaidProfile(card) {
-    const get = (name) => card.querySelector(`[data-mermaid-field="${name}"]`);
+  function saveInlineMermaidProfile(card: HTMLElement) {
+    const get = (name: string) => card.querySelector<HTMLInputElement>(`[data-mermaid-field="${name}"]`);
     const baseUrl = String(get("baseUrl")?.value || "").trim().replace(/\/+$/, "");
     const apiKey = String(get("apiKey")?.value || "").trim();
     const model = String(get("model")?.value || "").trim();
@@ -8477,7 +8268,7 @@ export function mountWorkbench(SubBatch) {
     return created.id;
   }
 
-  function requestMermaidCodeRepair(code, error, idx, targetRun, preferredProfileId) {
+  function requestMermaidCodeRepair(code: string, error: unknown, idx: number, targetRun: WorkbenchAiRun|null, preferredProfileId?: string) {
     // 缓存会抹掉 apiKey；从设置里的 LLM 回填，不要让用户去翻设置。
     const resolved = currentMermaidRepairResolution(targetRun, preferredProfileId);
     const cfg = resolved.config;
@@ -8486,7 +8277,7 @@ export function mountWorkbench(SubBatch) {
     }
     const runtime = createAiRuntime(`Mermaid 修复 · ${cfg.name || cfg.model || "AI"}`);
 
-    const parseError = String(error?.message || error || "未知渲染错误").slice(0, 4000);
+    const parseError = String(errorMessage(error) || "未知渲染错误").slice(0, 4000);
     const originalCode = String(code || "").slice(0, 30000);
     const messages = [
       {
@@ -8508,13 +8299,13 @@ export function mountWorkbench(SubBatch) {
       },
     ];
 
-    return new Promise((resolve, reject) => {
+    return new Promise<string>((resolve, reject) => {
       let latest = "";
       requestChatCompletion({
         runtime,
-        baseUrl: cfg.baseUrl,
-        apiKey: cfg.apiKey,
-        model: cfg.model,
+        baseUrl: cfg.baseUrl || "",
+        apiKey: cfg.apiKey || "",
+        model: cfg.model || "",
         temperature: 0.1,
         maxTokens: 32768,
         messages,
@@ -8540,31 +8331,31 @@ export function mountWorkbench(SubBatch) {
     });
   }
 
-  async function handleMermaidTool(button) {
+  async function handleMermaidTool(button: HTMLButtonElement) {
     const action = button?.dataset?.mmdAct;
-    const card = button?.closest(".bsb-mermaid-card, .bsb-mermaid-error");
+    const card = button?.closest<MermaidElement>(".bsb-mermaid-card, .bsb-mermaid-error");
 
     if (action === "open-llm") {
-      const host = button.closest?.(".mermaid[data-bsb-m]");
+      const host = button.closest<MermaidElement>(".mermaid[data-bsb-m]");
       const resolved = currentMermaidRepairResolution(getActiveAiRun(), host?._bsbMermaidJob?.preferredProfileId);
       openSettingsLlm(resolved.config?.id || resolved.readyProfiles?.[0]?.id || state.aiEditorId);
       return;
     }
 
     if (action === "retry" || action === "retry-with" || action === "save-inline") {
-      const host = button.closest?.(".mermaid[data-bsb-m]") || card?._bsbMermaidHost;
+      const host = button.closest<MermaidElement>(".mermaid[data-bsb-m]") || card?._bsbMermaidHost;
       const job = host?._bsbMermaidJob || card?._bsbMermaidJob;
       if (!host || !job) {
         setStatus("重绘失败：没有找到该图对应的 Mermaid 源码", "err");
         return;
       }
-      const box = host.querySelector(".bsb-mermaid-error") || card;
+      const box = host.querySelector<MermaidElement>(".bsb-mermaid-error") || card;
       if (action === "save-inline") {
         const savedId = saveInlineMermaidProfile(box || host);
         if (!savedId) return;
         job.preferredProfileId = savedId;
       } else {
-        const picked = box?.querySelector?.('[data-role="mermaid-repair-model"]')?.value || "";
+        const picked = box?.querySelector<HTMLSelectElement>('[data-role="mermaid-repair-model"]')?.value || "";
         if (picked) job.preferredProfileId = picked;
       }
       // 重绘只受当前模型约束：其他模型仍在生成时，不阻塞这个已完成模型。
@@ -8624,7 +8415,7 @@ export function mountWorkbench(SubBatch) {
 
         const persisted = persistRepairedMermaid(targetRun, job.idx, activeCode);
         if (persisted) {
-          try { await persistAiSessionCache(); } catch (_) { /* ignore */ }
+          try { await persistAiSessionCache(); } catch  { /* ignore */ }
         }
         const currentJob = host._bsbMermaidJob;
         if (currentJob) {
@@ -8650,10 +8441,10 @@ export function mountWorkbench(SubBatch) {
         };
         renderMermaidError(host, originalCode, err, job.idx);
         setStatus(
-          err?.mermaidSetup
-            ? String(err.message || "请在这张图里填写 API Key")
-            : `Mermaid 图 ${job.idx + 1} 重绘失败：${err?.message || err}`,
-          err?.mermaidSetup ? "" : "err",
+          isMermaidSetupError(err)
+            ? errorMessage(err) || "请在这张图里填写 API Key"
+            : `Mermaid 图 ${job.idx + 1} 重绘失败：${errorMessage(err)}`,
+          isMermaidSetupError(err) ? "" : "err",
         );
       } finally {
         if (targetRun) targetRun.mermaidRepairing = false;
@@ -8667,7 +8458,7 @@ export function mountWorkbench(SubBatch) {
     }
 
     if (!card) return;
-    const viewport = card.querySelector(".bsb-mermaid-viewport");
+    const viewport = card.querySelector<MermaidElement>(".bsb-mermaid-viewport");
     if (action === "fit") fitMermaidToViewport(card);
     else if (action === "actual") setMermaidScale(card, 1, "actual");
     else if (action === "zoom-in") setMermaidScale(card, getMermaidScale(card) + 0.15);
@@ -8679,85 +8470,16 @@ export function mountWorkbench(SubBatch) {
     if (viewport && action === "actual") { viewport.scrollLeft = 0; viewport.scrollTop = 0; }
   }
 
-  function buildMermaidCard(svg, idx, host) {
-    svg.classList.add("bsb-mermaid-svg");
-    svg.removeAttribute("width");
-    svg.removeAttribute("height");
-    svg.setAttribute("preserveAspectRatio", "xMinYMin meet");
-    svg.setAttribute("role", "img");
-    svg.setAttribute("aria-label", `架构流程图 ${idx + 1}`);
-    const viewBox = parseMermaidViewBox(svg);
-    if (!svg.hasAttribute("viewBox")) svg.setAttribute("viewBox", `${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`);
-
-    const baseWidth = Math.round(Math.max(760, Math.min(3600, viewBox.width)));
-    const card = document.createElement("section");
-    card.className = "bsb-mermaid-card";
-    card.dataset.scale = "1";
-    card.dataset.fit = "actual";
-
-    const toolbar = document.createElement("div");
-    toolbar.className = "bsb-mermaid-toolbar";
-    const title = document.createElement("span");
-    title.className = "bsb-mermaid-title";
-    const repaired = !!host?._bsbMermaidJob?.repaired;
-    title.textContent = `架构流程图 ${idx + 1}${repaired ? " · AI 已修复" : ""} · 可滚动查看`;
-    const tools = document.createElement("span");
-    tools.className = "bsb-mermaid-tools";
-    const makeButton = (toolAction, text, titleText) => {
-      const toolButton = document.createElement("button");
-      toolButton.type = "button";
-      toolButton.className = "bsb-mermaid-tool";
-      toolButton.dataset.mmdAct = toolAction;
-      toolButton.textContent = text;
-      toolButton.title = titleText;
-      toolButton.setAttribute("aria-label", titleText);
-      return toolButton;
-    };
-    tools.append(
-      makeButton("fit", "适宽", "适应可视区域宽度"),
-      makeButton("actual", "100%", "恢复清晰原始尺寸"),
-      makeButton("zoom-out", "−", "缩小图表"),
-    );
-    const scaleLabel = document.createElement("span");
-    scaleLabel.className = "bsb-mermaid-scale";
-    scaleLabel.textContent = "100%";
-    tools.append(
-      scaleLabel,
-      makeButton("zoom-in", "+", "放大图表"),
-      makeButton("retry", "重绘", "先重试渲染；若语法失败则只修复该 Mermaid 代码块"),
-      makeButton("fullscreen", "全屏", "全屏查看"),
-    );
-    toolbar.append(title, tools);
-
-    const viewport = document.createElement("div");
-    viewport.className = "bsb-mermaid-viewport";
-    viewport.tabIndex = 0;
-    viewport.setAttribute("aria-label", "可滚动和缩放的 Mermaid 图表");
-    const stage = document.createElement("div");
-    stage.className = "bsb-mermaid-stage";
-    stage.dataset.baseWidth = String(baseWidth);
-    stage.style.setProperty("--bsb-mermaid-width", `${baseWidth}px`);
-    stage.appendChild(svg);
-    const hint = document.createElement("span");
-    hint.className = "bsb-mermaid-hint";
-    hint.textContent = "Ctrl + 滚轮缩放";
-    viewport.append(stage, hint);
-    card.append(toolbar, viewport);
-    card._bsbMermaidHost = host || null;
-    card._bsbMermaidJob = host?._bsbMermaidJob || null;
-    return card;
-  }
-
-  function enqueueMermaidRender(task) {
+  function enqueueMermaidRender<T>(task: () => Promise<T>) {
     const run = state.mermaidQueue.catch(() => undefined).then(task);
-    state.mermaidQueue = run.catch(() => undefined);
+    state.mermaidQueue = run.then(() => undefined, () => undefined);
     return run;
   }
 
-  function renderMermaidError(node, code, err, idx) {
-    const message = String(err?.message || err || "未知错误");
+  function renderMermaidError(node: MermaidElement, code: string, err: unknown, idx: number) {
+    const message = err ? errorMessage(err) : "未知错误";
     const resolved = currentMermaidRepairResolution(getActiveAiRun(), node?._bsbMermaidJob?.preferredProfileId);
-    const needsSetup = !!(err?.mermaidSetup || resolved.source === "none");
+    const needsSetup = !!(isMermaidSetupError(err) || resolved.source === "none");
     node.replaceChildren();
 
     const box = document.createElement("section");
@@ -8864,11 +8586,11 @@ export function mountWorkbench(SubBatch) {
   }
 
   async function renderMermaidNode(
-    node,
-    code,
-    idx,
-    epoch,
-    { force = false, maxAttempts, showError = true, repaired = false, originalCode = "" } = {},
+    node: MermaidElement,
+    code: string,
+    idx: number,
+    epoch: number,
+    { force = false, maxAttempts, showError = true, repaired = false, originalCode = "" }: { force?: boolean; maxAttempts?: number; showError?: boolean; repaired?: boolean; originalCode?: string } = {},
   ) {
     if (!node || epoch !== state.renderEpoch) return { ok: false, aborted: true };
     if (!force && node.dataset.bsbState === "done") return { ok: true, skipped: true };
@@ -8934,19 +8656,21 @@ export function mountWorkbench(SubBatch) {
     return { ok: false, error: lastError, code: job.code };
   }
 
-  function scheduleMermaid(host, blocks, epoch, scrollRoot) {
-    const nodes = Array.from(host.querySelectorAll(".mermaid[data-bsb-m]"));
+  function scheduleMermaid(host: HTMLElement, blocks: string[], epoch: number, scrollRoot: HTMLElement|null) {
+    const nodes = Array.from(host.querySelectorAll<MermaidElement>(".mermaid[data-bsb-m]"));
     if (!nodes.length) return;
     if (state.mermaidObserver) state.mermaidObserver.disconnect();
     if ("IntersectionObserver" in window) {
       state.mermaidObserver = new IntersectionObserver((entries, observer) => {
         for (const entry of entries) if (entry.isIntersecting) {
           observer.unobserve(entry.target);
-          const idx = Number(entry.target.dataset.bsbM);
-          renderMermaidNode(entry.target, blocks[idx] || "", idx, epoch);
+          if (!(entry.target instanceof HTMLElement)) continue;
+          const node = entry.target as MermaidElement;
+          const idx = Number(node.dataset.bsbM);
+          renderMermaidNode(node, blocks[idx] || "", idx, epoch);
         }
       }, { root: scrollRoot || null, rootMargin: "320px 0px", threshold: 0.01 });
-      nodes.forEach((node) => { node.dataset.bsbState = "pending"; state.mermaidObserver.observe(node); });
+      nodes.forEach((node) => { node.dataset.bsbState = "pending"; state.mermaidObserver?.observe(node); });
     } else {
       nodes.forEach((node, idx) => renderMermaidNode(node, blocks[idx] || "", idx, epoch));
     }
@@ -8956,7 +8680,7 @@ export function mountWorkbench(SubBatch) {
     "bsb-folio", "kicker", "lede", "callout", "steps", "quote", "meta",
   ]);
 
-  function extractHtmlFolioSource(text) {
+  function extractHtmlFolioSource(text: string) {
     const raw = String(text || "");
     const fence = raw.match(/```html\s*\n([\s\S]*?)```/i);
     if (fence?.[1]) return String(fence[1]).trim();
@@ -8964,17 +8688,17 @@ export function mountWorkbench(SubBatch) {
     return article ? article[0].trim() : "";
   }
 
-  function isHtmlFolioSource(text) {
+  function isHtmlFolioSource(text: string) {
     return !!extractHtmlFolioSource(text);
   }
 
-  function extractFolioTitle(html) {
+  function extractFolioTitle(html: string) {
     const hit = String(html || "").match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i);
     if (!hit) return "";
     return stripHtml(hit[1]).replace(/\s+/g, " ").trim();
   }
 
-  function sanitizeFolioHtml(html) {
+  function sanitizeFolioHtml(html: string) {
     if (typeof DOMPurify === "undefined") return `<article class="bsb-folio"><p>${escapeHtml(stripHtml(html))}</p></article>`;
     return DOMPurify.sanitize(html, {
       USE_PROFILES: { html: true },
@@ -8985,15 +8709,15 @@ export function mountWorkbench(SubBatch) {
     });
   }
 
-  function pruneFolioClasses(root) {
-    root.querySelectorAll("[class]").forEach((el) => {
+  function pruneFolioClasses(root: HTMLElement) {
+    root.querySelectorAll<HTMLElement>("[class]").forEach((el) => {
       const next = Array.from(el.classList).filter((name) => FOLIO_CLASS_ALLOW.has(name));
       if (next.length) el.className = next.join(" ");
       else el.removeAttribute("class");
     });
   }
 
-  function slugFolioHeading(text, index) {
+  function slugFolioHeading(text: string, index: number) {
     const fn = coreFn("slugFolioHeading");
     if (fn) return fn(text, index);
     const base = String(text || "")
@@ -9004,8 +8728,8 @@ export function mountWorkbench(SubBatch) {
     return `folio-${base || "s"}-${index + 1}`;
   }
 
-  function collectFolioHeadings(article) {
-    return Array.from(article.querySelectorAll("h2, h3")).map((el, index) => ({
+  function collectFolioHeadings(article: HTMLElement) {
+    return Array.from(article.querySelectorAll<HTMLHeadingElement>("h2, h3")).map((el, index) => ({
       el,
       id: el.id || slugFolioHeading(el.textContent, index),
       level: el.tagName === "H3" ? 3 : 2,
@@ -9013,7 +8737,7 @@ export function mountWorkbench(SubBatch) {
     }));
   }
 
-  function decorateFolioArticle(article) {
+  function decorateFolioArticle(article: HTMLElement) {
     if (!article.classList.contains("bsb-folio")) article.classList.add("bsb-folio");
     const headings = collectFolioHeadings(article);
     headings.forEach((item) => {
@@ -9028,26 +8752,13 @@ export function mountWorkbench(SubBatch) {
     return headings;
   }
 
-  function folioOutlineFromHeadings(headings) {
-    const payload = headings.map((item) => ({ id: item.id, level: item.level, text: item.text }));
-    const build = coreFn("buildFolioOutline");
-    if (build) return build(payload);
-    const roots = [];
-    let chapter = null;
-    for (const item of payload) {
-      const node = { ...item, children: [] };
-      if (item.level === 2 || !chapter) {
-        node.level = 2;
-        roots.push(node);
-        chapter = node;
-      } else {
-        chapter.children.push(node);
-      }
-    }
-    return roots;
+  function folioOutlineFromHeadings(headings: ReturnType<typeof collectFolioHeadings>): FolioOutlineNode[] {
+    return coreCall("buildFolioOutline", headings.map((item) => ({
+      id: item.id, level: item.level === 3 ? 3 as const : 2 as const, text: item.text,
+    })));
   }
 
-  function makeFolioTocLink(node, kind, index) {
+  function makeFolioTocLink(node: FolioOutlineNode, kind: "h2" | "h3", index?: number) {
     const link = document.createElement("button");
     link.type = "button";
     link.className = `bsb-folio-toc-link is-h${node.level}`;
@@ -9056,7 +8767,7 @@ export function mountWorkbench(SubBatch) {
       const num = document.createElement("span");
       num.className = "bsb-folio-toc-index";
       num.textContent = coreFn("formatFolioChapterIndex")
-        ? coreFn("formatFolioChapterIndex")(index)
+        ? coreCall("formatFolioChapterIndex", index || 0)
         : String(index).padStart(2, "0");
       link.appendChild(num);
     } else {
@@ -9071,14 +8782,10 @@ export function mountWorkbench(SubBatch) {
     return link;
   }
 
-  function buildFolioToc(headings) {
+  function buildFolioToc(headings: ReturnType<typeof collectFolioHeadings>) {
     const outline = folioOutlineFromHeadings(headings);
-    const stats = coreFn("countFolioOutline")
-      ? coreFn("countFolioOutline")(outline)
-      : { chapters: outline.length, sections: headings.length };
-    const summary = coreFn("folioOutlineSummary")
-      ? coreFn("folioOutlineSummary")(stats)
-      : `${stats.chapters} 章`;
+    const stats = coreCall("countFolioOutline", outline);
+    const summary = coreCall("folioOutlineSummary", stats);
     const aside = document.createElement("aside");
     aside.className = "bsb-folio-toc";
     aside.setAttribute("aria-label", "阅读大纲");
@@ -9087,7 +8794,7 @@ export function mountWorkbench(SubBatch) {
     head.innerHTML = `<span class="bsb-folio-toc-kicker">目录</span><strong class="bsb-folio-toc-title">阅读大纲</strong><em class="bsb-folio-toc-meta">${escapeHtml(summary)}</em><span class="bsb-folio-toc-progress" aria-hidden="true"><i data-role="folio-progress"></i></span>`;
     const nav = document.createElement("nav");
     nav.className = "bsb-folio-toc-nav";
-    outline.forEach((chapter, index) => {
+    outline.forEach((chapter, index: number) => {
       const item = document.createElement("div");
       item.className = `bsb-folio-toc-item${chapter.children.length ? " has-kids is-open" : ""}`;
       item.dataset.folioId = chapter.id;
@@ -9113,8 +8820,8 @@ export function mountWorkbench(SubBatch) {
     return aside;
   }
 
-  function setFolioTocCurrent(shell, id) {
-    const links = shell.querySelectorAll(".bsb-folio-toc-link");
+  function setFolioTocCurrent(shell: HTMLDivElement, id: string) {
+    const links = shell.querySelectorAll<HTMLElement>(".bsb-folio-toc-link");
     links.forEach((link) => {
       const on = link.dataset.folioJump === id;
       link.classList.toggle("is-current", on);
@@ -9122,14 +8829,14 @@ export function mountWorkbench(SubBatch) {
         const item = link.closest(".bsb-folio-toc-item");
         if (item?.classList.contains("has-kids")) {
           item.classList.add("is-open");
-          item.querySelector(".bsb-folio-toc-twist")?.setAttribute("aria-expanded", "true");
+          item.querySelector<HTMLElement>(".bsb-folio-toc-twist")?.setAttribute("aria-expanded", "true");
         }
         scrollFolioTocLinkIntoNav(link);
       }
     });
   }
 
-  function scrollFolioTocLinkIntoNav(link) {
+  function scrollFolioTocLinkIntoNav(link: Element) {
     const nav = link?.closest?.(".bsb-folio-toc-nav");
     if (!nav || !link) return;
     const navRect = nav.getBoundingClientRect();
@@ -9138,29 +8845,30 @@ export function mountWorkbench(SubBatch) {
     else if (linkRect.bottom > navRect.bottom) nav.scrollTop += linkRect.bottom - navRect.bottom + 10;
   }
 
-  function syncFolioTocViewport(shell, box) {
-    const toc = shell?.querySelector?.(".bsb-folio-toc");
+  function syncFolioTocViewport(shell: HTMLDivElement, box: { clientHeight: number; } | null) {
+    const toc = shell?.querySelector<HTMLElement>(".bsb-folio-toc");
     if (!toc || !box) return;
     toc.style.setProperty("--folio-toc-h", `${Math.max(180, Math.round(box.clientHeight))}px`);
   }
 
-  function updateFolioProgress(shell, box) {
-    const bar = shell.querySelector("[data-role='folio-progress']");
+  function updateFolioProgress(shell: HTMLDivElement, box: { scrollHeight: number; clientHeight: number; scrollTop: number; }) {
+    const bar = shell.querySelector<HTMLElement>("[data-role='folio-progress']");
     if (!bar || !box) return;
     const max = Math.max(1, box.scrollHeight - box.clientHeight);
     bar.style.width = `${Math.max(0, Math.min(100, (box.scrollTop / max) * 100))}%`;
   }
 
-  function bindFolioToc(shell, scrollRoot) {
+  function bindFolioToc(shell: HTMLDivElement, scrollRoot: Element|null) {
     const box = scrollRoot || shell.closest("[data-role='ai-md']");
     syncFolioTocViewport(shell, box);
     shell.addEventListener("click", (e) => {
+      if (!(e.target instanceof Element)) return;
       if (e.target.closest?.("[data-folio-twist]")) {
         const item = e.target.closest(".bsb-folio-toc-item");
         if (!item?.classList.contains("has-kids")) return;
         const open = !item.classList.contains("is-open");
         item.classList.toggle("is-open", open);
-        e.target.closest("[data-folio-twist]").setAttribute("aria-expanded", open ? "true" : "false");
+        e.target.closest("[data-folio-twist]")?.setAttribute("aria-expanded", open ? "true" : "false");
         return;
       }
       if (e.target.closest?.("[data-folio-toc-fab]")) {
@@ -9171,10 +8879,10 @@ export function mountWorkbench(SubBatch) {
         shell.classList.remove("is-toc-open");
         return;
       }
-      const link = e.target.closest?.("[data-folio-jump]");
+      const link = e.target.closest<HTMLElement>("[data-folio-jump]");
       if (!link) return;
       e.preventDefault();
-      const target = shell.querySelector(`#${CSS.escape(link.dataset.folioJump || "")}`);
+      const target = shell.querySelector<HTMLElement>(`#${CSS.escape(link.dataset.folioJump || "")}`);
       if (!target) return;
       if (box) {
         const top = target.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 16;
@@ -9185,13 +8893,13 @@ export function mountWorkbench(SubBatch) {
       target.classList.remove("folio-flash");
       void target.offsetWidth;
       target.classList.add("folio-flash");
-      setFolioTocCurrent(shell, link.dataset.folioJump);
+      setFolioTocCurrent(shell, link.dataset.folioJump || "");
       shell.classList.remove("is-toc-open");
     });
     if (box) {
       const onScroll = () => {
         updateFolioProgress(shell, box);
-        const headings = Array.from(shell.querySelectorAll(".bsb-folio h2, .bsb-folio h3"));
+        const headings = Array.from(shell.querySelectorAll<HTMLElement>(".bsb-folio h2, .bsb-folio h3"));
         if (!headings.length) return;
         const top = box.getBoundingClientRect().top + 28;
         let current = headings[0];
@@ -9215,7 +8923,7 @@ export function mountWorkbench(SubBatch) {
     }
   }
 
-  function mountHtmlFolio(host, sourceHtml, scrollRoot) {
+  function mountHtmlFolio(host: Element, sourceHtml: string, scrollRoot: Element|null) {
     const raw = extractHtmlFolioSource(sourceHtml) || String(sourceHtml || "");
     const safe = sanitizeFolioHtml(raw);
     const tpl = document.createElement("template");
@@ -9253,12 +8961,12 @@ export function mountWorkbench(SubBatch) {
     return shell;
   }
 
-  function folioExportTokenCss(flavor) {
+  function folioExportTokenCss(flavor: string|undefined) {
     const palette = getCtpPalette(flavor);
     return Object.entries(palette).map(([key, hex]) => `--ctp-${key}:${hex};`).join("");
   }
 
-  function buildStandaloneFolioHtml(title, sourceHtml, flavor) {
+  function buildStandaloneFolioHtml(title: string, sourceHtml: string, flavor: string|undefined) {
     const raw = extractHtmlFolioSource(sourceHtml) || String(sourceHtml || "");
     const safe = sanitizeFolioHtml(raw);
     const tokens = folioExportTokenCss(flavor);
@@ -9298,10 +9006,10 @@ body{padding:48px 20px 80px}
 `;
   }
 
-  async function renderAiMarkdown(md, { streaming } = {}) {
+  async function renderAiMarkdown(md: unknown, { streaming = false } = {}) {
     const root = ensurePanel();
-    const box = root.querySelector('[data-role="ai-md"]');
-    const host = root.querySelector('[data-role="ai-content"]') || box;
+    const box = root.querySelector<HTMLElement>('[data-role="ai-md"]');
+    const host = root.querySelector<HTMLElement>('[data-role="ai-content"]') || box;
     if (!host) return;
     if (streaming) return paintAiStreamText(md);
     closeMermaidFullscreen();
@@ -9323,10 +9031,10 @@ body{padding:48px 20px 80px}
       }
     }
     if (isHtmlFolioSource(source)) {
-      try { await ensureMarkdownCore(); } catch (_) { /* DOMPurify 可能已在页内 */ }
+      try { await ensureMarkdownCore(); } catch  { /* DOMPurify 可能已在页内 */ }
       if (epoch !== state.renderEpoch) return;
       mountHtmlFolio(host, source, box);
-      if (box && !box.querySelector('[data-role="ai-anchor"]')) {
+      if (box && !box.querySelector<HTMLElement>('[data-role="ai-anchor"]')) {
         const a = document.createElement("div"); a.className = "bsb-ai-anchor"; a.dataset.role = "ai-anchor"; box.appendChild(a);
       }
       if (box) {
@@ -9343,7 +9051,7 @@ body{padding:48px 20px 80px}
     try {
       await ensureMarkdownCore();
       if (needsMath) await ensureKatex();
-    } catch (e) {
+    } catch  {
       host.innerHTML = simpleMarkdownFallback(source) + `<p style="color:var(--ctp-peach)">增强渲染库加载失败，已使用安全简易渲染。</p>`;
       if (box) box.scrollTop = 0;
       return;
@@ -9351,24 +9059,24 @@ body{padding:48px 20px 80px}
     if (epoch !== state.renderEpoch) return;
 
     const { md: mdMath, maths } = prepareMarkdownMath(source);
-    const mermaidBlocks = [];
+    const mermaidBlocks: string[] = [];
     const md2 = mdMath.replace(/```mermaid\s*\n([\s\S]*?)```/gi, (_, code) => {
       const i = mermaidBlocks.length; mermaidBlocks.push(code.trim());
       return `\n\n<div class="mermaid" data-bsb-m="${i}">${escapeHtml(code.trim())}</div>\n\n`;
     });
     let html;
-    try { html = marked.parse(md2); } catch (_) { html = simpleMarkdownFallback(md2); }
+    try { html = marked.parse(md2); } catch  { html = simpleMarkdownFallback(md2); }
     if (maths.length) html = replaceMathPlaceholders(html, maths, katexToHtml);
     html = sanitizeRenderedHtml(html);
     if (!(await replaceHostInBatches(host, html, epoch))) return;
 
-    host.querySelectorAll("a[href]").forEach((a) => { a.target = "_blank"; a.rel = "noopener noreferrer"; });
+    host.querySelectorAll<HTMLAnchorElement>("a[href]").forEach((a) => { a.target = "_blank"; a.rel = "noopener noreferrer"; });
     linkifyTimestamps(host);
     buildToc(host);
     if (needsMermaid) scheduleMermaid(host, mermaidBlocks, epoch, box);
     if (needsCode) await enhanceCodeBlocks(host, epoch);
 
-    if (box && !box.querySelector('[data-role="ai-anchor"]')) {
+    if (box && !box.querySelector<HTMLElement>('[data-role="ai-anchor"]')) {
       const a = document.createElement("div"); a.className = "bsb-ai-anchor"; a.dataset.role = "ai-anchor"; box.appendChild(a);
     }
     if (box) {
@@ -9381,7 +9089,7 @@ body{padding:48px 20px 80px}
   /** The Application controller owns exactly one POST, stream decoding and cancellation.
    *  No legacy network fallback: a failed or ambiguous POST must never be replayed.
    */
-  function requestChatCompletion(opts) {
+  function requestChatCompletion(opts: Omit<ChatCompletionOptions, "network" | "pageHref">) {
     const runtime = opts.runtime || createAiRuntime(opts.model || "AI");
     return appCall("ai.request", {
       ...opts,
@@ -9391,25 +9099,25 @@ body{padding:48px 20px 80px}
     });
   }
 
-  function abortPreprocessChildRuntime(runtime) {
+  function abortPreprocessChildRuntime(runtime: WorkbenchAiRuntime) {
     if (!runtime) return;
     runtime.abort = true;
-    try { runtime.abortController?.abort(); } catch (_) { /* noop */ }
-    try { runtime.xhr?.abort?.(); } catch (_) { /* noop */ }
+    try { runtime.abortController?.abort(); } catch  { /* noop */ }
+    try { runtime.xhr?.abort?.(); } catch  { /* noop */ }
   }
 
-  async function requestPreprocessChunk(runtime, cfg, prompt, vars, statusPrefix) {
+  async function requestPreprocessChunk(runtime: WorkbenchAiRuntime, cfg: AiProfile, prompt: PromptProfile, vars: Record<string,unknown>, statusPrefix: string) {
     const messages = buildAiMessagesForProfile(cfg, vars, prompt);
     if (!messages.length) throw new Error("预处理 Prompt 为空");
     let latest = "";
-    return await new Promise((resolve, reject) => {
+    return await new Promise<string>((resolve, reject) => {
       requestChatCompletion({
         runtime,
-        baseUrl: cfg.baseUrl,
-        apiKey: cfg.apiKey,
-        model: cfg.model,
-        temperature: cfg.temperature,
-        maxTokens: cfg.maxTokens,
+        baseUrl: cfg.baseUrl || "",
+        apiKey: cfg.apiKey || "",
+        model: cfg.model || "",
+        ...(cfg.temperature === undefined ? {} : { temperature: cfg.temperature }),
+        ...(cfg.maxTokens === undefined ? {} : { maxTokens: cfg.maxTokens }),
         messages,
         stream: cfg.stream !== false,
         onStatus(msg) {
@@ -9431,10 +9139,10 @@ body{padding:48px 20px 80px}
     });
   }
 
-  async function preprocessItemsForAi(items, prompt, cfg) {
+  async function preprocessItemsForAi(items: WorkbenchLibraryItem[], prompt: PromptProfile, cfg: AiProfile) {
     const settings = appCall("preprocess.settings", state);
     const modelName = cfg.name || cfg.model;
-    return appCall("preprocess.runPipeline", items, prompt.name, modelName, settings, {
+    return SubBatch.SubBatchMonorepo.app.preprocess.runPipeline(items, prompt.name, modelName, settings, {
       createRuntime: () => createAiRuntime("字幕预处理 · " + modelName),
       onStart: (run) => {
         state.preprocessRun = run;
@@ -9453,12 +9161,12 @@ body{padding:48px 20px 80px}
       getRaw: (item) => coreCall("cuesToAiText", item.data || [], item.bvid, item.page || 1),
       cacheKey: (item, raw) => coreCall("preprocessCacheKey", item, raw, prompt, cfg, settings),
       readCache: (key) => persistentCache.read(key),
-      split: (item) => coreCall("splitCuesForPreprocess", item, settings),
+      split: (item) => coreCall("splitCuesForPreprocess", { ...item, data: item.data || [] }, settings),
       forceRefresh: state.forcePreprocessOnce,
       cacheModel: cfg.model,
       runPool: (jobs, concurrency, handler, cancelled) =>
-        appCall("ai.runPool", jobs, concurrency, handler, cancelled),
-      runChunk: (job, workerId, run) => appCall("preprocess.runChunkWithRetry", job, settings.retries, workerId, {
+        SubBatch.SubBatchMonorepo.app.ai.runPool(jobs, concurrency, handler, cancelled),
+      runChunk: (job, workerId, run) => SubBatch.SubBatchMonorepo.app.preprocess.runChunkWithRetry(job, settings.retries, workerId, {
         isCancelled: () => !!state.aiAbort || !!run.runtime.abort,
         createRuntime: (label) => createAiRuntime(label),
         register: (child) => run.childRuntimes.add(child),
@@ -9489,13 +9197,13 @@ body{padding:48px 20px 80px}
     if (run.busy) paintAiStreamText(text || "正在规范化字幕…");
     else if (text) await renderAiMarkdown(text, { streaming: false });
     else {
-      const content = ensurePanel().querySelector('[data-role="ai-content"]');
+      const content = ensurePanel().querySelector<HTMLElement>('[data-role="ai-content"]');
       if (content) content.innerHTML = `<div class="bsb-empty"><div class="bsb-empty-ico">◌</div><strong>预处理稿</strong><span>${escapeHtml(run.statusText || "暂无内容")}</span></div>`;
     }
     setStatus(`预处理 · ${run.promptName || "字幕规范化"} · ${run.statusText || run.status}`, run.status === "error" ? "err" : run.status === "done" ? "ok" : undefined);
   }
 
-  function buildAiMessagesForProfile(_cfg, vars, promptProfile) {
+  function buildAiMessagesForProfile(_cfg: BatchModel, vars: Record<string,unknown>, promptProfile: PromptProfile | null) {
     const prompt = promptProfile ? coreCall("createPromptProfile", promptProfile, 0) : null;
     if (!prompt) return [];
     const system = renderPromptTemplate(prompt.systemPrompt, vars).trim();
@@ -9503,14 +9211,14 @@ body{padding:48px 20px 80px}
     return [
       system ? { role: "system", content: system } : null,
       user ? { role: "user", content: user } : null,
-    ].filter(Boolean);
+    ].filter((message): message is { role: string; content: string } => message !== null);
   }
 
-  function isCurrentAiRun(run) {
+  function isCurrentAiRun(run: WorkbenchAiRun | null | undefined) {
     return !!run && state.aiRuns.get(run.id) === run;
   }
 
-  function updateAiRun(run, patch) {
+  function updateAiRun(run: WorkbenchAiRun, patch: Partial<WorkbenchAiRun>) {
     Object.assign(run, patch || {});
     // 单模型重试会以同一标签 ID 替换运行对象。旧请求即使稍后回调，也不得覆盖新结果。
     if (!isCurrentAiRun(run)) return;
@@ -9519,7 +9227,8 @@ body{padding:48px 20px 80px}
     setAiBusy(anyAiRunBusy());
   }
 
-  async function runAiProfile(run, vars, promptProfile, commonMeta) {
+  async function runAiProfile(run: WorkbenchAiRun, vars: Record<string,unknown>, promptProfile: PromptProfile | null, commonMeta: { sourceBvids?: string[] }) {
+    if (!isCurrentAiRun(run)) return run;
     const cfg = run.config;
     run.abort = false;
     updateAiRun(run, {
@@ -9527,7 +9236,7 @@ body{padding:48px 20px 80px}
       status: "running",
       statusText: `正在连接 · max_tokens=${cfg.maxTokens}`,
       startedAt: Date.now(),
-      sourceBvids: [...commonMeta.sourceBvids],
+      sourceBvids: [...(commonMeta.sourceBvids || [])],
     });
     const messages = buildAiMessagesForProfile(cfg, vars, promptProfile);
     if (!messages.length) {
@@ -9537,14 +9246,14 @@ body{padding:48px 20px 80px}
     const useStream = cfg.stream !== false;
 
     try {
-      await new Promise((resolve, reject) => {
+      await new Promise<void>((resolve, reject) => {
         requestChatCompletion({
           runtime: run,
-          baseUrl: cfg.baseUrl,
-          apiKey: cfg.apiKey,
-          model: cfg.model,
-          temperature: cfg.temperature,
-          maxTokens: cfg.maxTokens,
+          baseUrl: cfg.baseUrl || "",
+          apiKey: cfg.apiKey || "",
+          model: cfg.model || "",
+          ...(cfg.temperature === undefined ? {} : { temperature: cfg.temperature }),
+          ...(cfg.maxTokens === undefined ? {} : { maxTokens: cfg.maxTokens }),
           messages,
           stream: useStream,
           onStatus(msg) {
@@ -9565,7 +9274,7 @@ body{padding:48px 20px 80px}
             if (isCurrentAiRun(run)) {
               run.raw = sanitizeMermaidTimestampCitationsInMarkdown(full || run.raw || "");
             }
-            resolve(isCurrentAiRun(run) ? run.raw : "");
+            resolve();
           },
           onError(err) {
             reject(err instanceof Error ? err : new Error(String(err || "AI 请求失败")));
@@ -9587,7 +9296,7 @@ body{padding:48px 20px 80px}
       }
     } catch (error) {
       if (!isCurrentAiRun(run)) return run;
-      const message = String(error?.message || error || "未知错误");
+      const message = String(errorMessage(error) || "未知错误");
       if (run.abort || state.aiAbort || /用户停止|abort/i.test(message)) {
         if (run.raw && !/\*\(已停止\)\*\s*$/.test(run.raw)) run.raw += "\n\n*(已停止)*";
         updateAiRun(run, { busy: false, status: "stopped", statusText: "已停止", finishedAt: Date.now() });
@@ -9610,9 +9319,9 @@ body{padding:48px 20px 80px}
     return run;
   }
 
-  let aiBatchCoordinator = null;
+  let aiBatchCoordinator: ReturnType<typeof createAiBatchCoordinator> | null = null;
 
-  async function doAiAnalyze(options = {}) {
+  async function doAiAnalyze(options: { automatic?: boolean; forceAll?: boolean; expectedRouteKey?: string; targets?: WorkbenchLibraryItem[] } = {}) {
     const automatic = !!options.automatic;
     if (state.aiBusy) {
       if (!automatic) setStatus("已有 AI 批次仍在生成；再次点击“送去 AI”可选择停止并重新分析", "err");
@@ -9625,12 +9334,12 @@ body{padding:48px 20px 80px}
     }
     const forceAll = !!state.forcePreprocessOnce || !!options.forceAll;
     const routeKeyForCache = options.expectedRouteKey || currentRouteVideoKey();
-    let cachedPayload = null;
+    let cachedPayload: AiSessionCachePayload | null = null;
     if (!forceAll && routeKeyForCache && coreFn("aiSessionCacheKey") && coreFn("isUsableAiSessionCache")) {
       try {
-        const rec = await persistentCache.read(coreFn("aiSessionCacheKey")(routeKeyForCache));
-        if (coreFn("isUsableAiSessionCache")(rec?.value)) cachedPayload = rec.value;
-      } catch (_) { /* ignore cache read */ }
+        const rec = await persistentCache.read<AiSessionCachePayload>(coreCall("aiSessionCacheKey", routeKeyForCache));
+        if (rec && coreCall("isUsableAiSessionCache", rec.value)) cachedPayload = rec.value;
+      } catch  { /* ignore cache read */ }
     }
     const root = ensurePanel();
 
@@ -9645,17 +9354,17 @@ body{padding:48px 20px 80px}
     } else {
       try {
         profiles = saveAiProfilesFromForm();
-      } catch (_) {
+      } catch  {
         profiles = loadAiProfiles();
         state.aiProfiles = profiles;
       }
       try {
         promptLibrary = savePromptProfilesFromForm({ activeId: state.activePromptId });
-      } catch (_) {
+      } catch  {
         promptLibrary = loadPromptProfiles();
       }
     }
-    const preprocessPrompt = promptLibrary.prompts.find((p) => p.id === state.activePrePromptId && p.stage === "preprocess") || null;
+    const preprocessPrompt = promptLibrary.prompts.find((p: { id: string; stage: string; }) => p.id === state.activePrePromptId && p.stage === "preprocess") || null;
     if (state.preprocessEnabled && (!preprocessPrompt || (!preprocessPrompt.systemPrompt.trim() && !preprocessPrompt.userPromptTemplate.trim()))) {
       setStatus("输入整理已开启，但没有可用的 PRE Prompt", "err");
       if (!automatic) setWorkspace("settings");
@@ -9663,7 +9372,7 @@ body{padding:48px 20px 80px}
     }
     if (!automatic) toggleAiPanel(true);
     const configuredTasks = (automatic ? currentPostTasks() : savePostTasks(currentPostTasks())).filter((t) => t.enabled !== false);
-    const planned = appCall("ai.planTasks", configuredTasks, promptLibrary.prompts, profiles);
+    const planned = SubBatch.SubBatchMonorepo.app.ai.planTasks(configuredTasks, promptLibrary.prompts, profiles);
     const taskPlans = planned.plans;
     if (!taskPlans.length) {
       setStatus("当前处理方案没有可运行的产物：请为至少一个 POST Prompt 选择已启用的 LLM", "err");
@@ -9671,7 +9380,7 @@ body{padding:48px 20px 80px}
       return;
     }
     const plannedRuns = planned.runs;
-    const partitionFn = appFn("ai.partitionRuns");
+    const partitionFn = SubBatch.SubBatchMonorepo.app.ai.partitionRuns;
     const skipPrepareFn = coreFn("shouldSkipPrepareForCachedSession");
     if (!forceAll && cachedPayload && typeof partitionFn === "function") {
       const preview = partitionFn(plannedRuns, cachedPayload.runs, "");
@@ -9685,7 +9394,7 @@ body{padding:48px 20px 80px}
             setStatus(`已从缓存恢复 ${preview.reuse.length} 个模型版本 · 改模型后点“运行”只会重跑变化项`, "ok");
             return;
           }
-        } catch (_) { /* fall through */ }
+        } catch  { /* fall through */ }
       }
     }
     const invalid = planned.invalid;
@@ -9709,7 +9418,7 @@ body{padding:48px 20px 80px}
     let targets = explicitTargets ? [...explicitTargets] : selectedItems();
     if (!targets.length && !explicitTargets) {
       if (!state.items.length) {
-        try { await doScan(); } catch (_) { /* noop */ }
+        try { await doScan(); } catch  { /* noop */ }
       }
       targets = selectedItems();
     }
@@ -9742,7 +9451,7 @@ body{padding:48px 20px 80px}
     setAiBusy(true);
     setStatus(`准备输入 · ${taskPlans.length} 个产物 · ${state.aiRunOrder.length} 个模型版本…`);
 
-    const contentHost = root.querySelector('[data-role="ai-content"]');
+    const contentHost = root.querySelector<HTMLElement>('[data-role="ai-content"]');
     if (contentHost && currentAiWorkbenchStage() === "postprocess") {
       contentHost.innerHTML = `<div class="bsb-empty"><div class="bsb-empty-ico">◌</div><strong>正在准备后处理输入…</strong><span>${state.preprocessEnabled ? "字幕只规范化一次，然后共享给" : "原始字幕将直接发送给"} ${taskPlans.length} 个后处理产物</span></div>`;
     } else if (currentAiWorkbenchStage() === "preprocess") {
@@ -9750,7 +9459,7 @@ body{padding:48px 20px 80px}
     }
 
     try {
-      const ready = await batch.stage(() => appCall("ai.ensureSubtitles", targets, state.delayMs, {
+      const ready = await batch.stage(() => SubBatch.SubBatchMonorepo.app.ai.ensureSubtitles(targets, state.delayMs, {
         cancelled: () => !!state.aiAbort,
         onFetching: (item, index, total) => setStatus("AI 准备字幕 " + (index + 1) + "/" + total + " · " + item.bvid + "…"),
         fetchSubtitle: (bvid, page) => fetchSubtitle(bvid, page),
@@ -9771,7 +9480,7 @@ body{padding:48px 20px 80px}
 
       const rawBuilt = buildSubtitlePayload(ready);
       let stageInput = rawBuilt;
-      if (state.preprocessEnabled) {
+      if (state.preprocessEnabled && preprocessPrompt && preprocessConfig) {
         setStatus(`阶段 1/2 · 字幕预处理 · ${preprocessPrompt.name} · ${preprocessConfig.name || preprocessConfig.model}`);
         stageInput = await batch.stage(() => preprocessItemsForAi(ready, preprocessPrompt, preprocessConfig));
         if (state.aiAbort) throw new Error("用户停止");
@@ -9802,14 +9511,14 @@ body{padding:48px 20px 80px}
       refreshAiChips();
       if (currentAiWorkbenchStage() === "preprocess") await renderPreprocessCanvas();
 
-      const inputHash = coreFn("aiSessionInputHash") ? coreFn("aiSessionInputHash")(vars) : "";
+      const inputHash = coreCall("aiSessionInputHash", vars);
       const split = (!forceAll && cachedPayload && typeof partitionFn === "function")
         ? partitionFn(plannedRuns, cachedPayload.runs, inputHash)
         : { reuse: [], generate: plannedRuns };
-      const { reused, generateIds } = appCall("ai.hydratePlannedRuns",
-        state.aiRunOrder.map((id) => state.aiRuns.get(id)).filter(Boolean),
+      const { reused, generateIds } = SubBatch.SubBatchMonorepo.app.ai.hydratePlannedRuns(
+        state.aiRunOrder.map((id) => state.aiRuns.get(id)).filter((run): run is WorkbenchAiRun => !!run),
         split, sourceBvids,
-        (cached) => coreFn("draftHydratedAiRun") ? coreFn("draftHydratedAiRun")(cached) : null);
+        (cached) => coreCall("draftHydratedAiRun", cached));
       renderAiResultTabs();
       if (state.aiActiveRunId) {
         const active = state.aiRuns.get(state.aiActiveRunId);
@@ -9827,12 +9536,13 @@ body{padding:48px 20px 80px}
       setStatus(`复用缓存 ${reused} · 新生成 ${generateIds.length} · ${ready.length} 条字幕${cut.truncated ? " · 输入已截断" : ""}`);
       const outcome = await batch.stage(() => appCall("ai.executeTasks", generateIds.map((id) => async () => {
         const run = state.aiRuns.get(id);
+        if (!run) throw new Error("AI run was replaced");
         return runAiProfile(run, vars, run.promptProfile, commonMeta);
       })));
       batch.finish(state.aiAbort ? "stopped" : outcome.status);
       if (sessionId === state.aiSessionSeq) summarizeAiRuns(reused ? "部分模型复用缓存后生成结束" : "全部产物生成结束");
     } catch (error) {
-      const message = String(error?.message || error);
+      const message = String(errorMessage(error));
       batch.finish(state.aiAbort ? "stopped" : "error");
       if (sessionId === state.aiSessionSeq) {
         if (!state.aiAbort) setStatus(`AI 准备失败: ${message}`, "err");
@@ -9865,7 +9575,7 @@ body{padding:48px 20px 80px}
    * 合集内视频页往往只有 BV，没有 URL 参数 sid。
    * 扫描「合集」时从 view 接口补 mid + ugc_season.id，便于一键拉全合集。
    */
-  async function ensureCollectionContext(ctx) {
+  async function ensureCollectionContext(ctx: ScanContext) {
     if (!ctx || ctx.type !== "collection") return ctx;
     if (ctx.mid && ctx.season_id) return ctx;
     const bvid = ctx.bvid || extractBvid(location.href);
@@ -9881,13 +9591,13 @@ body{padding:48px 20px 80px}
       if (season.title && !ctx.collectionTitleHint) ctx.collectionTitleHint = String(season.title);
       if (view.owner?.name && !ctx.authorHint) ctx.authorHint = String(view.owner.name);
     } catch (error) {
-      console.warn("[bili-subbatch] ensureCollectionContext", error?.message || error);
+      console.warn("[bili-subbatch] ensureCollectionContext", errorMessage(error));
     }
     return ctx;
   }
 
   /** IO: fetch view, then pure applyUgcSeasonToItems. */
-  async function stampUgcSeasonGroupMeta(items, bvid) {
+  async function stampUgcSeasonGroupMeta<T extends LibraryGroupItem>(items: T[], bvid: string) {
     const list = items || [];
     if (!list.length) return list;
     const id = bvid || list[0]?.bvid;
@@ -9898,7 +9608,7 @@ body{padding:48px 20px 80px}
       if (!view.ugc_season?.id) return list;
       return applyUgcSeasonToItems(list, view);
     } catch (error) {
-      console.warn("[bili-subbatch] stampUgcSeasonGroupMeta", error?.message || error);
+      console.warn("[bili-subbatch] stampUgcSeasonGroupMeta", errorMessage(error));
       return list;
     }
   }
@@ -9919,7 +9629,7 @@ body{padding:48px 20px 80px}
     }
     const scanId = ++state.scanSeq;
     refreshContextUI();
-    let ctx = resolveContext();
+    let ctx: ScanContext = resolveContext();
     state.ctx = ctx;
     state.cancel = false;
     state.cancelScan = false;
@@ -9931,11 +9641,11 @@ body{padding:48px 20px 80px}
       const root = ensurePanel();
       state.maxPages = Math.max(
         1,
-        Math.min(100, Number(root.querySelector('[data-role="max-pages"]').value) || DEFAULT_MAX_PAGES),
+        Math.min(100, Number(root.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-role="max-pages"]')?.value) || DEFAULT_MAX_PAGES),
       );
       state.delayMs = Math.max(
         0,
-        Math.min(5000, Number(root.querySelector('[data-role="delay"]').value) || DEFAULT_DELAY_MS),
+        Math.min(5000, Number(root.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-role="delay"]')?.value) || DEFAULT_DELAY_MS),
       );
 
       if (ctx.type === "collection") {
@@ -9962,8 +9672,8 @@ body{padding:48px 20px 80px}
 
       appCall("scan.validateContext", ctx);
 
-      let items = [];
-      let meta = {};
+      let items: WorkbenchLibraryItem[] = [];
+      let meta: Record<string, unknown> = {};
 
       // 单个视频 = 当前分P；视频选集 = 展开全部分P
       if (ctx.type === "video" || ctx.type === "selection") {
@@ -9973,7 +9683,7 @@ body{padding:48px 20px 80px}
         setStatus(
           expandParts
             ? `读取选集 ${bvid}（全部分P）…`
-            : `读取单个视频 ${bvid}${ctx.page > 1 ? " P" + ctx.page : ""}…`,
+            : `读取单个视频 ${bvid}${(ctx.page || 1) > 1 ? " P" + ctx.page : ""}…`,
         );
         const loaded = await loadVideoAsItems(bvid, expandParts);
         // 单个视频：只保留当前 p（loadVideoAsItems 非 expand 时已是 1 条；
@@ -9986,7 +9696,7 @@ body{padding:48px 20px 80px}
             items = [
               {
                 bvid,
-                aid: loaded.items[0]?.aid,
+                aid: loaded.items[0]?.aid ?? null,
                 title: part
                   ? `${loaded.meta?.title || bvid} - P${page}【${part.part || ""}】`
                   : loaded.meta?.title || bvid,
@@ -10018,7 +9728,7 @@ body{padding:48px 20px 80px}
           maxPages: state.maxPages,
           pageSize,
           delayMs: Math.min(state.delayMs, 400),
-          onProgress: (t) => setStatus(t),
+          onProgress: (t: string|null) => setStatus(t),
           shouldCancel: () => state.cancelScan || scanId !== state.scanSeq,
         });
         items = res.items;
@@ -10030,7 +9740,7 @@ body{padding:48px 20px 80px}
             String(meta.author || "").trim()
             || String(items.find((it) => String(it?.author || "").trim())?.author || "").trim()
             || "";
-          items = attachUserSpaceGroupMeta(items, { author, mid: ctx.mid });
+          items = attachUserSpaceGroupMeta(items, { author, mid: ctx.mid || "" });
           if (author) meta.author = author;
           try {
             setStatus("拉取合集列表（名称+地址）…");
@@ -10038,7 +9748,7 @@ body{padding:48px 20px 80px}
               maxPages: Math.max(5, Math.min(Number(state.maxPages) || 20, 40)),
               pageSize: 20,
               delayMs: Math.min(state.delayMs, 400),
-              onProgress: (t) => setStatus(t),
+              onProgress: (t: string|null) => setStatus(t),
               shouldCancel: () => state.cancelScan || scanId !== state.scanSeq,
             });
             if (state.cancelScan || scanId !== state.scanSeq) {
@@ -10071,9 +9781,9 @@ body{padding:48px 20px 80px}
               }
             }
           } catch (err) {
-            if (err?.name === "AbortError") throw err;
-            console.warn("[bili-subbatch] loadUserSpaceSeasons", err?.message || err);
-            meta.collectionError = String(err?.message || err || "合集列表失败");
+            if (isAbortError(err)) throw err;
+            console.warn("[bili-subbatch] loadUserSpaceSeasons", errorMessage(err));
+            meta.collectionError = String(errorMessage(err) || "合集列表失败");
           }
           // 未进合集/选集的散视频统一进「视频」文件夹
           items = attachSpaceLooseVideosMeta(items);
@@ -10083,9 +9793,9 @@ body{padding:48px 20px 80px}
           if (!meta.name && ctx.collectionTitleHint) meta.name = ctx.collectionTitleHint;
           const archiveCount = items.length;
           setStatus(`展开合集内多分P单元（${archiveCount} 个稿件）…`);
-          items = await expandCollectionArchivesWithParts(items, {
+          items = await expandCollectionArchivesWithParts(items.map((item) => ({ ...item, aid: Number(item.aid) || 0, pages: item.pages || [] })), {
             delayMs: Math.min(state.delayMs, 280),
-            onProgress: (t) => setStatus(t),
+            onProgress: (t: string|null) => setStatus(t),
             shouldCancel: () => state.cancelScan || scanId !== state.scanSeq,
           });
           if (items.length > archiveCount) {
@@ -10096,7 +9806,7 @@ body{padding:48px 20px 80px}
             ].filter(Boolean).join(" · ");
           }
           // Pure attach: authorHint / collectionTitleHint fill UP + folder label.
-          items = attachCollectionGroupMeta(items, meta, ctx);
+          items = attachCollectionGroupMeta(items, meta, { mid: ctx.mid || "", season_id: ctx.season_id || "", collectionTitleHint: ctx.collectionTitleHint || "", authorHint: ctx.authorHint || "", parentFolder: "" });
         }
       } else {
         const fromDom = harvestBvidsFromDom();
@@ -10133,7 +9843,7 @@ body{padding:48px 20px 80px}
       );
       state.meta = meta;
       state.captureDrawerOpen = false;
-      const drawer = ensurePanel().querySelector('[data-role="capture-drawer"]');
+      const drawer = ensurePanel().querySelector<HTMLElement>('[data-role="capture-drawer"]');
       if (drawer) drawer.hidden = true;
       renderList();
       refreshContextUI();
@@ -10143,17 +9853,17 @@ body{padding:48px 20px 80px}
       setStatus(msg, "ok");
       if (meta.name || meta.title || meta.keyword) {
         const label = meta.name || meta.title || meta.keyword;
-        const ctxEl = ensurePanel().querySelector('[data-role="ctx"]');
+        const ctxEl = ensurePanel().querySelector<HTMLElement>('[data-role="ctx"]');
         if (ctxEl && !ctxEl.textContent.includes(String(label))) {
           ctxEl.textContent += ` · ${label}`;
         }
       }
     } catch (e) {
-      if (e?.name === "AbortError" || state.cancelScan) {
+      if (isAbortError(e) || state.cancelScan) {
         setStatus(state.pendingRescan ? "旧扫描已停止 · 准备重新扫描…" : "扫描已停止");
       } else {
         console.error("[bili-subbatch] scan", e);
-        setStatus(`扫描失败: ${e.message || e}`, "err");
+        setStatus(`扫描失败: ${errorMessage(e)}`, "err");
       }
     } finally {
       if (scanId === state.scanSeq) {
@@ -10168,8 +9878,8 @@ body{padding:48px 20px 80px}
 
   function harvestBvidsFromDom() {
     const seen = new Set();
-    const out = [];
-    document.querySelectorAll('a[href*="/video/BV"]').forEach((a) => {
+    const out: string[] = [];
+    document.querySelectorAll<HTMLAnchorElement>('a[href*="/video/BV"]').forEach((a) => {
       const b = extractBvid(a.getAttribute("href") || a.href || "");
       if (b && !seen.has(b)) {
         seen.add(b);
@@ -10179,7 +9889,7 @@ body{padding:48px 20px 80px}
     return out;
   }
 
-  async function doBatch(act) {
+  async function doBatch(act: string) {
     if (state.batchBusy) {
       setStatus("已有字幕任务正在运行；可点击“停止”后重试", "err");
       return;
@@ -10189,7 +9899,7 @@ body{padding:48px 20px 80px}
       return;
     }
     const batchId = ++state.batchSeq;
-    let targets =
+    const targets =
       act === "dl-ok-only"
         ? state.items.filter((it) => it.selected && it.subStatus === "ok" && it.data)
         : selectedItems();
@@ -10203,7 +9913,7 @@ body{padding:48px 20px 80px}
     state.batchPaused = false;
     setBatchBusy(true);
     if (act === "fetch-selected") {
-      try { setWorkspace("subs", { silent: true }); } catch (_) { /* panel not ready */ }
+      try { setWorkspace("subs", { silent: true }); } catch  { /* panel not ready */ }
     }
     setLibraryJob({
       kind: "fetch",
@@ -10229,7 +9939,8 @@ body{padding:48px 20px 80px}
           break;
         }
         const it = targets[i];
-        const itemLabel = `${it.bvid}${it.page > 1 ? " P" + it.page : ""}`;
+        if (!it) continue;
+        const itemLabel = `${it.bvid}${(it.page || 1) > 1 ? " P" + it.page : ""}`;
         setLibraryJob({
           kind: "fetch",
           index: i + 1,
@@ -10253,7 +9964,7 @@ body{padding:48px 20px 80px}
             else err++;
           } catch (e) {
             it.subStatus = "error";
-            it.error = e.message || String(e);
+            it.error = errorMessage(e);
             err++;
           }
           renderList();
@@ -10290,9 +10001,9 @@ body{padding:48px 20px 80px}
           .map((it) => {
             const head =
               ready.length > 1
-                ? `=== ${it.bvid}${it.page > 1 ? " P" + it.page : ""} ${it.title || ""} ===\n`
+                ? `=== ${it.bvid}${(it.page || 1) > 1 ? " P" + it.page : ""} ${it.title || ""} ===\n`
                 : "";
-            return head + coreCall("cuesToTxt", it.data);
+            return head + coreCall("cuesToTxt", it.data || []);
           })
           .join("\n\n");
         clipboardWrite(text);
@@ -10302,7 +10013,7 @@ body{padding:48px 20px 80px}
 
       if (act === "dl-srt" || act === "dl-txt" || act === "dl-ok-only") {
         const ext = act === "dl-txt" ? "txt" : "srt";
-        const convert = (cues) => coreCall(ext === "txt" ? "cuesToTxt" : "cuesToSrt", cues);
+        const convert = (cues: readonly SubtitleCue[]) => coreCall(ext === "txt" ? "cuesToTxt" : "cuesToSrt", cues);
         const pool =
           act === "dl-ok-only"
             ? state.items.filter((it) => it.selected && it.subStatus === "ok" && it.data)
@@ -10319,7 +10030,7 @@ body{padding:48px 20px 80px}
       }
     } catch (e) {
       console.error("[bili-subbatch] batch", e);
-      setStatus(`失败: ${e.message || e}`, "err");
+      setStatus(`失败: ${errorMessage(e)}`, "err");
     } finally {
       if (batchId === state.batchSeq) {
         state.cancelBatch = false;
@@ -10341,7 +10052,7 @@ body{padding:48px 20px 80px}
    * - stale revalidate / 静默刷新不重复分析；
    * - AI 配置尚未完成时等待用户保存配置，保存后自动续跑。
    */
-  function scheduleAutoAnalyze(item, captureKey, reason = "capture", delay = AUTO_ANALYZE_DELAY_MS) {
+  function scheduleAutoAnalyze(item: WorkbenchLibraryItem, captureKey: string, reason = "capture", delay = AUTO_ANALYZE_DELAY_MS) {
     if (!state.autoAnalyzeEnabled || !item || item.subStatus !== "ok" || !item.data?.length) return;
     const key = captureKey || routeVideoKey(item.bvid, item.page || 1);
     if (!key || state.autoAnalyzeKey === key || state.autoAnalyzePendingKey === key) return;
@@ -10418,7 +10129,7 @@ body{padding:48px 20px 80px}
     if (currentAiWorkbenchStage() === "preprocess") renderPreprocessCanvas().catch(() => {});
     else if (currentAiWorkbenchStage() === "chat") renderStudioCanvas();
     const root = document.getElementById(PANEL_ID);
-    const content = root?.querySelector('[data-role="ai-content"]');
+    const content = root?.querySelector<HTMLElement>('[data-role="ai-content"]');
     if (content && currentAiWorkbenchStage() === "postprocess") {
       content.innerHTML = `<div class="bsb-empty"><div class="bsb-empty-ico">◌</div><strong>当前视频已切换</strong><span>${nextRouteKey ? escapeHtml(nextRouteKey) + " · " : ""}正在读取当前字幕，旧视频 AI 结果已解除绑定</span></div>`;
     }
@@ -10430,19 +10141,19 @@ body{padding:48px 20px 80px}
    * 仍应静默抓取并（在开启自动分析时）送入 AI pipeline，不依赖面板保持打开。
    * 历史 bug：`document.hidden` 会直接 return，导致后台标签页完全不抓字幕。
    */
-  function scheduleAutoCapture(reason, delay = AUTO_CAPTURE_DELAY_MS) {
+  function scheduleAutoCapture(reason: string|undefined, delay = AUTO_CAPTURE_DELAY_MS) {
     clearTimeout(state.autoCaptureTimer);
     if (!state.autoCaptureEnabled) return;
     state.autoCaptureTimer = window.setTimeout(() => {
       autoCaptureCurrentVideo(reason).catch((error) => {
-        if (error?.name !== "AbortError") {
+        if (!isAbortError(error)) {
           console.warn("[bili-subbatch] auto capture", error);
         }
       });
     }, Math.max(0, Number(delay) || 0));
   }
 
-  async function autoCaptureCurrentVideo(reason = "route", options = {}) {
+  async function autoCaptureCurrentVideo(reason = "route", options: { forceNetwork?: boolean; silent?: boolean; requestedBvid?: string; requestedPage?: number } = {}) {
     if (!state.autoCaptureEnabled && !options.forceNetwork) return;
     if (state.autoEnablePlayerSubtitle) {
       enablePlayerSubtitle(null).catch(() => {});
@@ -10461,7 +10172,7 @@ body{padding:48px 20px 80px}
         ? state.transcriptItem
         : null
     );
-    if (!options.forceNetwork && state.autoCaptureKey === captureKey && ["ok", "empty"].includes(existing?.subStatus)) {
+    if (!options.forceNetwork && state.autoCaptureKey === captureKey && ["ok", "empty"].includes(existing?.subStatus || "")) {
       if (existing?.subStatus === "ok") selectTranscriptItem(existing);
       return;
     }
@@ -10472,7 +10183,7 @@ body{padding:48px 20px 80px}
     state.autoCaptureAbortController = controller;
     state.autoCaptureKey = captureKey;
 
-    const placeholder = options.silent && existing
+    const placeholder: WorkbenchLibraryItem = options.silent && existing
       ? { ...existing }
       : {
           bvid,
@@ -10492,8 +10203,8 @@ body{padding:48px 20px 80px}
       const placeholderIndex = state.items.findIndex(
         (entry) => routeVideoKey(entry.bvid, entry.page || 1) === captureKey,
       );
-      if (placeholderIndex >= 0) {
-        const existingItem = state.items[placeholderIndex];
+      const existingItem = state.items[placeholderIndex];
+      if (existingItem) {
         Object.assign(existingItem, {
           title: placeholder.title || existingItem.title,
           author: placeholder.author || existingItem.author,
@@ -10511,11 +10222,11 @@ body{padding:48px 20px 80px}
     }
 
     let result = null;
-    let fastError = null;
+    let fastError: unknown = null;
     try {
       result = await fetchCurrentSubtitleFast(bvid, page, controller.signal, { forceNetwork: !!options.forceNetwork });
     } catch (error) {
-      if (error?.name === "AbortError") throw error;
+      if (isAbortError(error)) throw error;
       fastError = error;
     }
 
@@ -10526,19 +10237,19 @@ body{padding:48px 20px 80px}
         result = await fetchSubtitle(bvid, page);
         if (result && result.status === "ok") result.source = "robust_fallback";
       } catch (error) {
-        if (!result) result = { bvid, page, status: "error", error: error.message || String(error) };
+        if (!result) result = { bvid, page, status: "error", error: errorMessage(error) };
       }
     }
 
     if (epoch !== state.autoCaptureEpoch || controller.signal.aborted) return;
     if (currentRouteVideoKey() !== captureKey) return;
 
-    let item = {
+    let item: WorkbenchLibraryItem = {
       ...placeholder,
       bvid: result?.bvid || bvid,
       aid: result?.aid || null,
       cid: result?.cid || null,
-      title: result?.title || placeholder.title,
+      title: result?.title || placeholder.title || "",
       author: result?.author || "",
       page: result?.page || page,
       pages: result?.pages || [],
@@ -10546,11 +10257,11 @@ body{padding:48px 20px 80px}
       subStatus: result?.status || "error",
       cue_count: result?.cue_count || 0,
       data: result?.data || null,
-      error: result?.error || fastError?.message || "",
+      error: result?.error || (fastError ? errorMessage(fastError) : ""),
       lan: result?.lan || "",
       lan_doc: result?.lan_doc || "",
       tracks: result?.tracks || placeholder.tracks || [],
-      activeTrackIndex: Number.isInteger(result?.activeTrackIndex) ? result.activeTrackIndex : (placeholder.activeTrackIndex ?? -1),
+      activeTrackIndex: typeof result?.activeTrackIndex === "number" && Number.isInteger(result.activeTrackIndex) ? result.activeTrackIndex : (placeholder.activeTrackIndex ?? -1),
       cachePath: result?.cachePath || "",
       cacheLevel: result?.cacheLevel || "",
       cacheStale: !!result?.cacheStale,
@@ -10561,21 +10272,22 @@ body{padding:48px 20px 80px}
     try {
       const stamped = await stampUgcSeasonGroupMeta([item], item.bvid);
       if (stamped[0]) item = stamped[0];
-    } catch (_) { /* ignore season stamp */ }
+    } catch  { /* ignore season stamp */ }
     rememberTranscriptItem(item);
     const sameIndex = state.items.findIndex(
       (entry) => routeVideoKey(entry.bvid, entry.page || 1) === captureKey,
     );
-    if (sameIndex >= 0) {
-      let target = state.items[sameIndex];
-      target.title = item.title || target.title;
-      target.author = item.author || target.author;
-      target.aid = item.aid ?? target.aid;
-      target.cid = item.cid ?? target.cid;
-      target.pages = item.pages || target.pages;
+    const existingTarget = state.items[sameIndex];
+    if (existingTarget) {
+      let target = existingTarget;
+      target.title = item.title || target.title || "";
+      target.author = item.author || target.author || "";
+      target.aid = item.aid ?? target.aid ?? null;
+      target.cid = item.cid ?? target.cid ?? null;
+      target.pages = item.pages || target.pages || [];
       target = mergeGroupFields(target, item);
-      Object.assign(state.items[sameIndex], target);
-      target = state.items[sameIndex];
+      Object.assign(existingTarget, target);
+      target = existingTarget;
       target.sources = Array.from(new Set([...(target.sources || []), "打开视频"].filter(Boolean)));
       SubBatch.SubBatchMonorepo.ui.transcriptController.copySubtitleState(target, item);
       state.transcriptItem = target;
@@ -10622,7 +10334,7 @@ body{padding:48px 20px 80px}
       if (item.cacheStale && !options.forceNetwork) {
         window.setTimeout(() => {
           if (currentRouteVideoKey() === captureKey) {
-            autoCaptureCurrentVideo("stale-revalidate", { forceNetwork: true, silent: true, requestedBvid: item.bvid, requestedPage: item.page }).catch(() => {});
+            autoCaptureCurrentVideo("stale-revalidate", { forceNetwork: true, silent: true, requestedBvid: item.bvid, requestedPage: item.page || 1 }).catch(() => {});
           }
         }, 80);
       }
@@ -10666,7 +10378,7 @@ body{padding:48px 20px 80px}
       state.transcriptFilteredIndexes = null;
       state.transcriptItemKey = nextVideoKey;
       state.transcriptItem = null;
-      const transcriptSearch = document.getElementById(PANEL_ID)?.querySelector('[data-role="transcript-search"]');
+      const transcriptSearch = document.getElementById(PANEL_ID)?.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-role="transcript-search"]');
       if (transcriptSearch) transcriptSearch.value = "";
       refreshContextUI();
       renderTranscriptPanel();

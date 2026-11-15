@@ -6,6 +6,7 @@ export interface KnowledgeEvidence {
 }
 export interface KnowledgeAnswerNode {
   question: string;
+  suggestions?: string[];
   answer?: string;
   preview?: string;
   status?: string;
@@ -79,13 +80,13 @@ export function composerHtml(busy: boolean, modelOptionsHtml: string): string {
   }
 
 
-export function answerCardsHtml(
+export function answerCardsHtml<M>(
   text: string,
   options: {
     streaming?: boolean;
-    prepare: (source: string) => { md: string; maths: unknown[] };
+    prepare: (source: string) => { md: string; maths: M[] };
     blocks: (md: string) => Array<{ type: string; text: string; topic?: string }>;
-    chunkHtml: (chunk: string, maths: unknown[]) => string;
+    chunkHtml: (chunk: string, maths: M[]) => string;
     escapeHtml: (source: string) => string;
   },
 ): string {

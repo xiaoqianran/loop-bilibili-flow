@@ -519,8 +519,11 @@ TEMPORARY
 正式构建已从 `apps/userscript/src/main.ts` 统一打包，不再读取或拼接兼容主体。
 
 - `apps/userscript/src/workbench/runtime.ts` 保留了功能完整的旧工作台，确保行为不因构建切换而缺失。
-- 该文件仍是大型单体，使用 `@ts-nocheck` 和独立 ESLint 排除；**不代表业务职责已彻底分层**。
-- 后续按 `UI → Controllers → Application → Providers/Runtime` 边界继续拆分，先添加浏览器端到端回归，再移除单体与临时豁免。
+- 该文件仍是大型单体，已移除 `@ts-nocheck`，严格类型检查已于 2026-11-15 清零通过，并已移除独立 ESLint 排除，接受正常 lint；**不代表业务职责已彻底分层**。诊断审计上限不能替代完整类型检查。
+- AI 会话缓存恢复已归入 `app/ai-session-hydration.ts`，校验缓存输入并保留当前凭据与运行身份。
+- 字幕阅读区的空状态、轨道选择、搜索高亮、行渲染和播放跟随已归入 `ui/workspaces/transcript-controller.ts`；工作台保留媒体事件接线、抓取和缓存编排。
+- Mermaid 图表卡片、缩放、适宽和全屏节点恢复已归入 `ui/workspaces/mermaid-presentation.ts`，通过 typed ports 获取面板和调度动画帧；工作台保留渲染队列、AI 修复和缓存写入。
+- 后续按 `UI → Controllers → Application → Providers/Runtime` 边界继续拆分，补齐真实安装 Tampermonkey 的浏览器端到端回归，再继续缩减单体。
 - 浏览器侧需覆盖 Bilibili 字幕、AI PRE/POST、Studio、Knowledge、缓存、SPA 切换和 YouTube 隔离；单文件构建校验不能代替这些检查。
 
 详见 `docs/migration/P9-workbench-bundle.md`。

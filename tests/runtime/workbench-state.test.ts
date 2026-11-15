@@ -47,8 +47,8 @@ describe("typed workbench state factory", () => {
   it("allocates fresh cache maps, sessions, node collections and progress for every mount", () => {
     const first = createWorkbenchState(settings);
     const second = createWorkbenchState(settings);
-    first.aiRuns.set("r", { message: "a" });
-    first.fastTrackCache.set("t", "value");
+    first.fastTrackCache.set("t", []);
+    expect(first.aiRuns).not.toBe(second.aiRuns);
     first.libraryFolderCollapsed.a = true;
     first.libraryJob.index = 4;
     first.knowledgeAnchors.push({ id: "a" });

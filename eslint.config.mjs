@@ -7,8 +7,6 @@ export default tseslint.config(
     ignores: [
       "dist/**",
       "legacy/**",
-      // Residual workbench needs a separate lint-migration phase.
-      "apps/userscript/src/workbench/runtime.ts",
       "apps/userscript/src/legacy/**",
     ],
   },

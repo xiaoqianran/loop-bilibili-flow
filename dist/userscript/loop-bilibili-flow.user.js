@@ -45,36 +45,36 @@ var SubBatch = (function(exports) {
   function videoViewUrl(bvid) {
     return `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`;
   }
-  function record$2(value) {
+  function record$4(value) {
     return value && typeof value === "object" ? value : null;
   }
   function parseRecord(value) {
     if (typeof value === "string") {
       try {
-        return record$2(JSON.parse(value));
+        return record$4(JSON.parse(value));
       } catch {
         return null;
       }
     }
-    return record$2(value);
+    return record$4(value);
   }
   function nested(root, ...keys) {
     let current = root;
     for (const key of keys) {
-      const item = record$2(current);
+      const item = record$4(current);
       if (!item) return void 0;
       current = item[key];
     }
     return current;
   }
   function runtimeVideoView(runtime2, bvid) {
-    const root = record$2(runtime2);
-    const initial = record$2(root?.__INITIAL_STATE__);
+    const root = record$4(runtime2);
+    const initial = record$4(root?.__INITIAL_STATE__);
     const key = String(bvid || "").toUpperCase();
     const candidates = [
-      record$2(initial?.videoData),
-      record$2(initial?.videoInfo),
-      record$2(initial?.epInfo)
+      record$4(initial?.videoData),
+      record$4(initial?.videoInfo),
+      record$4(initial?.epInfo)
     ];
     for (const candidate of candidates) {
       if (!candidate) continue;
@@ -122,7 +122,7 @@ var SubBatch = (function(exports) {
   function normalizeTracks(value) {
     if (!Array.isArray(value)) return [];
     return value.map((track) => {
-      const item = record$2(track) ?? {};
+      const item = record$4(track) ?? {};
       return {
         ...item,
         subtitle_url: normalizeSubtitleUrl(item.subtitle_url)
@@ -130,9 +130,9 @@ var SubBatch = (function(exports) {
     });
   }
   function runtimeSubtitleTracks(runtime2, meta) {
-    const root = record$2(runtime2);
-    const initial = record$2(root?.__INITIAL_STATE__);
-    const initialVideo = record$2(initial?.videoData);
+    const root = record$4(runtime2);
+    const initial = record$4(root?.__INITIAL_STATE__);
+    const initialVideo = record$4(initial?.videoData);
     const roots = [
       root?.__playinfo__,
       root?.__PLAYINFO__,
@@ -2091,11 +2091,11 @@ ${prompt2.userPromptTemplate || ""}`);
   function applyGroupMetaPatchToItems(items, patch) {
     const list = items || [];
     if (!patch?.groupKey) return list.slice();
-    return list.map((row) => {
-      if (String(row.groupKey || "") !== patch.groupKey) return row;
-      const next = { ...row };
-      if (patch.author && (!row.author || row.author === "未知UP")) next.author = patch.author;
-      if (patch.groupFolder && (!row.groupFolder || /^未知UP\b/.test(String(row.groupFolder)))) {
+    return list.map((row2) => {
+      if (String(row2.groupKey || "") !== patch.groupKey) return row2;
+      const next = { ...row2 };
+      if (patch.author && (!row2.author || row2.author === "未知UP")) next.author = patch.author;
+      if (patch.groupFolder && (!row2.groupFolder || /^未知UP\b/.test(String(row2.groupFolder)))) {
         next.groupFolder = patch.groupFolder;
       }
       return next;
@@ -2301,17 +2301,17 @@ ${stripMermaidTimestampCitations(nextCode)}
     const sourceId = String(context.sourceId || "source").trim() || "source";
     const segmentId = String(context.segmentId || "").trim();
     const identity = [sourceId, segmentId].filter(Boolean).join(" ");
-    const rows = [];
+    const rows2 = [];
     let previous = "";
     for (const cue of cues) {
       const content2 = String(cue.content || "").replace(/\s+/g, " ").trim();
       if (!content2 || content2 === previous) continue;
       previous = content2;
-      rows.push(
+      rows2.push(
         `[${identity} ${formatClock(cue.from_sec ?? parseSeconds(cue.from))}] ${content2}`
       );
     }
-    return rows.join("\n");
+    return rows2.join("\n");
   }
   function cuesToAiText(cues, bvid, page) {
     return cuesToEvidenceText(cues, {
@@ -3308,21 +3308,21 @@ ${prompt2.userPromptTemplate}`
     const id = validVideoId(videoId);
     return id ? `https://www.youtube.com/watch?v=${id}` : "";
   }
-  function record$1(value) {
+  function record$3(value) {
     return value && typeof value === "object" ? value : null;
   }
   function textOf$1(value) {
-    const root = record$1(value);
+    const root = record$3(value);
     if (!root) return String(value || "").trim();
     const simple = String(root.simpleText || "").trim();
     if (simple) return simple;
     const runs = Array.isArray(root.runs) ? root.runs : [];
-    return runs.map((run) => String(record$1(run)?.text || "")).join("").trim();
+    return runs.map((run) => String(record$3(run)?.text || "")).join("").trim();
   }
   function videoDetails(response) {
-    const root = record$1(response);
-    const nested2 = record$1(root?.playerResponse);
-    const details = record$1(root?.videoDetails) ?? record$1(nested2?.videoDetails);
+    const root = record$3(response);
+    const nested2 = record$3(root?.playerResponse);
+    const details = record$3(root?.videoDetails) ?? record$3(nested2?.videoDetails);
     const videoId = String(details?.videoId || "").trim();
     if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return null;
     const title = String(details?.title || "").trim();
@@ -3334,12 +3334,12 @@ ${prompt2.userPromptTemplate}`
     };
   }
   function runtimePlayerResponse(runtime2, expectedVideoId) {
-    const root = record$1(runtime2);
+    const root = record$3(runtime2);
     if (!root) return null;
     const direct = root.ytInitialPlayerResponse;
-    const ytplayer = record$1(root.ytplayer);
-    const config = record$1(ytplayer?.config);
-    const args = record$1(config?.args);
+    const ytplayer = record$3(root.ytplayer);
+    const config = record$3(ytplayer?.config);
+    const args = record$3(config?.args);
     const candidates = [direct];
     const serialized = args?.player_response;
     if (typeof serialized === "string" && serialized.trim()) {
@@ -3424,13 +3424,13 @@ ${prompt2.userPromptTemplate}`
     return null;
   }
   function captionTracks(response) {
-    const root = record$1(response);
-    const nested2 = record$1(root?.playerResponse);
-    const captions = record$1(root?.captions) ?? record$1(nested2?.captions);
-    const renderer = record$1(captions?.playerCaptionsTracklistRenderer);
+    const root = record$3(response);
+    const nested2 = record$3(root?.playerResponse);
+    const captions = record$3(root?.captions) ?? record$3(nested2?.captions);
+    const renderer = record$3(captions?.playerCaptionsTracklistRenderer);
     const tracks = Array.isArray(renderer?.captionTracks) ? renderer.captionTracks : [];
     return tracks.flatMap((value) => {
-      const track = record$1(value);
+      const track = record$3(value);
       const baseUrl = String(track?.baseUrl || "").trim();
       const languageCode = String(track?.languageCode || "").trim();
       if (!baseUrl || !languageCode) return [];
@@ -3483,14 +3483,14 @@ ${prompt2.userPromptTemplate}`
     }
   }
   function parseJson3Transcript(payload) {
-    const root = record$1(payload);
+    const root = record$3(payload);
     const events = Array.isArray(root?.events) ? root.events : [];
     const segments = [];
     for (let index = 0; index < events.length; index += 1) {
-      const event = record$1(events[index]);
+      const event = record$3(events[index]);
       if (!event) continue;
       const pieces = Array.isArray(event.segs) ? event.segs : [];
-      const text = pieces.map((piece) => String(record$1(piece)?.utf8 || "")).join("").replace(/\s+/g, " ").trim();
+      const text = pieces.map((piece) => String(record$3(piece)?.utf8 || "")).join("").replace(/\s+/g, " ").trim();
       if (!text) continue;
       const startMs = Number(event.tStartMs);
       if (!Number.isFinite(startMs)) continue;
@@ -3522,6 +3522,75 @@ ${prompt2.userPromptTemplate}`
     videoDetails,
     videoWatchUrl
   }, Symbol.toStringTag, { value: "Module" }));
+  function record$2(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+  }
+  const str = (value) => String(value ?? "");
+  const num = (value) => {
+    const converted = Number(value);
+    return Number.isFinite(converted) ? converted : 0;
+  };
+  function optionalNumber(value) {
+    if (typeof value !== "number" && (typeof value !== "string" || !value.trim())) return void 0;
+    const converted = Number(value);
+    return Number.isFinite(converted) ? converted : void 0;
+  }
+  function row(value) {
+    const o = record$2(value);
+    const owner = record$2(o.owner);
+    const upper = record$2(o.upper);
+    return {
+      bvid: str(o.bvid),
+      bv_id: str(o.bv_id),
+      aid: num(o.aid),
+      id: num(o.id),
+      title: str(o.title),
+      author: str(o.author),
+      up_name: str(o.up_name),
+      arcurl: str(o.arcurl),
+      type: num(o.type),
+      owner: { name: str(owner.name) },
+      upper: { name: str(upper.name) }
+    };
+  }
+  const rows = (input) => Array.isArray(input) ? input.map(row) : [];
+  function parseListResponse(value) {
+    const payload = record$2(value);
+    const code = optionalNumber(payload.code);
+    if (code === void 0 || !Number.isInteger(code)) {
+      throw new Error("Bilibili 列表响应缺少有效 code");
+    }
+    const data = record$2(payload.data), list = record$2(data.list);
+    const page = record$2(data.page), info = record$2(data.info), meta = record$2(data.meta);
+    const metaUpper = record$2(meta.upper);
+    const pagination = {};
+    for (const key of ["pn", "ps", "count", "total"]) {
+      const value2 = optionalNumber(page[key]);
+      if (value2 !== void 0 && value2 >= 0) pagination[key] = value2;
+    }
+    return {
+      code,
+      message: str(payload.message),
+      data: {
+        list: { vlist: rows(list.vlist) },
+        page: pagination,
+        medias: rows(data.medias),
+        archives: rows(data.archives),
+        result: rows(data.result),
+        has_more: data.has_more === true,
+        numPages: num(data.numPages),
+        numResults: num(data.numResults),
+        info: { title: str(info.title) },
+        meta: {
+          name: str(meta.name),
+          title: str(meta.title),
+          author: str(meta.author),
+          name_upper: str(meta.name_upper),
+          upper: { name: str(metaUpper.name) }
+        }
+      }
+    };
+  }
   function validateContext(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       throw new Error("缺少扫描上下文，请打开 Bilibili 页面后重试");
@@ -3763,6 +3832,47 @@ ${prompt2.userPromptTemplate}`
   }
   function chooseSeasonMembers(recent, loaded) {
     return loaded.length > recent.length ? loaded : recent;
+  }
+  function parseUserSeasonPage(input) {
+    const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+    const response = object(input);
+    if (typeof response.code !== "number" && (typeof response.code !== "string" || !response.code.trim())) {
+      throw new Error("Bilibili 合集列表响应缺少有效 code");
+    }
+    const code = Number(response.code);
+    if (!Number.isInteger(code)) throw new Error("Bilibili 合集列表响应缺少有效 code");
+    const data = object(response.data);
+    const lists = object(data.items_lists);
+    const page = object(lists.page);
+    const seasons = Array.isArray(lists.seasons_list) ? lists.seasons_list.map((entry) => {
+      const raw = object(entry);
+      const meta = object(raw.meta);
+      const seasonMeta = {
+        ...typeof meta.season_id === "string" || typeof meta.season_id === "number" ? { season_id: meta.season_id } : {},
+        ...typeof meta.mid === "string" || typeof meta.mid === "number" ? { mid: meta.mid } : {},
+        ...typeof meta.name === "string" ? { name: meta.name } : {},
+        ...typeof meta.title === "string" ? { title: meta.title } : {},
+        ...Number.isFinite(Number(meta.total)) && meta.total != null ? { total: Number(meta.total) } : {}
+      };
+      return {
+        meta: seasonMeta,
+        ...Array.isArray(raw.archives) ? {
+          archives: raw.archives.map((item) => {
+            const archive = object(item);
+            return typeof archive.bvid === "string" ? { bvid: archive.bvid } : {};
+          })
+        } : {}
+      };
+    }) : [];
+    return {
+      code,
+      ...typeof response.message === "string" ? { message: response.message } : {},
+      ...response.data !== void 0 ? { data: { items_lists: {
+        seasons_list: seasons,
+        ...Array.isArray(lists.series_list) ? { series_list: lists.series_list } : {},
+        ...page.total === null || typeof page.total === "number" || typeof page.total === "string" ? { page: { total: page.total } } : {}
+      } } } : {}
+    };
   }
   async function collectUserSeasons(midValue, config, ports) {
     const mid = String(midValue || "").trim();
@@ -4006,6 +4116,7 @@ ${prompt2.userPromptTemplate}`
       if (item.subStatus === "ok" && item.data?.length) continue;
       ports.onFetching(item, i, targets.length);
       const result = await ports.fetchSubtitle(item.bvid, item.page || 1);
+      if (ports.cancelled()) throw new Error("用户停止");
       item.subStatus = result.status;
       item.cue_count = result.cue_count || 0;
       item.data = result.data || null;
@@ -4450,7 +4561,8 @@ ${prompt2.userPromptTemplate}`
   }
   async function fetchSubtitleBody(network, url, signal) {
     const payload = await network.json(url, request$1(signal));
-    return Array.isArray(payload?.body) ? payload.body : [];
+    if (!Array.isArray(payload?.body)) return [];
+    return payload.body.filter((value) => value !== null && typeof value === "object" && !Array.isArray(value));
   }
   async function fetchPlayerWbiTracks(network, meta, signal) {
     const params = meta.aid ? { aid: meta.aid, cid: meta.cid } : { bvid: meta.bvid, cid: meta.cid };
@@ -4809,13 +4921,13 @@ ${prompt2.userPromptTemplate}`
     const selected = /* @__PURE__ */ new Set();
     const head = Math.min(2, chunks.length);
     for (let i = 0; i < head; i++) selected.add(i);
-    const ranked = chunks.map((chunk, index) => ({ chunk, index, score: scoreChunk(chunk, tokens) })).filter((row) => !selected.has(row.index)).sort((a, b) => b.score - a.score || a.index - b.index);
+    const ranked = chunks.map((chunk, index) => ({ chunk, index, score: scoreChunk(chunk, tokens) })).filter((row2) => !selected.has(row2.index)).sort((a, b) => b.score - a.score || a.index - b.index);
     let used = [...selected].reduce((sum, index) => sum + chunks[index].length, 0);
-    for (const row of ranked) {
-      if (row.score <= 0 && used > budget * 0.55) continue;
-      if (used + row.chunk.length > budget) continue;
-      selected.add(row.index);
-      used += row.chunk.length;
+    for (const row2 of ranked) {
+      if (row2.score <= 0 && used > budget * 0.55) continue;
+      if (used + row2.chunk.length > budget) continue;
+      selected.add(row2.index);
+      used += row2.chunk.length;
       if (used >= budget * 0.94) break;
     }
     const ordered = [...selected].sort((a, b) => a - b);
@@ -5474,6 +5586,7 @@ ${prompt2.userPromptTemplate}`
     applyPromptStageOrder
   };
   const scan = {
+    parseListResponse,
     validateContext,
     pageSizeFor
   };
@@ -9962,6 +10075,43 @@ ${prompt2.userPromptTemplate}`
     __proto__: null,
     bind: bind$3
   }, Symbol.toStringTag, { value: "Module" }));
+  function status(item) {
+    const value = String(item?.subStatus || "wait");
+    return value === "ok" || value === "empty" || value === "error" ? value : "wait";
+  }
+  function statusLabel(item) {
+    const value = status(item);
+    if (value === "ok") return String(item?.cue_count || item?.data?.length || 0) + " 条";
+    if (value === "empty") return "无字幕";
+    if (value === "error") return "失败";
+    return "待抓取";
+  }
+  function filteredEntries(items, queryValue, filterValue) {
+    const query = String(queryValue || "").trim().toLocaleLowerCase();
+    const filter = String(filterValue || "all");
+    return items.map((item, index) => ({ item, index })).filter(({ item }) => filter === "all" || status(item) === filter).filter(({ item }) => {
+      if (!query) return true;
+      const haystack = [
+        item?.title,
+        item?.bvid,
+        item?.author,
+        item?.part,
+        item?.groupFolder,
+        item?.parentFolder,
+        item?.collectionName,
+        item?.videoTitle,
+        item?.collectionShortUrl,
+        ...Array.isArray(item?.sources) ? item.sources : []
+      ].filter(Boolean).join(" ").toLocaleLowerCase();
+      return haystack.includes(query);
+    });
+  }
+  const libraryController = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+    __proto__: null,
+    filteredEntries,
+    status,
+    statusLabel
+  }, Symbol.toStringTag, { value: "Module" }));
   function formatTime(seconds, withHours = false) {
     const total = Math.max(0, Math.floor(Number(seconds) || 0));
     const h = Math.floor(total / 3600);
@@ -10024,49 +10174,129 @@ ${prompt2.userPromptTemplate}`
     }
     return target;
   }
+  function appendHighlightedText(container, text, query) {
+    if (!query) {
+      container.textContent = text;
+      return;
+    }
+    const doc = container.ownerDocument;
+    const source = String(text || "");
+    const lower = source.toLocaleLowerCase();
+    const needle = query.toLocaleLowerCase();
+    let cursor = 0;
+    let index = lower.indexOf(needle);
+    while (index >= 0) {
+      if (index > cursor) container.append(doc.createTextNode(source.slice(cursor, index)));
+      const mark = doc.createElement("mark");
+      mark.textContent = source.slice(index, index + query.length);
+      container.append(mark);
+      cursor = index + query.length;
+      index = lower.indexOf(needle, cursor);
+    }
+    if (cursor < source.length) container.append(doc.createTextNode(source.slice(cursor)));
+  }
+  function populateTrackSelect(select, item, state2, preferredTrack) {
+    if (!select) return;
+    const tracks = item?.tracks || [];
+    const add = (label, value) => {
+      const option = select.ownerDocument.createElement("option");
+      option.textContent = label;
+      option.value = value;
+      select.appendChild(option);
+    };
+    select.replaceChildren();
+    if (!tracks.length) {
+      add(item?.lan_doc || item?.lan || "默认字幕", "0");
+      select.disabled = true;
+      return;
+    }
+    tracks.forEach((track, index) => add(track.lan_doc || track.lan || `字幕 ${index + 1}`, String(index)));
+    const active = item?.activeTrackIndex;
+    const selected = active !== void 0 && Number.isInteger(active) ? active : preferredTrack(tracks);
+    state2.transcriptTrackIndex = selected;
+    select.value = String(Math.max(0, selected));
+    select.disabled = tracks.length <= 1;
+  }
+  function renderPanel(root, item, state2, ports) {
+    if (!root) return false;
+    const list = root.querySelector('[data-role="transcript-list"]');
+    const title = root.querySelector('[data-role="transcript-title"]');
+    const meta = root.querySelector('[data-role="transcript-meta"]');
+    const count = root.querySelector('[data-role="transcript-count"]');
+    if (!list || !title || !meta || !count) return false;
+    const select = root.querySelector('[data-role="transcript-track"]');
+    if (!item || item.subStatus !== "ok" || !item.data?.length) {
+      title.textContent = item?.title || "当前视频字幕";
+      const value = status(item);
+      const page = item?.page || 1;
+      meta.textContent = !item ? "从左侧选择一个视频" : `${item.bvid || ""}${page > 1 ? ` · P${page}` : ""} · ${value === "error" ? "抓取失败" : value === "empty" ? "无字幕" : "待抓取"}`;
+      count.textContent = "";
+      populateTrackSelect(select, null, state2, ports.preferredTrack);
+      list.innerHTML = item ? `<div class="bsb-transcript-empty">${value === "error" ? "字幕抓取失败，可点击右上角刷新重试。" : value === "empty" ? "这个视频没有可读取字幕。" : "该视频尚未抓取字幕，可勾选后点击左侧「抓取所选」。"}</div>` : '<div class="bsb-transcript-empty">从左侧选择一个视频。<br>已有字幕的项目会直接显示全文。</div>';
+      return false;
+    }
+    if (!state2.transcriptItemKey) state2.transcriptItemKey = ports.routeKey(item.bvid, item.page || 1);
+    title.textContent = item.title || `${item.bvid} 字幕`;
+    meta.textContent = `${item.cue_count || item.data.length} 条 · ${item.lan_doc || item.lan || "字幕"} · ${item.cachePath || item.source || "已加载"}`;
+    populateTrackSelect(select, item, state2, ports.preferredTrack);
+    const query = state2.transcriptQuery.trim();
+    const indexes = filterIndexes(item.data, query);
+    state2.transcriptFilteredIndexes = query ? indexes : null;
+    count.textContent = query ? `${indexes.length}/${item.data.length}` : String(item.data.length);
+    const epoch = ++state2.transcriptRenderEpoch;
+    const doc = root.ownerDocument;
+    const fragment = doc.createDocumentFragment();
+    for (const index of indexes) {
+      const cue = item.data[index];
+      if (!cue) continue;
+      const row2 = doc.createElement("div");
+      row2.className = "bsb-transcript-row";
+      if (index === state2.transcriptActiveCueIndex) row2.classList.add("active");
+      row2.dataset.cueIndex = String(index);
+      const seconds = cue.from_sec ?? ports.parseSeconds(cue.from);
+      const time = doc.createElement("button");
+      time.type = "button";
+      time.className = "bsb-transcript-time";
+      time.dataset.transcriptTime = String(seconds);
+      time.textContent = formatTime(seconds);
+      time.title = `跳转到 ${formatTime(seconds, true)}`;
+      const text = doc.createElement("p");
+      text.className = "bsb-transcript-text";
+      appendHighlightedText(text, cue.content || "", query);
+      row2.append(time, text);
+      fragment.appendChild(row2);
+    }
+    if (epoch !== state2.transcriptRenderEpoch) return false;
+    list.replaceChildren(fragment);
+    return true;
+  }
+  function updateActiveCue(root, cues, state2, time, force, ports) {
+    if (!cues.length) return;
+    const index = cueIndexAt(cues, Number(time) || 0, ports.parseSeconds);
+    if (index < 0) {
+      root?.querySelector(".bsb-transcript-row.active")?.classList.remove("active");
+      state2.transcriptActiveCueIndex = -1;
+      return;
+    }
+    if (!force && index === state2.transcriptActiveCueIndex) return;
+    root?.querySelector(".bsb-transcript-row.active")?.classList.remove("active");
+    state2.transcriptActiveCueIndex = index;
+    const row2 = root?.querySelector(`.bsb-transcript-row[data-cue-index="${index}"]`);
+    row2?.classList.add("active");
+    if (!row2 || !state2.transcriptAutoFollow || state2.ui?.view !== "subs") return;
+    if (!force && ports.now() < state2.transcriptUserScrollUntil) return;
+    row2.scrollIntoView({ block: "center", behavior: ports.reducedMotion() ? "auto" : "smooth" });
+  }
   const transcriptController = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
     __proto__: null,
+    appendHighlightedText,
     copySubtitleState,
     cueIndexAt,
     filterIndexes,
-    formatTime
-  }, Symbol.toStringTag, { value: "Module" }));
-  function status(item) {
-    const value = String(item?.subStatus || "wait");
-    return value === "ok" || value === "empty" || value === "error" ? value : "wait";
-  }
-  function statusLabel(item) {
-    const value = status(item);
-    if (value === "ok") return String(item?.cue_count || item?.data?.length || 0) + " 条";
-    if (value === "empty") return "无字幕";
-    if (value === "error") return "失败";
-    return "待抓取";
-  }
-  function filteredEntries(items, queryValue, filterValue) {
-    const query = String(queryValue || "").trim().toLocaleLowerCase();
-    const filter = String(filterValue || "all");
-    return items.map((item, index) => ({ item, index })).filter(({ item }) => filter === "all" || status(item) === filter).filter(({ item }) => {
-      if (!query) return true;
-      const haystack = [
-        item?.title,
-        item?.bvid,
-        item?.author,
-        item?.part,
-        item?.groupFolder,
-        item?.parentFolder,
-        item?.collectionName,
-        item?.videoTitle,
-        item?.collectionShortUrl,
-        ...Array.isArray(item?.sources) ? item.sources : []
-      ].filter(Boolean).join(" ").toLocaleLowerCase();
-      return haystack.includes(query);
-    });
-  }
-  const libraryController = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
-    __proto__: null,
-    filteredEntries,
-    status,
-    statusLabel
+    formatTime,
+    populateTrackSelect,
+    renderPanel,
+    updateActiveCue
   }, Symbol.toStringTag, { value: "Module" }));
   function nodesForAnchor(nodes, anchorId) {
     return nodes.filter((node) => node.anchorId === anchorId);
@@ -10539,7 +10769,7 @@ ${prompt2.userPromptTemplate}`
     __proto__: null,
     bind: bind$1
   }, Symbol.toStringTag, { value: "Module" }));
-  function record(value) {
+  function record$1(value) {
     return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
   }
   function numberOrDefault(value, fallback) {
@@ -10592,7 +10822,7 @@ ${prompt2.userPromptTemplate}`
     const defaults = defaultUiGeometry(options);
     if (!raw) return defaults;
     try {
-      const saved = record(JSON.parse(raw));
+      const saved = record$1(JSON.parse(raw));
       const hasPreset = options.isPreset(saved.sizePreset) || saved.sizePreset === "custom";
       const sizePreset = hasPreset ? String(saved.sizePreset) : options.defaultSizePreset;
       const heightMode = hasPreset && saved.heightMode === "custom" ? "custom" : "high";
@@ -11063,6 +11293,255 @@ ${prompt2.userPromptTemplate}`
       onNavigate
     };
   }
+  function parseMermaidViewBox(svg) {
+    const raw = String(svg?.getAttribute("viewBox") || "").trim();
+    const [x = 0, y = 0, w = 0, h = 0] = raw.split(/[\s,]+/).map(Number);
+    const values = [x, y, w, h];
+    if (values.length === 4 && values.every(Number.isFinite) && w > 0 && h > 0) {
+      return { x, y, width: w, height: h };
+    }
+    const width = Number.parseFloat(svg?.getAttribute("width") || "") || 960;
+    const height = Number.parseFloat(svg?.getAttribute("height") || "") || 540;
+    return { x: 0, y: 0, width, height };
+  }
+  function getMermaidScale(card) {
+    const scale = Number(card?.dataset?.scale);
+    return Number.isFinite(scale) && scale > 0 ? scale : 1;
+  }
+  function updateMermaidScaleLabel(card) {
+    const label = card?.querySelector(".bsb-mermaid-scale");
+    if (label)
+      label.textContent = `${Math.round(getMermaidScale(card) * 100)}%`;
+  }
+  function setMermaidScale(card, scale, mode = "manual") {
+    if (!card)
+      return;
+    const stage = card.querySelector(".bsb-mermaid-stage");
+    if (!stage)
+      return;
+    const baseWidth = Number(stage.dataset.baseWidth) || 760;
+    const next = Math.max(0.35, Math.min(3, Number(scale) || 1));
+    card.dataset.scale = String(next);
+    card.dataset.fit = mode;
+    stage.style.setProperty("--bsb-mermaid-width", `${Math.max(240, Math.round(baseWidth * next))}px`);
+    updateMermaidScaleLabel(card);
+  }
+  function fitMermaidToViewport(card) {
+    const viewport = card?.querySelector(".bsb-mermaid-viewport");
+    const stage = card?.querySelector(".bsb-mermaid-stage");
+    if (!viewport || !stage)
+      return;
+    const baseWidth = Number(stage.dataset.baseWidth) || 760;
+    const available = Math.max(240, viewport.clientWidth - 36);
+    setMermaidScale(card, Math.min(1.5, available / baseWidth), "fit");
+    viewport.scrollLeft = 0;
+    viewport.scrollTop = 0;
+  }
+  function buildMermaidCard(svg, idx, host2) {
+    svg.classList.add("bsb-mermaid-svg");
+    svg.removeAttribute("width");
+    svg.removeAttribute("height");
+    svg.setAttribute("preserveAspectRatio", "xMinYMin meet");
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", `架构流程图 ${idx + 1}`);
+    const viewBox = parseMermaidViewBox(svg);
+    if (!svg.hasAttribute("viewBox"))
+      svg.setAttribute("viewBox", `${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`);
+    const baseWidth = Math.round(Math.max(760, Math.min(3600, viewBox.width)));
+    const card = document.createElement("section");
+    card.className = "bsb-mermaid-card";
+    card.dataset.scale = "1";
+    card.dataset.fit = "actual";
+    const toolbar = document.createElement("div");
+    toolbar.className = "bsb-mermaid-toolbar";
+    const title = document.createElement("span");
+    title.className = "bsb-mermaid-title";
+    const repaired = !!host2?._bsbMermaidJob?.repaired;
+    title.textContent = `架构流程图 ${idx + 1}${repaired ? " · AI 已修复" : ""} · 可滚动查看`;
+    const tools = document.createElement("span");
+    tools.className = "bsb-mermaid-tools";
+    const makeButton = (toolAction, text, titleText) => {
+      const toolButton = document.createElement("button");
+      toolButton.type = "button";
+      toolButton.className = "bsb-mermaid-tool";
+      toolButton.dataset.mmdAct = toolAction;
+      toolButton.textContent = text;
+      toolButton.title = titleText;
+      toolButton.setAttribute("aria-label", titleText);
+      return toolButton;
+    };
+    tools.append(makeButton("fit", "适宽", "适应可视区域宽度"), makeButton("actual", "100%", "恢复清晰原始尺寸"), makeButton("zoom-out", "−", "缩小图表"));
+    const scaleLabel = document.createElement("span");
+    scaleLabel.className = "bsb-mermaid-scale";
+    scaleLabel.textContent = "100%";
+    tools.append(scaleLabel, makeButton("zoom-in", "+", "放大图表"), makeButton("retry", "重绘", "先重试渲染；若语法失败则只修复该 Mermaid 代码块"), makeButton("fullscreen", "全屏", "全屏查看"));
+    toolbar.append(title, tools);
+    const viewport = document.createElement("div");
+    viewport.className = "bsb-mermaid-viewport";
+    viewport.tabIndex = 0;
+    viewport.setAttribute("aria-label", "可滚动和缩放的 Mermaid 图表");
+    const stage = document.createElement("div");
+    stage.className = "bsb-mermaid-stage";
+    stage.dataset.baseWidth = String(baseWidth);
+    stage.style.setProperty("--bsb-mermaid-width", `${baseWidth}px`);
+    stage.appendChild(svg);
+    const hint = document.createElement("span");
+    hint.className = "bsb-mermaid-hint";
+    hint.textContent = "Ctrl + 滚轮缩放";
+    viewport.append(stage, hint);
+    card.append(toolbar, viewport);
+    card._bsbMermaidHost = host2 || null;
+    card._bsbMermaidJob = host2?._bsbMermaidJob || null;
+    return card;
+  }
+  function createMermaidFullscreen(ports) {
+    function closeMermaidFullscreen() {
+      const root = ports.root();
+      const modal = root?.querySelector(".bsb-mermaid-modal");
+      if (!modal)
+        return;
+      const card = modal.querySelector(".bsb-mermaid-card");
+      const placeholder = card?._bsbMermaidPlaceholder;
+      if (card && placeholder?.parentNode) {
+        card.classList.remove("is-fullscreen");
+        placeholder.replaceWith(card);
+        card._bsbMermaidPlaceholder = null;
+        const full = card.querySelector('[data-mmd-act="fullscreen"]');
+        if (full) {
+          full.textContent = "全屏";
+          full.title = "全屏查看";
+        }
+      }
+      modal.remove();
+    }
+    function openMermaidFullscreen(card) {
+      if (!card || card.closest(".bsb-mermaid-modal"))
+        return;
+      closeMermaidFullscreen();
+      const root = ports.root();
+      if (!root)
+        return;
+      const placeholder = document.createComment("bsb-mermaid-placeholder");
+      card.before(placeholder);
+      card._bsbMermaidPlaceholder = placeholder;
+      const modal = document.createElement("div");
+      modal.className = "bsb-mermaid-modal";
+      modal.setAttribute("role", "dialog");
+      modal.setAttribute("aria-modal", "true");
+      modal.setAttribute("aria-label", "Mermaid 图表全屏查看");
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal)
+          closeMermaidFullscreen();
+      });
+      card.classList.add("is-fullscreen");
+      const full = card.querySelector('[data-mmd-act="fullscreen"]');
+      if (full) {
+        full.textContent = "退出";
+        full.title = "退出全屏";
+      }
+      modal.appendChild(card);
+      root.appendChild(modal);
+      ports.requestFrame(() => fitMermaidToViewport(card));
+    }
+    return { closeMermaidFullscreen, openMermaidFullscreen };
+  }
+  function record(value) {
+    return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+  }
+  function strings(value) {
+    return Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : [];
+  }
+  function normalizeCachedSessionInput(value) {
+    const input = record(value);
+    const vars = record(input?.vars);
+    if (!input || !vars || typeof vars.subtitle !== "string") return null;
+    const meta = record(input.commonMeta);
+    return {
+      ...input,
+      sessionId: Number(input.sessionId) || 0,
+      routeKey: String(input.routeKey || ""),
+      vars: { ...vars, subtitle: vars.subtitle },
+      promptProfile: record(input.promptProfile),
+      preprocessPrompt: record(input.preprocessPrompt),
+      preprocessConfig: record(input.preprocessConfig),
+      preprocessEnabled: !!input.preprocessEnabled,
+      taskSnapshots: Array.isArray(input.taskSnapshots) ? input.taskSnapshots.flatMap((entry) => {
+        const snapshot = record(entry);
+        if (!snapshot) return [];
+        const task = record(snapshot.task);
+        return [{
+          task: task ? { ...task, modelIds: strings(task.modelIds) } : null,
+          prompt: record(snapshot.prompt)
+        }];
+      }) : [],
+      commonMeta: { ...meta, sourceBvids: strings(meta?.sourceBvids) }
+    };
+  }
+  function applyRestoredRunOutput(target, draft) {
+    return Object.assign(target, {
+      raw: draft.raw,
+      status: draft.status,
+      statusText: draft.statusText,
+      error: draft.error,
+      sourceIds: [...draft.sourceIds],
+      sourceBvids: [...draft.sourceBvids],
+      startedAt: draft.startedAt,
+      finishedAt: draft.finishedAt,
+      scrollTop: draft.scrollTop,
+      busy: false,
+      mermaidRepairing: false
+    });
+  }
+  function restorePreprocessRun(snapshot, runtime2) {
+    return {
+      runtime: runtime2,
+      childRuntimes: /* @__PURE__ */ new Set(),
+      busy: false,
+      raw: snapshot.raw || "",
+      text: snapshot.text || snapshot.raw || "",
+      preview: snapshot.preview || "",
+      status: snapshot.status === "error" ? "error" : snapshot.status === "stopped" ? "stopped" : "done",
+      statusText: snapshot.statusText || "缓存",
+      modelName: snapshot.modelName || "",
+      promptName: snapshot.promptName || "",
+      cacheHits: snapshot.cacheHits || 0,
+      total: snapshot.total || 0,
+      totalChunks: snapshot.totalChunks || 0,
+      completedChunks: snapshot.completedChunks || 0,
+      settings: settings({
+        preprocessConcurrency: snapshot.settings?.concurrency,
+        preprocessTargetMinutes: snapshot.settings?.targetMinutes,
+        preprocessOverlapSeconds: snapshot.settings?.overlapSeconds,
+        preprocessMaxChars: snapshot.settings?.maxChars,
+        preprocessRetries: snapshot.settings?.retries
+      })
+    };
+  }
+  function resolveAiScrollState(s, ev) {
+    let stick = !!s.stick;
+    let userReading = !!s.userReading;
+    const prog = !!s.progScroll;
+    const type = ev && ev.type || "";
+    const gap = ev && typeof ev.gap === "number" ? ev.gap : null;
+    if (type === "start" || type === "resume") {
+      stick = true;
+      userReading = false;
+    } else if (type === "wheel-up" || type === "detach") {
+      stick = false;
+      userReading = true;
+    } else if (type === "scroll") {
+      if (prog) ;
+      else if (gap != null && gap > 24) {
+        stick = false;
+        userReading = true;
+      } else if (gap != null && gap <= 12 && userReading) {
+        stick = true;
+        userReading = false;
+      }
+    }
+    const allowPaintScroll = stick && !userReading;
+    return { stick, userReading, allowPaintScroll };
+  }
   function readSessionCache(storage, prefix, kind, key, ttlMs, now = Date.now()) {
     try {
       const fullKey = prefix + kind + ":" + key;
@@ -11360,6 +11839,20 @@ ${prompt2.userPromptTemplate}`
     return fn(...args);
   }
   function mountWorkbench(SubBatch2) {
+    const { closeMermaidFullscreen, openMermaidFullscreen } = createMermaidFullscreen({
+      root: () => document.getElementById(PANEL_ID),
+      requestFrame: (callback) => requestAnimationFrame(callback)
+    });
+    function errorMessage(value) {
+      if (value && typeof value === "object" && "message" in value && value.message) return String(value.message);
+      return String(value);
+    }
+    function isAbortError2(value) {
+      return !!value && typeof value === "object" && "name" in value && value.name === "AbortError";
+    }
+    function isMermaidSetupError(value) {
+      return !!value && typeof value === "object" && "mermaidSetup" in value && value.mermaidSetup === true;
+    }
     const SCRIPT_VERSION = typeof GM_info !== "undefined" && GM_info?.script?.version || "6.10.1";
     const PANEL_ID = "bili-subbatch-panel";
     const UI_STORE_KEY = "bili-subbatch-ui-v2";
@@ -11487,7 +11980,7 @@ ${prompt2.userPromptTemplate}`
     });
     function normalizeCtpFlavor(value) {
       const id = String(value || "").trim().toLowerCase();
-      return CTP_FLAVOR_IDS.includes(id) ? id : DEFAULT_CTP_FLAVOR;
+      return CTP_FLAVOR_IDS.find((flavor) => flavor === id) || DEFAULT_CTP_FLAVOR;
     }
     function getCtpPalette(flavor = DEFAULT_CTP_FLAVOR) {
       return CTP_PALETTES[normalizeCtpFlavor(flavor)] || CTP_PALETTES[DEFAULT_CTP_FLAVOR];
@@ -11794,21 +12287,21 @@ ${prompt2.userPromptTemplate}`
     const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
     function loadAutoCaptureSetting() {
       const raw = storageGet(AUTO_CAPTURE_STORE_KEY, true);
-      return ![false, 0, "0", "false", "off"].includes(raw);
+      return raw !== false && raw !== 0 && raw !== "0" && raw !== "false" && raw !== "off";
     }
     function saveAutoCaptureSetting(enabled) {
       storageSet(AUTO_CAPTURE_STORE_KEY, enabled ? "true" : "false");
     }
     function loadAutoAnalyzeSetting() {
       const raw = storageGet(AUTO_ANALYZE_STORE_KEY, true);
-      return ![false, 0, "0", "false", "off"].includes(raw);
+      return raw !== false && raw !== 0 && raw !== "0" && raw !== "false" && raw !== "off";
     }
     function saveAutoAnalyzeSetting(enabled) {
       storageSet(AUTO_ANALYZE_STORE_KEY, enabled ? "true" : "false");
     }
     function loadPreprocessEnabledSetting() {
       const raw = storageGet(PREPROCESS_ENABLED_STORE_KEY, true);
-      return ![false, 0, "0", "false", "off"].includes(raw);
+      return raw !== false && raw !== 0 && raw !== "0" && raw !== "false" && raw !== "off";
     }
     function savePreprocessEnabledSetting(enabled) {
       storageSet(PREPROCESS_ENABLED_STORE_KEY, enabled ? "true" : "false");
@@ -11828,15 +12321,16 @@ ${prompt2.userPromptTemplate}`
     }
     function loadTranscriptFollowSetting() {
       const raw = storageGet(TRANSCRIPT_FOLLOW_STORE_KEY, true);
-      return ![false, 0, "0", "false", "off"].includes(raw);
+      return raw !== false && raw !== 0 && raw !== "0" && raw !== "false" && raw !== "off";
     }
     function loadPlayerSubtitleSetting() {
       const raw = storageGet(PLAYER_SUBTITLE_STORE_KEY, true);
-      return ![false, 0, "0", "false", "off"].includes(raw);
+      return raw !== false && raw !== 0 && raw !== "0" && raw !== "false" && raw !== "off";
     }
     function lruGet(map, key) {
       if (!map.has(key)) return null;
       const value = map.get(key);
+      if (value === void 0) return null;
       map.delete(key);
       map.set(key, value);
       return value;
@@ -11844,7 +12338,11 @@ ${prompt2.userPromptTemplate}`
     function lruSet(map, key, value, max = MEMORY_CACHE_LIMIT) {
       if (map.has(key)) map.delete(key);
       map.set(key, value);
-      while (map.size > max) map.delete(map.keys().next().value);
+      while (map.size > max) {
+        const oldestKey = map.keys().next().value;
+        if (oldestKey === void 0) break;
+        map.delete(oldestKey);
+      }
       return value;
     }
     const TYPE_LABEL = {
@@ -11865,31 +12363,6 @@ ${prompt2.userPromptTemplate}`
       "collection",
       "search"
     ];
-    function resolveAiScrollState(s, ev) {
-      let stick = !!s.stick;
-      let userReading = !!s.userReading;
-      const prog = !!s.progScroll;
-      const type = ev && ev.type || "";
-      const gap = ev && typeof ev.gap === "number" ? ev.gap : null;
-      if (type === "start" || type === "resume") {
-        stick = true;
-        userReading = false;
-      } else if (type === "wheel-up" || type === "detach") {
-        stick = false;
-        userReading = true;
-      } else if (type === "scroll") {
-        if (prog) ;
-        else if (gap != null && gap > 24) {
-          stick = false;
-          userReading = true;
-        } else if (gap != null && gap <= 12 && userReading) {
-          stick = true;
-          userReading = false;
-        }
-      }
-      const allowPaintScroll = stick && !userReading;
-      return { stick, userReading, allowPaintScroll };
-    }
     function prepareMarkdownMath(md) {
       const maths = [];
       let s = String(md || "");
@@ -11991,15 +12464,19 @@ ${prompt2.userPromptTemplate}`
           try {
             const out = renderToString(m.tex, !!m.display);
             if (out != null && out !== "") return out;
-          } catch (_) {
+          } catch {
           }
         }
         const esc = String(m.tex).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
         return m.display ? `<pre class="bsb-math-fallback">${esc}</pre>` : `<code class="bsb-math-fallback">${esc}</code>`;
       });
     }
-    function httpJson(url, extraHeaders) {
+    function httpJson(url, extraHeaders = {}) {
       return new Promise((resolve2, reject) => {
+        if (typeof GM_xmlhttpRequest !== "function") {
+          reject(new Error("缺少 GM_xmlhttpRequest 跨域能力"));
+          return;
+        }
         GM_xmlhttpRequest({
           method: "GET",
           url,
@@ -12025,7 +12502,7 @@ ${prompt2.userPromptTemplate}`
             }
             try {
               resolve2(JSON.parse(res.responseText));
-            } catch (e) {
+            } catch {
               reject(
                 new Error(
                   `invalid JSON from ${url}: ${(res.responseText || "").slice(0, 200)}`
@@ -12046,7 +12523,7 @@ ${prompt2.userPromptTemplate}`
       try {
         const pure = typeof SubBatch2 !== "undefined" ? SubBatch2?.SubBatchMonorepo?.bilibili?.extractBvid : null;
         if (typeof pure === "function") return pure(text);
-      } catch (_) {
+      } catch {
       }
       if (!text) return "";
       text = String(text).trim();
@@ -12058,7 +12535,7 @@ ${prompt2.userPromptTemplate}`
     function resolveCid(view2, page = 1) {
       const pages = view2.pages || [];
       if (Array.isArray(pages) && pages.length && page >= 1 && page <= pages.length) {
-        const cid = pages[page - 1].cid;
+        const cid = pages[page - 1]?.cid;
         return cid != null ? Number(cid) : null;
       }
       if (view2.cid == null) return null;
@@ -12072,22 +12549,22 @@ ${prompt2.userPromptTemplate}`
         if (!content2) continue;
         const normalized = content2.toLocaleLowerCase();
         const previous = out[out.length - 1];
-        if (previous && previous._normalized === normalized) {
-          const previousTo = Number(previous.to_sec ?? coreCall("parseSeconds", previous.to));
+        if (previous && previous.normalized === normalized) {
+          const previousTo = Number(previous.cue.to_sec ?? coreCall("parseSeconds", previous.cue.to));
           const currentFrom = Number(cue.from_sec ?? coreCall("parseSeconds", cue.from));
           if (currentFrom - previousTo <= 1.25) {
             const nextTo = Math.max(
               previousTo,
               Number(cue.to_sec ?? coreCall("parseSeconds", cue.to))
             );
-            previous.to_sec = nextTo;
-            previous.to = `${nextTo.toFixed(2)}s`;
+            previous.cue.to_sec = nextTo;
+            previous.cue.to = `${nextTo.toFixed(2)}s`;
             continue;
           }
         }
-        out.push({ ...cue, content: content2, _normalized: normalized });
+        out.push({ cue: { ...cue, content: content2 }, normalized });
       }
-      return out.map(({ _normalized, ...cue }) => cue);
+      return out.map((entry) => entry.cue);
     }
     function stripHtml(s) {
       return String(s || "").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, " ").trim();
@@ -12095,7 +12572,7 @@ ${prompt2.userPromptTemplate}`
     function subbatchCore() {
       try {
         return typeof SubBatch2 !== "undefined" ? SubBatch2?.SubBatchMonorepo?.core || null : null;
-      } catch (_) {
+      } catch {
         return null;
       }
     }
@@ -12104,26 +12581,24 @@ ${prompt2.userPromptTemplate}`
       const fn = api && api[name];
       return typeof fn === "function" ? fn : null;
     }
+    const bili = SubBatch2.SubBatchMonorepo.bilibili;
+    const BILI_FUNCTIONS = {
+      "video.isChargeBlocked": bili.video.isChargeBlocked,
+      "video.runtimeView": bili.video.runtimeView,
+      "video.pageMeta": bili.video.pageMeta,
+      "subtitle.preferredIndex": bili.subtitle.preferredIndex,
+      "subtitle.runtimeTracks": bili.subtitle.runtimeTracks,
+      "subtitle.normalizeUrl": bili.subtitle.normalizeUrl,
+      "subtitle.pickTrack": bili.subtitle.pickTrack,
+      "extractPlayingVideoHint": bili.extractPlayingVideoHint,
+      "resolvePlayingVideoRef": bili.resolvePlayingVideoRef,
+      "playingVideoChanged": bili.playingVideoChanged
+    };
     function bilibiliFn(path) {
-      try {
-        const mono = typeof SubBatch2 !== "undefined" ? SubBatch2?.SubBatchMonorepo : null;
-        let value = mono?.bilibili;
-        for (const segment of String(path || "").split(".").filter(Boolean)) {
-          value = value?.[segment];
-        }
-        if (typeof value === "function") return value;
-        const flat = mono?.bilibili?.[path] || mono?.[path];
-        return typeof flat === "function" ? flat : null;
-      } catch (_) {
-        return null;
-      }
+      return BILI_FUNCTIONS[path];
     }
     function bilibiliCall(path, ...args) {
-      const fn = bilibiliFn(path);
-      if (!fn) {
-        throw new Error(`[bili-subbatch] monorepo bilibili API missing "${path}"`);
-      }
-      return fn(...args);
+      return Reflect.apply(bilibiliFn(path), void 0, args);
     }
     function appFn(path) {
       return resolveAppMethod(SubBatch2?.SubBatchMonorepo?.app, path);
@@ -12132,16 +12607,14 @@ ${prompt2.userPromptTemplate}`
       return callApp(SubBatch2?.SubBatchMonorepo?.app, path, ...args);
     }
     function runtimeNetwork() {
-      try {
-        return typeof SubBatch2 !== "undefined" ? SubBatch2?.SubBatchMonorepo?.runtime?.network || null : null;
-      } catch (_) {
-        return null;
-      }
+      const network = SubBatch2.SubBatchMonorepo.runtime.network;
+      if (!network) throw new Error("[bili-subbatch] missing network adapter");
+      return network;
     }
     function coreCall(name, ...args) {
       const fn = coreFn(name);
       if (!fn) throw new Error("[bili-subbatch] monorepo core API missing: " + name);
-      return fn(...args);
+      return Reflect.apply(fn, void 0, args);
     }
     function safeFilename(name) {
       return coreCall("safePathSegment", name, 120);
@@ -12164,14 +12637,14 @@ ${prompt2.userPromptTemplate}`
         const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
         return parsed;
-      } catch (_) {
+      } catch {
         return {};
       }
     }
     function saveExportIndexMap(map) {
       try {
         storageSet(SUBTITLE_EXPORT_INDEX_STORE_KEY, JSON.stringify(map || {}));
-      } catch (_) {
+      } catch {
       }
       return map || {};
     }
@@ -12182,22 +12655,22 @@ ${prompt2.userPromptTemplate}`
       return coreCall("renderExportIndexMd", map);
     }
     function attachSelectionGroupMeta2(items, meta = {}) {
-      return coreCall("attachSelectionGroupMeta", items, meta);
+      return SubBatch2.SubBatchMonorepo.core.attachSelectionGroupMeta(items, meta);
     }
     function attachCollectionGroupMeta2(items, meta = {}, ctx = {}) {
-      return coreCall("attachCollectionGroupMeta", items, meta, ctx);
+      return SubBatch2.SubBatchMonorepo.core.attachCollectionGroupMeta(items, meta, { mid: ctx.mid || "", season_id: ctx.season_id || "", collectionTitleHint: ctx.collectionTitleHint || "", authorHint: ctx.authorHint || "", parentFolder: "" });
     }
     function attachUserSpaceGroupMeta2(items, meta = {}) {
-      return coreCall("attachUserSpaceGroupMeta", items, meta);
+      return SubBatch2.SubBatchMonorepo.core.attachUserSpaceGroupMeta(items, meta);
     }
     function applySpaceCollectionMembership2(items, collections) {
-      return coreCall("applySpaceCollectionMembership", items, collections);
+      return SubBatch2.SubBatchMonorepo.core.applySpaceCollectionMembership(items, collections);
     }
     function countSpaceCollectionMatches2(items, collections) {
       return coreCall("countSpaceCollectionMatches", items, collections);
     }
     function attachSpaceLooseVideosMeta2(items) {
-      return coreCall("attachSpaceLooseVideosMeta", items);
+      return SubBatch2.SubBatchMonorepo.core.attachSpaceLooseVideosMeta(items);
     }
     function setGroupSelection2(items, groupKey, selected) {
       return coreCall("setGroupSelection", items, groupKey, selected);
@@ -12213,16 +12686,16 @@ ${prompt2.userPromptTemplate}`
       return coreCall("buildLibraryRenderNodes", entries, collapsedMap || {});
     }
     function applyUgcSeasonToItems2(items, view2) {
-      return coreCall("applyUgcSeasonToItems", items, view2);
+      return SubBatch2.SubBatchMonorepo.core.applyUgcSeasonToItems(items, view2);
     }
     function buildGroupMetaPatches2(normalized) {
       return coreCall("buildGroupMetaPatches", normalized);
     }
     function applyGroupMetaPatchToItems2(items, patch) {
-      return coreCall("applyGroupMetaPatchToItems", items, patch);
+      return SubBatch2.SubBatchMonorepo.core.applyGroupMetaPatchToItems(items, patch);
     }
     function mergeGroupFields2(target, source) {
-      return coreCall("mergeGroupFields", target, source);
+      return SubBatch2.SubBatchMonorepo.core.mergeGroupFields(target, source);
     }
     function suggestCaptureMode2(item) {
       return coreCall("suggestCaptureMode", item);
@@ -12233,7 +12706,7 @@ ${prompt2.userPromptTemplate}`
       let next = "auto";
       try {
         next = suggestCaptureMode2(item) || "auto";
-      } catch (_) {
+      } catch {
         const pageCount = Array.isArray(item?.pages) ? item.pages.length : 0;
         if (item?.groupType === "collection" || item?.collectionSid) next = "collection";
         else if (item?.groupType === "selection" || pageCount > 1) next = "selection";
@@ -12248,7 +12721,7 @@ ${prompt2.userPromptTemplate}`
       if (modeSel) modeSel.value = next;
       try {
         refreshContextUI();
-      } catch (_) {
+      } catch {
       }
       if (!silent) {
         setStatus(`采集模式已自动切换为「${TYPE_LABEL[next] || next}」`, "ok");
@@ -12258,12 +12731,12 @@ ${prompt2.userPromptTemplate}`
     function downloadText(filename, text, { overwrite = false } = {}) {
       const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
       const url = URL.createObjectURL(blob);
-      let name = String(filename || "download.txt").replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+      const name = String(filename || "download.txt").replace(/\\/g, "/").replace(/\/{2,}/g, "/");
       const revokeLater = () => {
         setTimeout(() => {
           try {
             URL.revokeObjectURL(url);
-          } catch (_) {
+          } catch {
           }
         }, 6e4);
       };
@@ -12277,7 +12750,7 @@ ${prompt2.userPromptTemplate}`
         setTimeout(() => {
           try {
             URL.revokeObjectURL(url);
-          } catch (_) {
+          } catch {
           }
           a.remove();
         }, 1500);
@@ -12295,7 +12768,7 @@ ${prompt2.userPromptTemplate}`
           if (overwrite) opts.conflictAction = "overwrite";
           GM_download(opts);
           return;
-        } catch (_) {
+        } catch {
         }
       }
       anchorFallback();
@@ -12309,7 +12782,12 @@ ${prompt2.userPromptTemplate}`
         const patch = buildGroupMetaPatches2(it);
         if (patch) nextItems = applyGroupMetaPatchToItems2(nextItems, patch);
         indexMap = upsertIndexForExportItem2(indexMap, it);
-        downloadText(buildSubtitleExportRelativePath2(it, ext), convert(it.data), { overwrite: true });
+        const sourceCues = pool[i]?.data;
+        downloadText(
+          buildSubtitleExportRelativePath2(it, ext),
+          convert(Array.isArray(sourceCues) ? sourceCues : []),
+          { overwrite: true }
+        );
         if (pool.length > 1) await sleep(220);
       }
       state2.items = nextItems;
@@ -12332,16 +12810,16 @@ ${prompt2.userPromptTemplate}`
           try {
             const url = new URL(href || location.href);
             return pure(href || location.href, extractPageHints(url));
-          } catch (_) {
+          } catch {
             return pure(String(href || ""), {});
           }
         }
-      } catch (_) {
+      } catch {
       }
       let u;
       try {
         u = new URL(href || location.href);
-      } catch (_) {
+      } catch {
         return { type: "unknown", source: "auto" };
       }
       const host2 = u.hostname.toLowerCase();
@@ -12417,7 +12895,7 @@ ${prompt2.userPromptTemplate}`
         if (m) {
           const segs = path.split("/").filter(Boolean);
           const mid = m[1];
-          if (segs.length === 1 || segs.length === 2 && /^(video|upload|dynamic|favlist)?$/i.test(segs[1]) || segs.length === 3 && segs[1] === "upload" && segs[2] === "video") {
+          if (segs.length === 1 || segs.length === 2 && /^(video|upload|dynamic|favlist)?$/i.test(segs[1] || "") || segs.length === 3 && segs[1] === "upload" && segs[2] === "video") {
             if (segs[1] && /^favlist$/i.test(segs[1]) && !fid) {
               return { type: "user", source: "auto", mid, note: "favlist_no_fid" };
             }
@@ -12539,7 +13017,7 @@ ${prompt2.userPromptTemplate}`
       };
       try {
         if (!u) u = new URL(location.href);
-      } catch (_) {
+      } catch {
         return hints;
       }
       hints.bvid = extractBvid2(u.searchParams.get("bvid") || "") || extractBvid2(u.pathname) || "";
@@ -12551,11 +13029,11 @@ ${prompt2.userPromptTemplate}`
       if (/\/video\//i.test(u.pathname)) hints.fromVideoPath = true;
       let m = u.pathname.match(/space\.bilibili\.com\/(\d+)/i);
       if (!m) m = String(location.href).match(/space\.bilibili\.com\/(\d+)/i);
-      if (m) hints.mid = m[1];
+      if (m?.[1]) hints.mid = m[1];
       m = u.pathname.match(/^\/list\/(\d+)/i);
-      if (m) hints.mid = m[1];
+      if (m?.[1]) hints.mid = m[1];
       m = u.pathname.match(/^\/(\d+)(?:\/|$)/);
-      if (m && /space\.bilibili\.com/i.test(u.hostname)) hints.mid = m[1];
+      if (m?.[1] && /space\.bilibili\.com/i.test(u.hostname)) hints.mid = m[1];
       try {
         const anchors = document.querySelectorAll(
           'a[href*="lists/"], a[href*="collectiondetail"], a[href*="season_id"], a[href*="sid="], a[href*="/list/"]'
@@ -12563,7 +13041,7 @@ ${prompt2.userPromptTemplate}`
         for (const a of anchors) {
           const href = a.getAttribute("href") || a.href || "";
           const lm = href.match(/\/(\d+)\/lists\/(\d+)/);
-          if (lm) {
+          if (lm?.[1] && lm[2]) {
             if (!hints.mid) hints.mid = lm[1];
             if (!hints.season_id) hints.season_id = lm[2];
             break;
@@ -12574,11 +13052,11 @@ ${prompt2.userPromptTemplate}`
             if (sm && /^\d+$/.test(sm)) {
               if (!hints.season_id) hints.season_id = sm;
               const mm = au.pathname.match(/\/(\d+)/);
-              if (mm && !hints.mid) hints.mid = mm[1];
+              if (mm?.[1] && !hints.mid) hints.mid = mm[1];
             }
             const listMid = au.pathname.match(/\/list\/(\d+)/i);
-            if (listMid && !hints.mid) hints.mid = listMid[1];
-          } catch (_) {
+            if (listMid?.[1] && !hints.mid) hints.mid = listMid[1];
+          } catch {
           }
         }
         if (!hints.bvid) {
@@ -12591,7 +13069,7 @@ ${prompt2.userPromptTemplate}`
           const og = document.querySelector('meta[property="og:url"]')?.content;
           if (og) hints.bvid = extractBvid2(og);
         }
-      } catch (_) {
+      } catch {
       }
       if (!hints.bvid) {
         const extractPlaying = bilibiliFn("extractPlayingVideoHint");
@@ -12656,7 +13134,7 @@ ${prompt2.userPromptTemplate}`
     function currentPageNumber() {
       try {
         return Math.max(1, parseInt(new URL(location.href).searchParams.get("p") || "1", 10) || 1);
-      } catch (_) {
+      } catch {
         return 1;
       }
     }
@@ -12664,15 +13142,13 @@ ${prompt2.userPromptTemplate}`
       try {
         const pure = typeof SubBatch2 !== "undefined" ? SubBatch2?.SubBatchMonorepo?.bilibili?.routeVideoKey : null;
         if (typeof pure === "function") return pure(bvid, page);
-      } catch (_) {
+      } catch {
       }
       return `${String(bvid || "").toUpperCase()}:P${Math.max(1, Number(page) || 1)}`;
     }
     function currentRouteVideoRef() {
-      const resolve2 = appFn("resolveCurrentVideoRef");
-      if (typeof resolve2 === "function") {
-        return resolve2(location.href, pageWindow);
-      }
+      const resolved = appCall("video.resolve", location.href, pageWindow);
+      if (resolved) return resolved;
       const ctx = detectContext2(location.href);
       const resolvePlaying = bilibiliFn("resolvePlayingVideoRef");
       const extractPlaying = bilibiliFn("extractPlayingVideoHint");
@@ -12775,7 +13251,15 @@ ${prompt2.userPromptTemplate}`
       const lan = String(track.lan || "");
       let url = bilibiliCall("subtitle.normalizeUrl", track.subtitle_url || "");
       if (!url && lan.startsWith("ai-") && base.aid) {
-        url = await aiSubtitleStat(base.aid, base.cid);
+        const resolved = await appCall(
+          "acquisition.resolveSubtitleUrl",
+          runtimeNetwork(),
+          track,
+          { aid: base.aid, cid: base.cid },
+          "",
+          signal
+        );
+        url = resolved.url;
       }
       if (!url) return { ...base, status: "empty", lan, tracks, activeTrackIndex: trackIndex, source: "NET 无地址" };
       const body = await appCall(
@@ -12793,7 +13277,7 @@ ${prompt2.userPromptTemplate}`
         status: "ok",
         cue_count: cues.length,
         lan,
-        lan_doc: track.lan_doc || lan,
+        lan_doc: String(track.lan_doc || lan),
         data: cues,
         tracks,
         activeTrackIndex: trackIndex,
@@ -12833,11 +13317,11 @@ ${prompt2.userPromptTemplate}`
           return result2;
         }
       }
-      const trackHit = await fetchSubtitleTracksFast(base, signal, { forceNetwork });
+      const trackHit = await fetchSubtitleTracksFast({ ...base, cid }, signal, { forceNetwork });
       const tracks = trackHit.tracks;
       if (!tracks.length) return { ...base, status: "empty", tracks: [], source: trackHit.cacheLevel };
       const activeTrackIndex = bilibiliCall("subtitle.preferredIndex", tracks);
-      const result = await fetchTrackBodyFast(base, tracks, activeTrackIndex, signal, { forceNetwork });
+      const result = await fetchTrackBodyFast({ ...base, cid }, tracks, activeTrackIndex, signal, { forceNetwork });
       const finalResult = {
         ...result,
         cachePath: `${viewHit.cacheLevel} → ${trackHit.cacheLevel} → ${result.cacheLevel || result.source}`
@@ -12856,7 +13340,7 @@ ${prompt2.userPromptTemplate}`
       try {
         detail = await appCall("acquisition.fetchVideoDetail", runtimeNetwork(), bvid);
       } catch (e) {
-        return { bvid, status: "error", error: `view/detail: ${e.message || e}` };
+        return { bvid, status: "error", error: `view/detail: ${errorMessage(e)}` };
       }
       if (detail.code !== 0) {
         return {
@@ -12869,8 +13353,7 @@ ${prompt2.userPromptTemplate}`
       if (bilibiliCall("video.isChargeBlocked", view2)) {
         return { bvid, status: "empty", error: "charge_exclusive_blocked" };
       }
-      let aid = view2.aid || 0;
-      aid = Number(aid) || null;
+      const aid = Number(view2.aid) || null;
       const cid = resolveCid(view2, page);
       const title = String(view2.title || "");
       const author = String(view2.owner && view2.owner.name || "");
@@ -12902,7 +13385,7 @@ ${prompt2.userPromptTemplate}`
           ...base,
           status: "error",
           lan,
-          error: `subtitle body: ${e.message || e}`
+          error: `subtitle body: ${errorMessage(e)}`
         };
       }
       if (!Array.isArray(body) || !body.length) {
@@ -12917,6 +13400,9 @@ ${prompt2.userPromptTemplate}`
         data: cues,
         source
       };
+    }
+    async function httpBilibiliList(url, headers) {
+      return appCall("scan.parseListResponse", await httpJson(url, headers));
     }
     async function fetchListPage(ctx, page, pageSize) {
       if (ctx.type === "user") {
@@ -12934,7 +13420,7 @@ ${prompt2.userPromptTemplate}`
             order_avoided: true
           }
         );
-        const result = await httpJson(
+        const result = await httpBilibiliList(
           `https://api.bilibili.com/x/space/wbi/arc/search?${q}`,
           { Referer: `https://space.bilibili.com/${ctx.mid}`, Origin: "https://space.bilibili.com" }
         );
@@ -12954,7 +13440,7 @@ ${prompt2.userPromptTemplate}`
         return { items, hasMore, meta: { count: pageInfo.count } };
       }
       if (ctx.type === "favorite") {
-        const result = await httpJson(
+        const result = await httpBilibiliList(
           `https://api.bilibili.com/x/v3/fav/resource/list?media_id=${ctx.media_id}&pn=${page}&ps=${Math.min(pageSize, 20)}&platform=web&t=${Date.now()}`,
           { Referer: "https://space.bilibili.com/", Origin: "https://www.bilibili.com" }
         );
@@ -12976,7 +13462,7 @@ ${prompt2.userPromptTemplate}`
         };
       }
       if (ctx.type === "collection") {
-        const result = await httpJson(
+        const result = await httpBilibiliList(
           `https://api.bilibili.com/x/polymer/web-space/seasons_archives_list?mid=${ctx.mid}&season_id=${ctx.season_id}&sort_reverse=false&page_num=${page}&page_size=${pageSize}&web_location=333.1387`,
           {
             Referer: `https://space.bilibili.com/${ctx.mid}/channel/collectiondetail?sid=${ctx.season_id}`,
@@ -13027,15 +13513,15 @@ ${prompt2.userPromptTemplate}`
             page_size: 42
           }
         );
-        const result = await httpJson(
+        const result = await httpBilibiliList(
           `https://api.bilibili.com/x/web-interface/wbi/search/type?${q}`,
           { Referer: "https://search.bilibili.com/", Origin: "https://search.bilibili.com" }
         );
         if (result.code !== 0) {
           throw new Error(result.message || `search code=${result.code}`);
         }
-        const rows = result.data && result.data.result || [];
-        const items = rows.map((v) => ({
+        const rows2 = result.data && result.data.result || [];
+        const items = rows2.map((v) => ({
           bvid: v.bvid || extractBvid2(v.arcurl || ""),
           aid: v.aid || v.id || 0,
           title: stripHtml(v.title) || "未知标题",
@@ -13056,11 +13542,11 @@ ${prompt2.userPromptTemplate}`
       throw new Error(`unsupported list type: ${ctx.type}`);
     }
     async function loadAllListItems(ctx, { maxPages, pageSize, onProgress, delayMs, shouldCancel }) {
-      return appCall("libraryScan.collectPages", { maxPages, pageSize, delayMs }, {
+      return appCall("libraryScan.collectPages", { maxPages, pageSize, ...delayMs === void 0 ? {} : { delayMs } }, {
         fetchPage: (page, size) => fetchListPage(ctx, page, size),
         waitIfPaused: () => waitIfJobPaused(),
         cancelled: () => typeof shouldCancel === "function" && shouldCancel(),
-        progress: onProgress,
+        ...onProgress ? { progress: onProgress } : {},
         sleep
       });
     }
@@ -13077,10 +13563,10 @@ ${prompt2.userPromptTemplate}`
         mid,
         { maxPages, pageSize, delayMs, maxSeasonArchivePages },
         {
-          fetchPage: (midStr, page, size) => httpJson(
+          fetchPage: async (midStr, page, size) => parseUserSeasonPage(await httpJson(
             "https://api.bilibili.com/x/polymer/web-space/seasons_series_list?mid=" + encodeURIComponent(midStr) + "&page_num=" + page + "&page_size=" + size + "&web_location=333.1387",
             { Referer: "https://space.bilibili.com/" + midStr, Origin: "https://space.bilibili.com" }
-          ),
+          )),
           loadMembers: async (midStr, sid, archivePages, ms, progress) => {
             const full = await loadAllListItems(
               { type: "collection", mid: midStr, season_id: sid },
@@ -13089,19 +13575,19 @@ ${prompt2.userPromptTemplate}`
                 pageSize: 30,
                 delayMs: ms,
                 onProgress: progress,
-                shouldCancel
+                ...shouldCancel ? { shouldCancel } : {}
               }
             );
             return full.items.map((item) => item.bvid).filter(Boolean);
           },
           shortUrl: buildCollectionShortUrl2,
-          progress: onProgress,
+          ...onProgress ? { progress: onProgress } : {},
           cancelled: () => typeof shouldCancel === "function" && shouldCancel(),
           sleep,
           warn: (sid, error) => console.warn(
             "[bili-subbatch] loadUserSpaceSeasons archives",
             sid,
-            error?.message || error
+            errorMessage(error)
           )
         }
       );
@@ -13119,11 +13605,21 @@ ${prompt2.userPromptTemplate}`
           setLibraryJob({ kind: "scan", index, total, label: "展开分P " + bvid });
           if (onProgress) onProgress("展开合集分P " + index + "/" + total + "（" + bvid + "）…");
         },
-        fetchView: async (bvid) => (await fetchVideoViewFast(bvid))?.value || {},
+        fetchView: async (bvid) => {
+          const view2 = (await fetchVideoViewFast(bvid))?.value;
+          if (!view2) return {};
+          const aid = Number(view2.aid);
+          return {
+            ...view2.title !== void 0 ? { title: view2.title } : {},
+            ...view2.owner ? { owner: view2.owner } : {},
+            ...view2.pages ? { pages: view2.pages } : {},
+            ...Number.isFinite(aid) ? { aid } : {}
+          };
+        },
         onFailure: (bvid, error) => console.warn(
           "[bili-subbatch] expand collection parts",
           bvid,
-          error?.message || error
+          errorMessage(error)
         ),
         sleep
       });
@@ -13139,7 +13635,7 @@ ${prompt2.userPromptTemplate}`
         const author = r.author || "";
         const rawItems = pages.map((p, i) => ({
           bvid: r.bvid || bvid,
-          aid: r.aid,
+          aid: r.aid ?? null,
           title: `${videoTitle} - P${i + 1}【${p.part || ""}】`,
           author,
           page: i + 1,
@@ -13156,15 +13652,15 @@ ${prompt2.userPromptTemplate}`
           items: [
             {
               bvid: r.bvid || bvid,
-              aid: r.aid,
+              aid: r.aid ?? null,
               title: r.title || bvid,
               author: r.author || "",
               page: 1
             }
           ],
           meta: {
-            title: r.title,
-            author: r.author,
+            title: r.title || "",
+            author: r.author || "",
             multip: false,
             hint: "该稿只有 1P，已按单视频处理"
           },
@@ -13175,13 +13671,13 @@ ${prompt2.userPromptTemplate}`
         items: [
           {
             bvid: r.bvid || bvid,
-            aid: r.aid,
+            aid: r.aid ?? null,
             title: r.title || bvid,
             author: r.author || "",
             page: 1
           }
         ],
-        meta: { title: r.title, author: r.author, multip: pages.length > 1 },
+        meta: { title: r.title || "", author: r.author || "", multip: pages.length > 1 },
         pages
       };
     }
@@ -13203,29 +13699,27 @@ ${prompt2.userPromptTemplate}`
       knowledgeModelId: String(storageGet(KNOWLEDGE_MODEL_STORE_KEY, "") || ""),
       shortcutConfig: loadShortcutSettings()
     });
-    function isPanelSizePreset2(value) {
-      return panelGeometryCall("isPanelSizePreset", value);
+    function panelGeometry() {
+      const api = typeof SubBatch2 !== "undefined" ? SubBatch2?.SubBatchMonorepo?.ui?.panelGeometry : null;
+      if (!api) throw new Error("[bili-subbatch] panel geometry API missing");
+      return api;
     }
-    function panelGeometryCall(name, ...args) {
-      const fn = typeof SubBatch2 !== "undefined" ? SubBatch2?.SubBatchMonorepo?.ui?.panelGeometry?.[name] : null;
-      if (typeof fn !== "function") {
-        throw new Error(`[bili-subbatch] panel geometry API missing "${name}"`);
-      }
-      return fn(...args);
+    function panelState() {
+      const api = typeof SubBatch2 !== "undefined" ? SubBatch2?.SubBatchMonorepo?.ui?.panelState : null;
+      if (!api) throw new Error("[bili-subbatch] panel state API missing");
+      return api;
+    }
+    function isPanelSizePreset2(value) {
+      return panelGeometry().isPanelSizePreset(value);
     }
     function panelPresetWidth2(name, viewportWidth = window.innerWidth) {
-      return panelGeometryCall("panelPresetWidth", name, viewportWidth);
-    }
-    function panelStateCall(name, ...args) {
-      const fn = typeof SubBatch2 !== "undefined" ? SubBatch2?.SubBatchMonorepo?.ui?.panelState?.[name] : null;
-      if (typeof fn !== "function") throw new Error(`[bili-subbatch] panel state API missing "${name}"`);
-      return fn(...args);
+      return panelGeometry().panelPresetWidth(name, viewportWidth);
     }
     function highPanelHeight2(viewportHeight = window.innerHeight) {
-      return panelGeometryCall("highPanelHeight", viewportHeight);
+      return panelGeometry().highPanelHeight(viewportHeight);
     }
     function panelSizeClassFromWidth2(width, viewportWidth = window.innerWidth) {
-      return panelGeometryCall("panelSizeClassFromWidth", width, viewportWidth);
+      return panelGeometry().panelSizeClassFromWidth(width, viewportWidth);
     }
     function panelPersistenceOptions() {
       return {
@@ -13279,7 +13773,7 @@ ${prompt2.userPromptTemplate}`
           localStorage.getItem(UI_STORE_KEY),
           panelPersistenceOptions()
         );
-      } catch (_) {
+      } catch {
         return SubBatch2.SubBatchMonorepo.ui.panelPersistence.defaultUiGeometry(panelPersistenceOptions());
       }
     }
@@ -13290,15 +13784,15 @@ ${prompt2.userPromptTemplate}`
           state2.ui,
           panelPersistenceOptions()
         ));
-      } catch (_) {
+      } catch {
       }
     }
     function clampUiToViewport(ui2) {
-      Object.assign(ui2, panelGeometryCall("clampPanelRect", ui2, window.innerWidth, window.innerHeight));
+      Object.assign(ui2, panelGeometry().clampPanelRect(ui2, window.innerWidth, window.innerHeight));
       return ui2;
     }
     function injectStyles() {
-      GM_addStyle(`
+      GM_addStyle?.(`
       ${buildCtpFlavorCss(PANEL_ID)}
 
       ${SubBatch2.SubBatchMonorepo.ui.panelStyles.renderShellStyles(PANEL_ID, MIN_W, MIN_H, DOCK_EDGE_PX)}
@@ -13369,15 +13863,14 @@ ${prompt2.userPromptTemplate}`
       applyKnowledgeLayoutVars(root);
     }
     function bindPanelChrome(root) {
-      root.querySelector(".bsb-sidebar");
-      state2.ui = loadUiGeom();
-      applyCtpFlavor(state2.ui.ctpFlavor, { silent: true, persist: false });
+      const ui2 = state2.ui = loadUiGeom();
+      applyCtpFlavor(ui2.ctpFlavor, { silent: true, persist: false });
       function setOpen(open) {
-        const next = panelStateCall("setPanelOpen", { ...state2.ui, open: state2.open, aiFocus: state2.aiFocus }, open);
+        const next = panelState().setPanelOpen({ ...ui2, open: state2.open, aiFocus: state2.aiFocus }, open);
         state2.open = next.open;
         state2.aiFocus = next.aiFocus;
-        state2.ui.dock = next.dock;
-        state2.ui.dockExpanded = next.dockExpanded;
+        ui2.dock = next.dock;
+        ui2.dockExpanded = next.dockExpanded;
         if (open) {
           refreshContextUI();
         } else {
@@ -13387,8 +13880,8 @@ ${prompt2.userPromptTemplate}`
         saveUiGeom();
       }
       function setDock(side) {
-        const next = panelStateCall("setPanelDock", { ...state2.ui, open: state2.open, aiFocus: state2.aiFocus }, side, window.innerWidth);
-        Object.assign(state2.ui, { dock: next.dock, dockExpanded: next.dockExpanded, x: next.x });
+        const next = panelState().setPanelDock({ ...ui2, open: state2.open, aiFocus: state2.aiFocus }, side, window.innerWidth);
+        Object.assign(ui2, { dock: next.dock, dockExpanded: next.dockExpanded, x: next.x });
         state2.open = next.open;
         state2.aiFocus = next.aiFocus;
         if (side) {
@@ -13401,42 +13894,42 @@ ${prompt2.userPromptTemplate}`
         );
       }
       function toggleDockExpanded(force) {
-        if (!state2.ui.dock) return;
-        const next = panelStateCall("expandPanelDock", { ...state2.ui, open: state2.open, aiFocus: state2.aiFocus }, force);
-        state2.ui.dockExpanded = next.dockExpanded;
+        if (!ui2.dock) return;
+        const next = panelState().expandPanelDock({ ...ui2, open: state2.open, aiFocus: state2.aiFocus }, force);
+        ui2.dockExpanded = next.dockExpanded;
         state2.open = next.open;
         applyPanelGeometry();
-        if (state2.ui.dockExpanded) refreshContextUI();
+        if (ui2.dockExpanded) refreshContextUI();
       }
       const chromeController2 = typeof SubBatch2 !== "undefined" ? SubBatch2?.SubBatchMonorepo?.ui?.panelChrome?.bindPanelChromeControls : null;
       if (typeof chromeController2 !== "function") throw new Error("[bili-subbatch] missing panel chrome controller");
       chromeController2({
         root,
-        state: () => ({ open: state2.open, dock: state2.ui.dock, dockExpanded: state2.ui.dockExpanded }),
+        state: () => ({ open: state2.open, dock: ui2.dock, dockExpanded: ui2.dockExpanded }),
         setOpen,
         setDock,
         expandDock: toggleDockExpanded,
-        preferredDockSide: () => panelStateCall("preferredDockSide", state2.ui, window.innerWidth),
+        preferredDockSide: () => panelState().preferredDockSide(ui2, window.innerWidth),
         selectSize: (next) => {
           if (!isPanelSizePreset2(next)) return;
-          const oldWidth = state2.ui.w;
-          const oldRight = state2.ui.x + oldWidth;
-          const anchorRight = state2.ui.dock === "right" || !state2.ui.dock && state2.ui.x + oldWidth / 2 >= window.innerWidth / 2;
-          state2.ui.sizePreset = next;
-          state2.ui.w = panelPresetWidth2(next);
-          if (anchorRight && !state2.ui.dock) state2.ui.x = oldRight - state2.ui.w;
-          clampUiToViewport(state2.ui);
+          const oldWidth = ui2.w;
+          const oldRight = ui2.x + oldWidth;
+          const anchorRight = ui2.dock === "right" || !ui2.dock && ui2.x + oldWidth / 2 >= window.innerWidth / 2;
+          ui2.sizePreset = next;
+          ui2.w = panelPresetWidth2(next);
+          if (anchorRight && !ui2.dock) ui2.x = oldRight - ui2.w;
+          clampUiToViewport(ui2);
           applyPanelGeometry();
           saveUiGeom();
-          setStatus(`面板宽度：${PANEL_SIZE_PRESETS2[next].label} · ${Math.round(state2.ui.w)}px；高度保持${state2.ui.heightMode === "custom" ? "自定义" : "约 90% 视口"}`);
+          setStatus(`面板宽度：${PANEL_SIZE_PRESETS2[next].label} · ${Math.round(ui2.w)}px；高度保持${ui2.heightMode === "custom" ? "自定义" : "约 90% 视口"}`);
         }
       });
       const pointerController2 = typeof SubBatch2 !== "undefined" ? SubBatch2?.SubBatchMonorepo?.ui?.panelPointer?.bindPanelPointerController : null;
       if (typeof pointerController2 !== "function") throw new Error("[bili-subbatch] missing panel pointer controller");
       pointerController2({
         root,
-        getState: () => state2.ui,
-        update: (patch) => Object.assign(state2.ui, patch),
+        getState: () => ui2,
+        update: (patch) => Object.assign(ui2, patch),
         setOpen: (open) => {
           state2.open = open;
         },
@@ -13447,18 +13940,18 @@ ${prompt2.userPromptTemplate}`
         snapThreshold: DOCK_SNAP_PX
       });
       window.addEventListener("resize", () => {
-        if (!state2.ui) return;
-        clampUiToViewport(state2.ui);
+        if (!ui2) return;
+        clampUiToViewport(ui2);
         applyPanelGeometry();
       });
-      if (state2.ui.dock) {
+      if (ui2.dock) {
         state2.open = true;
-        state2.ui.dockExpanded = false;
+        ui2.dockExpanded = false;
       }
       applyPanelGeometry();
       try {
-        setWorkspace(state2.ui.view || "ai", { silent: true });
-      } catch (_) {
+        setWorkspace(ui2.view || "ai", { silent: true });
+      } catch {
       }
       root._bsbSetOpen = setOpen;
       root._bsbSetDock = setDock;
@@ -13614,10 +14107,12 @@ ${prompt2.userPromptTemplate}`
         clear: studioClearChat,
         copy: studioCopyLast,
         exportChat: studioExportChat,
-        onError: (error) => setStatus(`对话失败：${error?.message || error}`, "err")
+        onError: (error) => setStatus(`对话失败：${errorMessage(error)}`, "err")
       });
       root.addEventListener("mouseup", (e) => {
-        if (e.target.closest?.('[data-role="knowledge-selection-toolbar"], [data-role="knowledge-rail"]')) return;
+        const target = e.target instanceof Element ? e.target : e.target instanceof Text ? e.target.parentElement : null;
+        if (!target) return;
+        if (target.closest('[data-role="knowledge-selection-toolbar"], [data-role="knowledge-rail"]')) return;
         setTimeout(captureKnowledgeSelection, 0);
       });
       SubBatch2.SubBatchMonorepo.ui.resourceInteraction.bind(root, {
@@ -13627,7 +14122,8 @@ ${prompt2.userPromptTemplate}`
           renderList({ renderTranscript: false });
         },
         selectItem: (index, checked) => {
-          if (state2.items[index]) state2.items[index].selected = checked;
+          const item = state2.items[Number(index)];
+          if (item) item.selected = checked;
           renderList({ renderTranscript: false });
         },
         toggleFolder: (key) => {
@@ -13636,7 +14132,7 @@ ${prompt2.userPromptTemplate}`
           renderList({ renderTranscript: false });
         },
         openItem: (index) => {
-          const item = state2.items[index];
+          const item = state2.items[Number(index)];
           if (item) selectTranscriptItem(item);
         },
         searchLibrary: (query) => {
@@ -13653,7 +14149,7 @@ ${prompt2.userPromptTemplate}`
         },
         switchTrack: (index) => {
           switchTranscriptTrack(index).catch((error) => {
-            if (error?.name !== "AbortError") setStatus("切换字幕失败: " + (error.message || error), "err");
+            if (!isAbortError2(error)) setStatus("切换字幕失败: " + errorMessage(error), "err");
           });
         },
         setFollow: (enabled) => {
@@ -13669,7 +14165,7 @@ ${prompt2.userPromptTemplate}`
       SubBatch2.SubBatchMonorepo.ui.settingsInteraction.bindFlowChanges(root, {
         shortcutPreference: (key, value, checked) => {
           if (key === "enabled") state2.shortcutConfig.enabled = checked;
-          else state2.shortcutConfig[key] = value;
+          else if (key === "summonLayout" || key === "summonTarget" || key === "preferredDock") state2.shortcutConfig[key] = value;
           saveShortcutSettings();
           renderShortcutSettings(root);
           setStatus(key === "enabled" ? `快捷键已${state2.shortcutConfig.enabled ? "开启" : "关闭"}` : "快捷召唤偏好已保存", "ok");
@@ -13714,7 +14210,7 @@ ${prompt2.userPromptTemplate}`
           renderAiFlowDrawer();
         },
         studioContext: (value) => {
-          state2.studioContextPref = ["raw", "processed"].includes(value) ? value : "auto";
+          state2.studioContextPref = value === "raw" || value === "processed" ? value : "auto";
           persistStudioChat();
           if (currentAiWorkbenchStage() === "chat") renderStudioCanvas();
         },
@@ -13727,12 +14223,15 @@ ${prompt2.userPromptTemplate}`
         }
       });
       root.addEventListener("click", (e) => {
-        const knowledgeSelectionAction = e.target.closest?.("[data-knowledge-selection-act]");
+        const target = e.target instanceof Element ? e.target : e.target instanceof Text ? e.target.parentElement : null;
+        if (!target) return;
+        const knowledgeSelectionAction = target.closest("[data-knowledge-selection-act]");
         if (knowledgeSelectionAction) {
           e.preventDefault();
           const action = knowledgeSelectionAction.dataset.knowledgeSelectionAct;
           Promise.resolve((async () => {
             const anchor = await ensureKnowledgeAnchorFromSelection({ starred: action === "save" });
+            if (!anchor) return;
             if (action === "save") {
               setStatus(`已收藏知识锚点：${anchor.selectedText}`, "ok");
               return;
@@ -13744,34 +14243,34 @@ ${prompt2.userPromptTemplate}`
             }
             const question = action === "deep" ? `请深入解释「${anchor.selectedText}」，重点说明它在当前字幕语境中的机制、为什么重要、常见误解以及与相邻概念的关系。` : `什么是「${anchor.selectedText}」？请结合当前字幕说明它在这里的具体含义和作用。`;
             await knowledgeAsk(anchor.id, null, question);
-          })()).catch((error) => setStatus(`Knowledge 操作失败：${error?.message || error}`, "err"));
+          })()).catch((error) => setStatus(`Knowledge 操作失败：${errorMessage(error)}`, "err"));
           return;
         }
-        const knowledgeMark = e.target.closest?.("[data-knowledge-anchor-id]");
+        const knowledgeMark = target.closest("[data-knowledge-anchor-id]");
         if (knowledgeMark) {
           e.preventDefault();
-          openKnowledgeAnchor(knowledgeMark.dataset.knowledgeAnchorId).catch((error) => setStatus(`打开知识锚点失败：${error?.message || error}`, "err"));
+          openKnowledgeAnchor(knowledgeMark.dataset.knowledgeAnchorId || "").catch((error) => setStatus(`打开知识锚点失败：${errorMessage(error)}`, "err"));
           return;
         }
-        if (e.target.closest?.("[data-knowledge-close]")) {
+        if (target.closest("[data-knowledge-close]")) {
           e.preventDefault();
           closeKnowledgeRail();
           return;
         }
-        if (e.target.closest?.("[data-knowledge-stop]")) {
+        if (target.closest("[data-knowledge-stop]")) {
           e.preventDefault();
           abortKnowledgeRequest();
           return;
         }
-        const handledKnowledgeReader = SubBatch2.SubBatchMonorepo.ui.knowledgeReader.dispatchReaderClick(e.target, {
+        const handledKnowledgeReader = SubBatch2.SubBatchMonorepo.ui.knowledgeReader.dispatchReaderClick(target, {
           starAnchor: () => {
             const anchor = knowledgeAnchorById(state2.knowledgeActiveAnchorId);
             if (!anchor) return;
             const updated = { ...anchor, starred: !anchor.starred, updatedAt: Date.now() };
-            knowledgePutAnchor(updated).then(() => {
+            knowledgePutAnchor(updated).then(async () => {
               if (state2.ui?.view === "knowledge") return renderKnowledgeWorkspace();
-              return Promise.all([renderKnowledgeRail(), decorateKnowledgeAnchors()]);
-            }).catch((error) => setStatus("收藏失败：" + (error?.message || error), "err"));
+              await Promise.all([renderKnowledgeRail(), decorateKnowledgeAnchors()]);
+            }).catch((error) => setStatus("收藏失败：" + errorMessage(error), "err"));
           },
           starNode: () => {
             const node = knowledgeNodeById(state2.knowledgeActiveNodeId);
@@ -13780,15 +14279,15 @@ ${prompt2.userPromptTemplate}`
             knowledgePutNode(updated).then(() => {
               if (state2.ui?.view === "knowledge") return renderKnowledgeWorkspace();
               return renderKnowledgeRail();
-            }).catch((error) => setStatus("收藏失败：" + (error?.message || error), "err"));
+            }).catch((error) => setStatus("收藏失败：" + errorMessage(error), "err"));
           },
           deleteAnchor: () => {
             const anchor = knowledgeAnchorById(state2.knowledgeActiveAnchorId);
             if (!anchor || !confirm("删除知识锚点「" + anchor.selectedText + "」及其全部追问？")) return;
-            knowledgeDeleteAnchor(anchor.id).then(() => renderKnowledgeWorkspace()).then(() => decorateKnowledgeAnchors()).catch((error) => setStatus("删除失败：" + (error?.message || error), "err"));
+            knowledgeDeleteAnchor(anchor.id).then(() => renderKnowledgeWorkspace()).then(() => decorateKnowledgeAnchors()).catch((error) => setStatus("删除失败：" + errorMessage(error), "err"));
           },
           toggleMore: () => {
-            const menu = e.target.closest(".bsb-knowledge-more")?.querySelector('[data-role="knowledge-more-menu"]');
+            const menu = target.closest(".bsb-knowledge-more")?.querySelector('[data-role="knowledge-more-menu"]');
             if (menu) menu.hidden = !menu.hidden;
           }
         });
@@ -13796,7 +14295,7 @@ ${prompt2.userPromptTemplate}`
           e.preventDefault();
           return;
         }
-        const handledKnowledgeNavigation = SubBatch2.SubBatchMonorepo.ui.knowledgeTreeRenderer.dispatchNavigationClick(e.target, {
+        const handledKnowledgeNavigation = SubBatch2.SubBatchMonorepo.ui.knowledgeTreeRenderer.dispatchNavigationClick(target, {
           backList: () => {
             state2.knowledgeActiveAnchorId = "";
             state2.knowledgeActiveNodeId = "";
@@ -13832,14 +14331,14 @@ ${prompt2.userPromptTemplate}`
             });
           },
           askSuggestion: (question) => {
-            knowledgeAsk(state2.knowledgeActiveAnchorId, state2.knowledgeActiveNodeId || null, question).catch((error) => setStatus("Knowledge 追问失败：" + (error?.message || error), "err"));
+            knowledgeAsk(state2.knowledgeActiveAnchorId, state2.knowledgeActiveNodeId || null, question).catch((error) => setStatus("Knowledge 追问失败：" + errorMessage(error), "err"));
           }
         });
         if (handledKnowledgeNavigation) {
           e.preventDefault();
           return;
         }
-        if (e.target.closest?.("[data-knowledge-evidence-toggle]")) {
+        if (target.closest("[data-knowledge-evidence-toggle]")) {
           e.preventDefault();
           if (state2.ui) {
             state2.ui.knowledgeContextOpen = !state2.ui.knowledgeContextOpen;
@@ -13851,19 +14350,19 @@ ${prompt2.userPromptTemplate}`
           });
           return;
         }
-        if (!e.target.closest?.(".bsb-knowledge-more")) {
-          root.querySelectorAll?.('[data-role="knowledge-more-menu"]').forEach((menu) => {
+        if (!target.closest(".bsb-knowledge-more")) {
+          root.querySelectorAll('[data-role="knowledge-more-menu"]').forEach((menu) => {
             menu.hidden = true;
           });
         }
-        const knowledgeQuick = e.target.closest?.("[data-knowledge-quick]");
+        const knowledgeQuick = target.closest("[data-knowledge-quick]");
         if (knowledgeQuick) {
           e.preventDefault();
           const anchor = knowledgeAnchorById(state2.knowledgeActiveAnchorId);
-          if (anchor) knowledgeAsk(anchor.id, null, `什么是「${anchor.selectedText}」？请结合当前字幕说明它在这里的具体含义和作用。`).catch((error) => setStatus(`Knowledge 追问失败：${error?.message || error}`, "err"));
+          if (anchor) knowledgeAsk(anchor.id, null, `什么是「${anchor.selectedText}」？请结合当前字幕说明它在这里的具体含义和作用。`).catch((error) => setStatus(`Knowledge 追问失败：${errorMessage(error)}`, "err"));
           return;
         }
-        const knowledgeSend = e.target.closest?.("[data-knowledge-send]");
+        const knowledgeSend = target.closest("[data-knowledge-send]");
         if (knowledgeSend) {
           e.preventDefault();
           const shell = knowledgeSend.closest(".bsb-knowledge-composer, .bsb-knowledge-reader, .bsb-knowledge-rail-body") || root;
@@ -13872,25 +14371,25 @@ ${prompt2.userPromptTemplate}`
           if (q) {
             knowledgeAsk(state2.knowledgeActiveAnchorId, state2.knowledgeActiveNodeId || null, q).then(() => {
               if (input) input.value = "";
-            }).catch((error) => setStatus(`Knowledge 追问失败：${error?.message || error}`, "err"));
+            }).catch((error) => setStatus(`Knowledge 追问失败：${errorMessage(error)}`, "err"));
           }
           return;
         }
-        if (e.target.closest?.("[data-knowledge-seek]")) {
+        if (target.closest("[data-knowledge-seek]")) {
           e.preventDefault();
           const anchor = knowledgeAnchorById(state2.knowledgeActiveAnchorId);
           if (anchor) {
             setWorkspace("ai");
             state2.aiInputView = "processed";
             setAiWorkbenchStage("preprocess").then(() => {
-              if (anchor.timeStart != null) seekToVideoTimestamp(anchor.timeStart, anchor.bvid, anchor.page || 1);
+              if (anchor.timeStart != null) seekToVideoTimestamp(anchor.timeStart, anchor.bvid || "", anchor.page || 1);
               openKnowledgeAnchor(anchor.id).catch(() => {
               });
             });
           }
           return;
         }
-        const flowStep = e.target.closest?.("[data-flow-step]");
+        const flowStep = target.closest("[data-flow-step]");
         if (flowStep) {
           e.preventDefault();
           const shell = flowStep.closest(".bsb-flow-stepper");
@@ -13907,45 +14406,45 @@ ${prompt2.userPromptTemplate}`
           input.dispatchEvent(new Event("change", { bubbles: true }));
           return;
         }
-        const drawerBackdrop = e.target.closest?.('[data-role="ai-drawer-backdrop"]');
+        const drawerBackdrop = target.closest('[data-role="ai-drawer-backdrop"]');
         if (drawerBackdrop) {
           e.preventDefault();
           setAiDrawer("");
           return;
         }
-        const drawerAction = e.target.closest?.('[data-role="ai-flow-drawer"] button[data-act], [data-role="ai-input-drawer"] button[data-act]');
+        const drawerAction = target.closest('[data-role="ai-flow-drawer"] button[data-act], [data-role="ai-input-drawer"] button[data-act]');
         if (drawerAction) {
           e.preventDefault();
-          Promise.resolve(onAction(drawerAction.dataset.act)).catch((error) => setStatus(`操作失败: ${error?.message || error}`, "err"));
+          Promise.resolve(onAction(drawerAction.dataset.act || null)).catch((error) => setStatus(`操作失败: ${errorMessage(error)}`, "err"));
           return;
         }
-        const inputView = e.target.closest?.("[data-input-view]");
+        const inputView = target.closest("[data-input-view]");
         if (inputView) {
           e.preventDefault();
           state2.aiInputView = String(inputView.dataset.inputView || "raw");
           renderAiInputDrawer();
           return;
         }
-        const aiStageTab = e.target.closest?.("[data-ai-stage]");
+        const aiStageTab = target.closest("[data-ai-stage]");
         if (aiStageTab) {
           e.preventDefault();
-          setAiWorkbenchStage(aiStageTab.dataset.aiStage).catch((error) => setStatus(`切换 AI 阶段失败: ${error?.message || error}`, "err"));
+          setAiWorkbenchStage(aiStageTab.dataset.aiStage || "").catch((error) => setStatus(`切换 AI 阶段失败: ${errorMessage(error)}`, "err"));
           return;
         }
-        const preprocessView = e.target.closest?.("[data-ai-preprocess-view]");
+        const preprocessView = target.closest("[data-ai-preprocess-view]");
         if (preprocessView) {
           e.preventDefault();
           state2.aiInputView = String(preprocessView.dataset.aiPreprocessView || "raw");
-          renderPreprocessCanvas().catch((error) => setStatus(`打开字幕失败: ${error?.message || error}`, "err"));
+          renderPreprocessCanvas().catch((error) => setStatus(`打开字幕失败: ${errorMessage(error)}`, "err"));
           return;
         }
-        const outputTask = e.target.closest?.("[data-ai-output-task]");
+        const outputTask = target.closest("[data-ai-output-task]");
         if (outputTask) {
           e.preventDefault();
-          selectAiOutputTask(outputTask.dataset.aiOutputTask).catch((error) => setStatus(`切换产物失败: ${error?.message || error}`, "err"));
+          selectAiOutputTask(outputTask.dataset.aiOutputTask || "").catch((error) => setStatus(`切换产物失败: ${errorMessage(error)}`, "err"));
           return;
         }
-        const taskRemove = e.target.closest?.("[data-flow-task-remove]");
+        const taskRemove = target.closest("[data-flow-task-remove]");
         if (taskRemove) {
           e.preventDefault();
           const id = String(taskRemove.dataset.flowTaskRemove || "");
@@ -13953,10 +14452,10 @@ ${prompt2.userPromptTemplate}`
           renderAiFlowDrawer();
           return;
         }
-        const modelAdd = e.target.closest?.("[data-flow-task-model-add]");
+        const modelAdd = target.closest("[data-flow-task-model-add]");
         if (modelAdd) {
           e.preventDefault();
-          const card = modelAdd.closest?.("[data-flow-task-id]");
+          const card = modelAdd.closest("[data-flow-task-id]");
           const taskId = String(card?.dataset.flowTaskId || "");
           const modelId = String(modelAdd.dataset.flowTaskModelAdd || "");
           const tasks = currentPostTasks().map((t) => ({ ...t, modelIds: [...t.modelIds || []] }));
@@ -13968,11 +14467,11 @@ ${prompt2.userPromptTemplate}`
           }
           return;
         }
-        const modelRemove = e.target.closest?.("[data-flow-task-model-remove]");
+        const modelRemove = target.closest("[data-flow-task-model-remove]");
         if (modelRemove) {
           e.preventDefault();
           e.stopPropagation();
-          const card = modelRemove.closest?.("[data-flow-task-id]");
+          const card = modelRemove.closest("[data-flow-task-id]");
           const taskId = String(card?.dataset.flowTaskId || "");
           const modelId = String(modelRemove.dataset.flowTaskModelRemove || "");
           const tasks = currentPostTasks().map((t) => ({ ...t, modelIds: [...t.modelIds || []] }));
@@ -13984,15 +14483,15 @@ ${prompt2.userPromptTemplate}`
           }
           return;
         }
-        const editorAction = e.target.closest?.('[data-role="prompt-editor"] button[data-act], [data-role="ai-editor"] button[data-act]');
+        const editorAction = target.closest('[data-role="prompt-editor"] button[data-act], [data-role="ai-editor"] button[data-act]');
         if (editorAction) {
           e.preventDefault();
-          Promise.resolve(onAction(editorAction.dataset.act)).catch((error) => {
-            setStatus(`设置操作失败: ${error?.message || error}`, "err");
+          Promise.resolve(onAction(editorAction.dataset.act || null)).catch((error) => {
+            setStatus(`设置操作失败: ${errorMessage(error)}`, "err");
           });
           return;
         }
-        const shortcutRecord = e.target.closest?.("[data-shortcut-record]");
+        const shortcutRecord = target.closest("[data-shortcut-record]");
         if (shortcutRecord) {
           e.preventDefault();
           const id = String(shortcutRecord.dataset.shortcutRecord || "");
@@ -14003,7 +14502,7 @@ ${prompt2.userPromptTemplate}`
           setStatus("快捷键录制中 · 按 Esc 取消，Backspace / Delete 清除");
           return;
         }
-        const shortcutReset = e.target.closest?.("[data-shortcut-reset]");
+        const shortcutReset = target.closest("[data-shortcut-reset]");
         if (shortcutReset) {
           e.preventDefault();
           const id = String(shortcutReset.dataset.shortcutReset || "");
@@ -14016,7 +14515,7 @@ ${prompt2.userPromptTemplate}`
           setStatus(`已恢复：${command2.label} · ${shortcutDisplayChord(command2.defaultChord)}`, "ok");
           return;
         }
-        const shortcutResetAll = e.target.closest?.("[data-shortcut-reset-all]");
+        const shortcutResetAll = target.closest("[data-shortcut-reset-all]");
         if (shortcutResetAll) {
           e.preventDefault();
           const preserved = {
@@ -14032,37 +14531,37 @@ ${prompt2.userPromptTemplate}`
           setStatus("已恢复默认快捷键", "ok");
           return;
         }
-        const settingsTab = e.target.closest?.("[data-settings-tab]");
+        const settingsTab = target.closest("[data-settings-tab]");
         if (settingsTab) {
           e.preventDefault();
           try {
             savePromptProfilesFromForm({ activeId: state2.activePromptId });
-          } catch (_) {
+          } catch {
           }
           try {
             saveAiProfilesFromForm();
-          } catch (_) {
+          } catch {
           }
-          setSettingsTab(settingsTab.dataset.settingsTab);
+          setSettingsTab(settingsTab.dataset.settingsTab || "");
           return;
         }
-        const flavorPick = e.target.closest?.("[data-ctp-flavor-pick]");
+        const flavorPick = target.closest("[data-ctp-flavor-pick]");
         if (flavorPick) {
           e.preventDefault();
           applyCtpFlavor(flavorPick.dataset.ctpFlavorPick);
           return;
         }
-        const promptStageTab = e.target.closest?.("[data-prompt-stage-tab]");
+        const promptStageTab = target.closest("[data-prompt-stage-tab]");
         if (promptStageTab) {
           e.preventDefault();
           try {
             savePromptProfilesFromForm({ activeId: state2.activePromptId });
-          } catch (_) {
+          } catch {
           }
-          setPromptStageTab(promptStageTab.dataset.promptStageTab);
+          setPromptStageTab(promptStageTab.dataset.promptStageTab || "");
           return;
         }
-        const promptListItem = e.target.closest?.("[data-prompt-list-id]");
+        const promptListItem = target.closest("[data-prompt-list-id]");
         if (promptListItem) {
           e.preventDefault();
           savePromptProfilesFromForm({ activeId: state2.activePromptId });
@@ -14070,7 +14569,7 @@ ${prompt2.userPromptTemplate}`
           fillPromptConfigForm(root);
           return;
         }
-        const aiListItem = e.target.closest?.("[data-ai-list-id]");
+        const aiListItem = target.closest("[data-ai-list-id]");
         if (aiListItem) {
           e.preventDefault();
           saveAiProfilesFromForm();
@@ -14078,46 +14577,46 @@ ${prompt2.userPromptTemplate}`
           fillAiConfigForm(root);
           return;
         }
-        const promptTool = e.target.closest?.("[data-prompt-act]");
+        const promptTool = target.closest("[data-prompt-act]");
         if (promptTool) {
           e.preventDefault();
           handlePromptProfileAction(promptTool);
           return;
         }
-        const profileTool = e.target.closest?.("[data-ai-profile-act]");
+        const profileTool = target.closest("[data-ai-profile-act]");
         if (profileTool) {
           e.preventDefault();
           handleAiProfileAction(profileTool);
           return;
         }
-        const preprocessTab = e.target.closest?.("[data-ai-preprocess-tab]");
+        const preprocessTab = target.closest("[data-ai-preprocess-tab]");
         if (preprocessTab) {
           e.preventDefault();
-          selectPreprocessResult().catch((error) => setStatus(`打开预处理稿失败: ${error?.message || error}`, "err"));
+          selectPreprocessResult().catch((error) => setStatus(`打开预处理稿失败: ${errorMessage(error)}`, "err"));
           return;
         }
-        const retryTab = e.target.closest?.("[data-ai-retry-id]");
+        const retryTab = target.closest("[data-ai-retry-id]");
         if (retryTab) {
           e.preventDefault();
           const runId = retryTab.dataset.aiRetryId;
-          selectAiRun(runId).then(() => regenerateActiveAiRun()).catch((error) => setStatus(`重新生成失败: ${error?.message || error}`, "err"));
+          selectAiRun(runId || "").then(() => regenerateActiveAiRun()).catch((error) => setStatus(`重新生成失败: ${errorMessage(error)}`, "err"));
           return;
         }
-        const resultTab = e.target.closest?.("[data-ai-result-id]");
+        const resultTab = target.closest("[data-ai-result-id]");
         if (resultTab) {
           e.preventDefault();
-          selectAiRun(resultTab.dataset.aiResultId).catch((error) => {
-            setStatus(`切换结果失败: ${error?.message || error}`, "err");
+          selectAiRun(resultTab.dataset.aiResultId || "").catch((error) => {
+            setStatus(`切换结果失败: ${errorMessage(error)}`, "err");
           });
           return;
         }
-        const mermaidTool = e.target.closest?.("[data-mmd-act]");
+        const mermaidTool = target.closest("[data-mmd-act]");
         if (mermaidTool) {
           e.preventDefault();
           handleMermaidTool(mermaidTool);
           return;
         }
-        const ts = e.target.closest?.(".bsb-time-link");
+        const ts = target.closest(".bsb-time-link");
         if (!ts) return;
         e.preventDefault();
         seekToVideoTimestamp(
@@ -14127,7 +14626,9 @@ ${prompt2.userPromptTemplate}`
         );
       });
       root.addEventListener("wheel", (e) => {
-        const viewport = e.target.closest?.(".bsb-mermaid-viewport");
+        const target = e.target instanceof Element ? e.target : e.target instanceof Text ? e.target.parentElement : null;
+        if (!target) return;
+        const viewport = target.closest(".bsb-mermaid-viewport");
         if (!viewport || !e.ctrlKey) return;
         const card = viewport.closest(".bsb-mermaid-card");
         if (!card) return;
@@ -14135,11 +14636,13 @@ ${prompt2.userPromptTemplate}`
         setMermaidScale(card, getMermaidScale(card) + (e.deltaY < 0 ? 0.12 : -0.12));
       }, { passive: false });
       root.addEventListener("keydown", (e) => {
-        const input = e.target.closest?.('[data-role="knowledge-question"]');
+        const target = e.target instanceof Element ? e.target : e.target instanceof Text ? e.target.parentElement : null;
+        if (!target) return;
+        const input = target.closest('[data-role="knowledge-question"]');
         if (!input || e.key !== "Enter" || !(e.ctrlKey || e.metaKey)) return;
         e.preventDefault();
         const q = String(input.value || "").trim();
-        if (q) knowledgeAsk(state2.knowledgeActiveAnchorId, state2.knowledgeActiveNodeId || null, q).catch((error) => setStatus(`Knowledge 追问失败：${error?.message || error}`, "err"));
+        if (q) knowledgeAsk(state2.knowledgeActiveAnchorId, state2.knowledgeActiveNodeId || null, q).catch((error) => setStatus(`Knowledge 追问失败：${errorMessage(error)}`, "err"));
       });
       window.addEventListener("keydown", (e) => {
         if (e.key !== "Escape") return;
@@ -14188,7 +14691,7 @@ ${prompt2.userPromptTemplate}`
       refreshAiChips();
       return root;
     }
-    function setWorkspace(view2, opts) {
+    function setWorkspace(view2, opts = {}) {
       const v = ["ai", "subs", "knowledge", "settings"].includes(view2) ? view2 : "ai";
       const root = ensurePanel();
       if (state2.ui) state2.ui.view = v;
@@ -14204,7 +14707,7 @@ ${prompt2.userPromptTemplate}`
       });
       if (v === "ai") setAiWorkbenchStage(state2.ui?.aiStage || "preprocess", { silent: true }).catch(() => {
       });
-      if (v === "knowledge") renderKnowledgeWorkspace().catch((error) => setStatus(`知识库加载失败: ${error?.message || error}`, "err"));
+      if (v === "knowledge") renderKnowledgeWorkspace().catch((error) => setStatus(`知识库加载失败: ${errorMessage(error)}`, "err"));
       if (!opts?.silent) {
         saveUiGeom();
         if (v === "ai") refreshAiChips();
@@ -14220,7 +14723,7 @@ ${prompt2.userPromptTemplate}`
         }
       }
     }
-    function setSettingsTab(tab, opts) {
+    function setSettingsTab(tab, opts = {}) {
       const root = ensurePanel();
       const next = ["prompt", "llm", "shortcuts", "appearance"].includes(tab) ? tab : "prompt";
       if (next !== "shortcuts" && state2.shortcutRecordingId) state2.shortcutRecordingId = "";
@@ -14465,10 +14968,10 @@ ${prompt2.userPromptTemplate}`
         if (!command2) return;
         event.preventDefault();
         event.stopImmediatePropagation();
-        Promise.resolve(executeShortcutCommand(command2.id)).catch((error) => setStatus(`快捷键执行失败：${error?.message || error}`, "err"));
+        Promise.resolve(executeShortcutCommand(command2.id)).catch((error) => setStatus(`快捷键执行失败：${errorMessage(error)}`, "err"));
       }, true);
     }
-    function setPromptStageTab(stage, opts) {
+    function setPromptStageTab(stage, opts = {}) {
       const root = ensurePanel();
       const next = stage === "postprocess" ? "postprocess" : stage === "knowledge" ? "knowledge" : "preprocess";
       if (state2.ui) state2.ui.promptStage = next;
@@ -14574,7 +15077,7 @@ ${prompt2.userPromptTemplate}`
       ]);
       const batchActions = /* @__PURE__ */ new Set(["copy", "copy-bvid", "dl-srt", "dl-txt", "dl-ok-only", "fetch-selected"]);
       root.querySelectorAll("button[data-act]").forEach((button) => {
-        const act = button.getAttribute("data-act");
+        const act = button.getAttribute("data-act") || "";
         if (act === "cancel") {
           button.style.display = operationBusy() ? "" : "none";
           button.disabled = false;
@@ -14615,7 +15118,7 @@ ${prompt2.userPromptTemplate}`
     }
     function updateLibraryJobBar() {
       const root = document.getElementById(PANEL_ID);
-      const bar = root?.querySelector?.('[data-role="library-jobbar"]');
+      const bar = root?.querySelector('[data-role="library-jobbar"]');
       if (!bar) return;
       const job = appCall("libraryJob.view", state2);
       bar.hidden = !job.busy;
@@ -14689,9 +15192,10 @@ ${prompt2.userPromptTemplate}`
       const ctx = resolveContext();
       state2.ctx = ctx;
       const badge = root.querySelector('[data-role="type"]');
-      badge.textContent = (ctx.source === "manual" ? "手动 · " : "自动 · ") + (TYPE_LABEL[ctx.type] || ctx.type);
-      badge.classList.toggle("manual", ctx.source === "manual");
-      root.querySelector('[data-role="ctx"]').textContent = formatCtxBits(ctx);
+      if (badge) badge.textContent = (ctx.source === "manual" ? "手动 · " : "自动 · ") + (TYPE_LABEL[ctx.type] || ctx.type);
+      badge?.classList.toggle("manual", ctx.source === "manual");
+      const contextLabel = root.querySelector('[data-role="ctx"]');
+      if (contextLabel) contextLabel.textContent = formatCtxBits(ctx);
       const hint = root.querySelector('[data-role="auto-hint"]');
       if (hint) {
         const autoLabel = TYPE_LABEL[auto.type] || auto.type;
@@ -14717,9 +15221,10 @@ ${prompt2.userPromptTemplate}`
       return counts;
     }
     function libraryItemRowHtml(it, i, { child = false, depth = 0 } = {}) {
+      if (!it) return "";
       const status2 = SubBatch2.SubBatchMonorepo.ui.libraryController.status(it);
       const stClass = status2 === "ok" ? "st-ok" : status2 === "empty" ? "st-empty" : status2 === "error" ? "st-err" : "st-wait";
-      const active = routeVideoKey2(it.bvid, it.page || 1) === state2.transcriptItemKey;
+      const active = routeVideoKey2(it.bvid, Number(it.page) || 1) === state2.transcriptItemKey;
       const page = Math.max(1, Number(it.page) || 1);
       const displayTitle = it.groupType === "selection" || it.groupType === "collection" ? it.groupType === "selection" ? it.part ? `P${page}${it.part}` : `P${page}` : it.title || it.bvid || "未命名视频" : it.title || it.bvid || "未命名视频";
       const bvPart = `${escapeHtml(it.bvid || "")}${page > 1 ? ` · P${page}` : ""}`;
@@ -14856,12 +15361,12 @@ ${prompt2.userPromptTemplate}`
           if (!items.length) throw new Error("播放器没有可开启字幕");
           const wanted = String(item?.lan || item?.preferred_language || "");
           const target = wanted && items.find((node) => node.dataset.lan === wanted) || items.find((node) => /^(ai-zh|zh-CN|zh-Hans|zh)$/i.test(node.dataset.lan || "")) || items.find((node) => /中文/.test(node.textContent || "")) || items[0];
-          target.click();
+          target?.click();
           await sleep(140);
         }
         if (panel.offsetParent !== null) button.click();
       })().catch((error) => {
-        console.debug("[bili-subbatch] player subtitle not enabled", error?.message || error);
+        console.debug("[bili-subbatch] player subtitle not enabled", errorMessage(error));
       }).finally(() => {
         state2.playerSubtitleOperation = null;
       });
@@ -14908,116 +15413,37 @@ ${prompt2.userPromptTemplate}`
         input?.focus();
       }
     }
-    function appendTranscriptHighlightedText(container, text, query) {
-      if (!query) {
-        container.textContent = text;
-        return;
-      }
-      const source = String(text || "");
-      const lower = source.toLocaleLowerCase();
-      const needle = query.toLocaleLowerCase();
-      let cursor = 0;
-      let index = lower.indexOf(needle);
-      while (index >= 0) {
-        if (index > cursor) container.append(document.createTextNode(source.slice(cursor, index)));
-        const mark = document.createElement("mark");
-        mark.textContent = source.slice(index, index + query.length);
-        container.append(mark);
-        cursor = index + query.length;
-        index = lower.indexOf(needle, cursor);
-      }
-      if (cursor < source.length) container.append(document.createTextNode(source.slice(cursor)));
-    }
-    function populateTranscriptTrackSelect(item) {
-      const select = document.querySelector(`#${PANEL_ID} [data-role="transcript-track"]`);
-      if (!select) return;
-      const tracks = Array.isArray(item?.tracks) ? item.tracks : [];
-      select.replaceChildren();
-      if (!tracks.length) {
-        select.appendChild(new Option(item?.lan_doc || item?.lan || "默认字幕", "0"));
-        select.disabled = true;
-        return;
-      }
-      tracks.forEach((track, index) => {
-        select.appendChild(new Option(track.lan_doc || track.lan || `字幕 ${index + 1}`, String(index)));
-      });
-      const active = Number.isInteger(item.activeTrackIndex) ? item.activeTrackIndex : bilibiliCall("subtitle.preferredIndex", tracks);
-      state2.transcriptTrackIndex = active;
-      select.value = String(Math.max(0, active));
-      select.disabled = tracks.length <= 1;
-    }
     function renderTranscriptPanel() {
       const root = document.getElementById(PANEL_ID);
       if (!root) return;
-      const list = root.querySelector('[data-role="transcript-list"]');
-      const title = root.querySelector('[data-role="transcript-title"]');
-      const meta = root.querySelector('[data-role="transcript-meta"]');
-      const count = root.querySelector('[data-role="transcript-count"]');
-      if (!list || !title || !meta || !count) return;
-      const item = currentTranscriptItem();
-      if (!item || item.subStatus !== "ok" || !item.data?.length) {
-        title.textContent = item?.title || "当前视频字幕";
-        const status2 = item ? SubBatch2.SubBatchMonorepo.ui.libraryController.status(item) : "";
-        meta.textContent = !item ? "从左侧选择一个视频" : status2 === "error" ? `${item.bvid || ""}${item.page > 1 ? ` · P${item.page}` : ""} · 抓取失败` : status2 === "empty" ? `${item.bvid || ""}${item.page > 1 ? ` · P${item.page}` : ""} · 无字幕` : `${item.bvid || ""}${item.page > 1 ? ` · P${item.page}` : ""} · 待抓取`;
-        count.textContent = "";
-        populateTranscriptTrackSelect(null);
-        list.innerHTML = item ? `<div class="bsb-transcript-empty">${status2 === "error" ? "字幕抓取失败，可点击右上角刷新重试。" : status2 === "empty" ? "这个视频没有可读取字幕。" : "该视频尚未抓取字幕，可勾选后点击左侧「抓取所选」。"}</div>` : `<div class="bsb-transcript-empty">从左侧选择一个视频。<br>已有字幕的项目会直接显示全文。</div>`;
-        return;
-      }
-      if (!state2.transcriptItemKey) state2.transcriptItemKey = routeVideoKey2(item.bvid, item.page || 1);
-      title.textContent = item.title || `${item.bvid} 字幕`;
-      meta.textContent = `${item.cue_count || item.data.length} 条 · ${item.lan_doc || item.lan || "字幕"} · ${item.cachePath || item.source || "已加载"}`;
-      populateTranscriptTrackSelect(item);
-      const query = state2.transcriptQuery.trim();
-      const indexes = SubBatch2.SubBatchMonorepo.ui.transcriptController.filterIndexes(item.data, query);
-      state2.transcriptFilteredIndexes = query ? indexes : null;
-      count.textContent = query ? `${indexes.length}/${item.data.length}` : String(item.data.length);
-      const epoch = ++state2.transcriptRenderEpoch;
-      const fragment = document.createDocumentFragment();
-      for (const index of indexes) {
-        const cue = item.data[index];
-        const row = document.createElement("div");
-        row.className = "bsb-transcript-row";
-        if (index === state2.transcriptActiveCueIndex) row.classList.add("active");
-        row.dataset.cueIndex = String(index);
-        const time = document.createElement("button");
-        time.type = "button";
-        time.className = "bsb-transcript-time";
-        time.dataset.transcriptTime = String(cue.from_sec ?? coreCall("parseSeconds", cue.from));
-        time.textContent = SubBatch2.SubBatchMonorepo.ui.transcriptController.formatTime(cue.from_sec ?? coreCall("parseSeconds", cue.from));
-        time.title = `跳转到 ${SubBatch2.SubBatchMonorepo.ui.transcriptController.formatTime(cue.from_sec ?? coreCall("parseSeconds", cue.from), true)}`;
-        const text = document.createElement("p");
-        text.className = "bsb-transcript-text";
-        appendTranscriptHighlightedText(text, cue.content || "", query);
-        row.append(time, text);
-        fragment.appendChild(row);
-      }
-      if (epoch !== state2.transcriptRenderEpoch) return;
-      list.replaceChildren(fragment);
-      updateTranscriptActiveCue(currentVideoTime(), true);
+      const rendered = SubBatch2.SubBatchMonorepo.ui.transcriptController.renderPanel(
+        root,
+        currentTranscriptItem(),
+        state2,
+        {
+          routeKey: routeVideoKey2,
+          preferredTrack: (tracks) => bilibiliCall("subtitle.preferredIndex", tracks.map((track) => ({ ...track }))),
+          parseSeconds: (value) => coreCall("parseSeconds", value)
+        }
+      );
+      if (rendered) updateTranscriptActiveCue(currentVideoTime(), true);
     }
     function currentVideoTime() {
       return Number(document.querySelector("video")?.currentTime || 0);
     }
     function updateTranscriptActiveCue(time, force = false) {
-      const item = currentTranscriptItem();
-      if (!item?.data?.length) return;
-      const index = SubBatch2.SubBatchMonorepo.ui.transcriptController.cueIndexAt(item.data, Number(time) || 0, (value) => coreCall("parseSeconds", value));
-      const root = document.getElementById(PANEL_ID);
-      if (index < 0) {
-        root?.querySelector(".bsb-transcript-row.active")?.classList.remove("active");
-        state2.transcriptActiveCueIndex = -1;
-        return;
-      }
-      if (!force && index === state2.transcriptActiveCueIndex) return;
-      root?.querySelector(".bsb-transcript-row.active")?.classList.remove("active");
-      state2.transcriptActiveCueIndex = index;
-      const row = root?.querySelector(`.bsb-transcript-row[data-cue-index="${index}"]`);
-      row?.classList.add("active");
-      if (!row || !state2.transcriptAutoFollow || state2.ui?.view !== "subs") return;
-      if (!force && Date.now() < state2.transcriptUserScrollUntil) return;
-      const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
-      row.scrollIntoView({ block: "center", behavior });
+      SubBatch2.SubBatchMonorepo.ui.transcriptController.updateActiveCue(
+        document.getElementById(PANEL_ID),
+        currentTranscriptItem()?.data || [],
+        state2,
+        time,
+        force,
+        {
+          parseSeconds: (value) => coreCall("parseSeconds", value),
+          now: Date.now,
+          reducedMotion: () => matchMedia("(prefers-reduced-motion: reduce)").matches
+        }
+      );
     }
     function bindTranscriptVideoEvents() {
       state2.transcriptVideoAbort?.abort();
@@ -15033,27 +15459,29 @@ ${prompt2.userPromptTemplate}`
     }
     function seekTranscriptTime(seconds) {
       const item = currentTranscriptItem();
-      if (!item || !Number.isFinite(seconds)) return;
+      if (!item || typeof seconds !== "number" || !Number.isFinite(seconds)) return;
       seekToVideoTimestamp(seconds, item.bvid, item.page || 1);
       updateTranscriptActiveCue(seconds, true);
     }
     async function switchTranscriptTrack(index) {
       const item = currentTranscriptItem();
-      if (!item?.tracks?.length || !item.tracks[index]) return;
+      const trackIndex = Number(index);
+      const track = Number.isInteger(trackIndex) ? item?.tracks?.[trackIndex] : void 0;
+      if (!item?.tracks?.length || !track || typeof item.cid !== "string" && typeof item.cid !== "number") return;
       state2.transcriptSwitchAbort?.abort();
       const controller = new AbortController();
       state2.transcriptSwitchAbort = controller;
-      setStatus(`正在切换到 ${item.tracks[index].lan_doc || item.tracks[index].lan || "字幕"}…`);
+      setStatus(`正在切换到 ${track.lan_doc || track.lan || "字幕"}…`);
       const base = {
         bvid: item.bvid,
-        aid: item.aid,
+        aid: typeof item.aid === "string" || typeof item.aid === "number" ? item.aid : null,
         cid: item.cid,
         title: item.title,
         author: item.author,
         pages: item.pages || [],
         page: item.page || 1
       };
-      const result = await fetchTrackBodyFast(base, item.tracks, index, controller.signal);
+      const result = await fetchTrackBodyFast(base, item.tracks, trackIndex, controller.signal);
       if (controller.signal.aborted) return;
       Object.assign(item, result, { selected: item.selected !== false });
       rememberTranscriptItem(item);
@@ -15145,6 +15573,7 @@ ${prompt2.userPromptTemplate}`
         const tasks = currentPostTasks().map((t) => ({ ...t, modelIds: [...t.modelIds || []] }));
         const used = new Set(tasks.map((t) => t.promptId));
         const prompt2 = posts.find((p) => !used.has(p.id)) || posts.find((p) => p.id === state2.activePromptId) || posts[0];
+        if (!prompt2) return;
         const modelIds = (state2.aiProfiles?.length ? state2.aiProfiles : loadAiProfiles()).filter((p) => p.enabled).map((p) => p.id);
         const task = normalizePostTask({ id: makePostTaskId(), promptId: prompt2.id, modelIds, enabled: true, order: tasks.length }, tasks.length);
         tasks.push(task);
@@ -15217,12 +15646,12 @@ ${prompt2.userPromptTemplate}`
       }
       if (act === "ai-reset") {
         const prev = loadAiProfiles();
-        const first = prev.find((x) => x.enabled) || prev[0] || {};
+        const first = prev.find((x) => x.enabled) || prev[0];
         const resetProfile = coreCall("createAiProfile", {
           ...AI_DEFAULTS,
           name: "默认模型",
-          apiKey: first.apiKey || "",
-          baseUrl: first.baseUrl || ""
+          apiKey: first?.apiKey || "",
+          baseUrl: first?.baseUrl || ""
         }, 0);
         saveAiProfiles([resetProfile]);
         state2.aiEditorId = resetProfile.id;
@@ -15448,12 +15877,12 @@ ${prompt2.userPromptTemplate}`
           const v = GM_getValue(key, null);
           if (v != null && v !== "") return v;
         }
-      } catch (_) {
+      } catch {
       }
       try {
         const legacy = localStorage.getItem(key);
         if (legacy != null) return legacy;
-      } catch (_) {
+      } catch {
       }
       return fallback;
     }
@@ -15464,17 +15893,17 @@ ${prompt2.userPromptTemplate}`
           GM_setValue(key, value);
           storedByGm = true;
         }
-      } catch (_) {
+      } catch {
       }
       if (!storedByGm) {
         try {
-          localStorage.setItem(key, value);
-        } catch (_) {
+          localStorage.setItem(key, String(value));
+        } catch {
         }
       } else {
         try {
           localStorage.removeItem(key);
-        } catch (_) {
+        } catch {
         }
       }
     }
@@ -15517,7 +15946,7 @@ ${prompt2.userPromptTemplate}`
           preferredDock: parsed.preferredDock === "left" ? "left" : "right",
           bindings: bindings2
         };
-      } catch (_) {
+      } catch {
         return defaults;
       }
     }
@@ -15792,7 +16221,7 @@ ${addition}`.trim() };
           if (migrated.changed) {
             try {
               storageSet(PROMPT_STORE_KEY, JSON.stringify({ version: PROMPT_SCHEMA_VERSION, activeId: ids.activeId, activePreprocessId: ids.activePreprocessId, activeKnowledgeId: ids.activeKnowledgeId, prompts: prompts2 }));
-            } catch (_) {
+            } catch {
             }
           }
           state2.promptProfiles = prompts2;
@@ -15801,7 +16230,7 @@ ${addition}`.trim() };
           state2.activeKnowledgePromptId = ids.activeKnowledgeId;
           return { prompts: prompts2, ...ids };
         }
-      } catch (_) {
+      } catch {
       }
       const pre = coreCall("createPromptProfile", DEFAULT_PREPROCESS_PROMPT, 0);
       const post = coreCall("createPromptProfile", DEFAULT_MERMAID_PROMPT, 1);
@@ -15815,7 +16244,7 @@ ${addition}`.trim() };
       return { prompts, activeId: post.id, activePreprocessId: pre.id, activeKnowledgeId: knowledge2.id };
     }
     function savePromptProfiles(prompts, activeId, activePreprocessId = state2.activePrePromptId, activeKnowledgeId = state2.activeKnowledgePromptId) {
-      let normalized = coreCall("normalizePromptProfiles", prompts);
+      const normalized = coreCall("normalizePromptProfiles", prompts);
       const ids = coreCall("resolvePromptActiveIds", normalized, String(activeId || ""), String(activePreprocessId || ""), String(activeKnowledgeId || ""));
       try {
         storageSet(PROMPT_STORE_KEY, JSON.stringify({
@@ -15825,7 +16254,7 @@ ${addition}`.trim() };
           activeKnowledgeId: ids.activeKnowledgeId,
           prompts: normalized
         }));
-      } catch (_) {
+      } catch {
       }
       state2.promptProfiles = normalized;
       state2.activePromptId = ids.activeId;
@@ -15856,7 +16285,7 @@ ${addition}`.trim() };
       if (!knowledgeRepository) {
         const factory = appFn("knowledge.createRepository");
         if (factory && globalThis.indexedDB) {
-          knowledgeRepository = factory(globalThis.indexedDB);
+          knowledgeRepository = SubBatch2.SubBatchMonorepo.app.knowledge.createRepository(globalThis.indexedDB);
         }
       }
       return knowledgeRepository;
@@ -15872,9 +16301,8 @@ ${addition}`.trim() };
           knowledgeStoreRequest(KNOWLEDGE_ANCHOR_STORE, "readonly", (s) => s.getAll()),
           knowledgeStoreRequest(KNOWLEDGE_NODE_STORE, "readonly", (s) => s.getAll())
         ]);
-        state2.knowledgeAnchors = appCall("knowledge.sortAnchors", anchors);
-        const { nodes: reconciledNodes, recovered } = appCall(
-          "knowledge.reconcileNodes",
+        state2.knowledgeAnchors = SubBatch2.SubBatchMonorepo.app.knowledge.sortAnchors(anchors);
+        const { nodes: reconciledNodes, recovered } = SubBatch2.SubBatchMonorepo.app.knowledge.reconcileNodes(
           nodes,
           state2.knowledgeNodes,
           !!state2.knowledgeBusy,
@@ -15891,16 +16319,14 @@ ${addition}`.trim() };
       return { anchors: state2.knowledgeAnchors, nodes: state2.knowledgeNodes };
     }
     async function knowledgePutAnchor(anchor) {
-      return appCall(
-        "knowledge.saveAnchor",
+      return SubBatch2.SubBatchMonorepo.app.knowledge.saveAnchor(
         state2.knowledgeAnchors,
         anchor,
         (value) => knowledgeStoreRequest(KNOWLEDGE_ANCHOR_STORE, "readwrite", (store) => store.put(value))
       );
     }
     async function knowledgePutNode(node) {
-      return appCall(
-        "knowledge.saveNode",
+      return SubBatch2.SubBatchMonorepo.app.knowledge.saveNode(
         state2.knowledgeNodes,
         node,
         (value) => knowledgeStoreRequest(KNOWLEDGE_NODE_STORE, "readwrite", (store) => store.put(value))
@@ -15910,8 +16336,7 @@ ${addition}`.trim() };
       if (state2.knowledgeRuntime && state2.knowledgeActiveAnchorId === anchorId) abortKnowledgeRequest();
       const repository = currentKnowledgeRepository();
       if (!repository) throw new Error("IndexedDB unavailable");
-      const remaining = await appCall(
-        "knowledge.deleteAnchorCommitted",
+      const remaining = await SubBatch2.SubBatchMonorepo.app.knowledge.deleteAnchorCommitted(
         state2.knowledgeAnchors,
         state2.knowledgeNodes,
         anchorId,
@@ -15929,15 +16354,15 @@ ${addition}`.trim() };
     }
     function currentKnowledgeSource() {
       const routeKey = currentRouteVideoKey();
-      const current = routeKey ? state2.items.find((it) => routeVideoKey2(it.bvid, it.page || 1) === routeKey) || (routeVideoKey2(state2.transcriptItem?.bvid, state2.transcriptItem?.page || 1) === routeKey ? state2.transcriptItem : null) : state2.transcriptItem || selectedItems()[0] || null;
-      const bvid = current?.bvid || state2.aiSessionInput?.vars?.bvid?.match(/BV[\w]+/i)?.[0] || "";
+      const current = routeKey ? state2.items.find((it) => routeVideoKey2(it.bvid, Number(it.page) || 1) === routeKey) || (routeVideoKey2(state2.transcriptItem?.bvid, state2.transcriptItem?.page || 1) === routeKey ? state2.transcriptItem : null) : state2.transcriptItem || selectedItems()[0] || null;
+      const bvid = current?.bvid || String(state2.aiSessionInput?.vars?.bvid || "").match(/BV[\w]+/i)?.[0] || "";
       const page = Math.max(1, Number(current?.page || 1));
       return {
         sourceKey: knowledgeSourceKey(bvid, page),
         bvid,
         page,
-        title: current?.title || state2.aiSessionInput?.vars?.title || document.title || bvid,
-        author: current?.author || state2.aiSessionInput?.vars?.author || ""
+        title: current?.title || String(state2.aiSessionInput?.vars?.title || document.title || bvid),
+        author: current?.author || String(state2.aiSessionInput?.vars?.author || "")
       };
     }
     function knowledgeNodesForAnchor(anchorId) {
@@ -15953,7 +16378,7 @@ ${addition}`.trim() };
       const source = String(raw || "");
       const match = source.match(/<suggestions>([\s\S]*?)(?:<\/suggestions>|$)/i);
       const answer = source.replace(/\n?<suggestions>[\s\S]*$/i, "").trim();
-      const suggestions = match ? match[1].split(/\r?\n/).map((x) => x.replace(/^\s*[-*\d.)]+\s*/, "").trim()).filter(Boolean).slice(0, 4) : [];
+      const suggestions = match ? (match[1] || "").split(/\r?\n/).map((x) => x.replace(/^\s*[-*\d.)]+\s*/, "").trim()).filter(Boolean).slice(0, 4) : [];
       return { answer, suggestions };
     }
     function knowledgeVisibleAnswer(raw) {
@@ -15965,7 +16390,9 @@ ${addition}`.trim() };
       tpl.innerHTML = String(html || "");
       const walker = document.createTreeWalker(tpl.content, NodeFilter.SHOW_TEXT);
       const nodes = [];
-      while (walker.nextNode()) nodes.push(walker.currentNode);
+      while (walker.nextNode()) {
+        if (walker.currentNode instanceof Text) nodes.push(walker.currentNode);
+      }
       for (const node of nodes) {
         const parent = node.parentElement;
         if (!parent) continue;
@@ -16048,7 +16475,7 @@ ${addition}`.trim() };
         const heading = trimmed.match(/^#{1,4}\s+(.+)$/);
         if (heading) {
           flush();
-          topic = heading[1].replace(/[*_`]+/g, "").trim();
+          topic = (heading[1] || "").replace(/[*_`]+/g, "").trim();
           blocks.push({ type: "heading", text: topic });
           continue;
         }
@@ -16068,7 +16495,7 @@ ${addition}`.trim() };
       if (hasCodeSyntax(source)) {
         try {
           await ensureHighlight();
-        } catch (_) {
+        } catch {
         }
       }
     }
@@ -16076,7 +16503,7 @@ ${addition}`.trim() };
       let html = "";
       try {
         html = typeof marked !== "undefined" && marked?.parse ? marked.parse(String(chunk || "")) : simpleMarkdownFallback(String(chunk || ""));
-      } catch (_) {
+      } catch {
         html = simpleMarkdownFallback(String(chunk || ""));
       }
       if (maths?.length) html = replaceMathPlaceholders(html, maths, katexToHtml);
@@ -16099,7 +16526,7 @@ ${addition}`.trim() };
       });
       try {
         await enhanceCodeBlocks(scope, epoch);
-      } catch (_) {
+      } catch {
       }
     }
     function knowledgeGetModelConfig() {
@@ -16145,7 +16572,7 @@ ${addition}`.trim() };
       const treeOpen = !!showTree;
       const treePane = treeOpen ? `<aside class="bsb-knowledge-tree-pane" data-role="knowledge-tree-pane"><div class="bsb-knowledge-pane-head"><span class="bsb-knowledge-kicker">追问树</span><button type="button" class="bsb-icon-btn" data-knowledge-tree-toggle title="收起追问树">‹</button></div><div class="bsb-knowledge-tree">${SubBatch2.SubBatchMonorepo.ui.knowledgeTreeRenderer.treeHtml(anchor.id, activeNode?.id || "", state2.knowledgeNodes || [], escapeHtml, escapeAttr)}</div></aside>` : "";
       return `${knowledgeContextHtml(anchor)}
-      <div class="bsb-knowledge-crumbs">${SubBatch2.SubBatchMonorepo.ui.knowledgeTreeRenderer.breadcrumbHtml(activeNode, activeNode ? appCall("knowledge.ancestorNodes", activeNode, state2.knowledgeNodes || []) : [], escapeHtml, escapeAttr)}${!treeOpen ? `<button type="button" class="bsb-mini" data-knowledge-tree-toggle title="展开追问树" style="margin-left:auto">☷ 追问树</button>` : ""}</div>
+      <div class="bsb-knowledge-crumbs">${SubBatch2.SubBatchMonorepo.ui.knowledgeTreeRenderer.breadcrumbHtml(activeNode, activeNode ? SubBatch2.SubBatchMonorepo.app.knowledge.ancestorNodes(activeNode, state2.knowledgeNodes || []) : [], escapeHtml, escapeAttr)}${!treeOpen ? `<button type="button" class="bsb-mini" data-knowledge-tree-toggle title="展开追问树" style="margin-left:auto">☷ 追问树</button>` : ""}</div>
       <div class="bsb-knowledge-rail-split${treeOpen ? " with-tree" : ""}">${treePane}<div class="bsb-knowledge-split-main"><div class="bsb-knowledge-panel-main">${knowledgeAnswerBodyHtml(activeNode)}</div>${knowledgeComposerHtml()}</div></div>`;
     }
     function knowledgeAnchorListItemHtml(anchor, activeAnchorId = state2.knowledgeActiveAnchorId) {
@@ -16184,7 +16611,7 @@ ${addition}`.trim() };
         contextHtml: knowledgeContextHtml(anchor),
         breadcrumbHtml: SubBatch2.SubBatchMonorepo.ui.knowledgeTreeRenderer.breadcrumbHtml(
           activeNode,
-          activeNode ? appCall("knowledge.ancestorNodes", activeNode, state2.knowledgeNodes || []) : [],
+          activeNode ? SubBatch2.SubBatchMonorepo.app.knowledge.ancestorNodes(activeNode, state2.knowledgeNodes || []) : [],
           escapeHtml,
           escapeAttr
         ),
@@ -16224,7 +16651,7 @@ ${addition}`.trim() };
       if (!state2.knowledgeAnchors.length) {
         try {
           await knowledgeRefreshCache();
-        } catch (_) {
+        } catch {
         }
       }
       const anchor = knowledgeAnchorById(state2.knowledgeActiveAnchorId);
@@ -16241,11 +16668,11 @@ ${addition}`.trim() };
       const answerText = knowledgeVisibleAnswer(activeNode?.answer || activeNode?.preview || "");
       try {
         await ensureKnowledgeRenderLibs(answerText);
-      } catch (_) {
+      } catch {
       }
       rail.innerHTML = `<button type="button" class="bsb-knowledge-rail-resize" data-role="knowledge-rail-resize" title="拖拽调整 Knowledge 宽度" aria-label="调整 Knowledge 宽度"></button>
       <div class="bsb-knowledge-rail-head">
-        <div class="bsb-knowledge-anchor-title"><span class="bsb-knowledge-kicker">KNOWLEDGE ANCHOR</span><strong>${escapeHtml(anchor.selectedText)}</strong><small>${escapeHtml(anchor.title || anchor.bvid)} · ${anchor.timeStart != null ? coreCall("formatClock", anchor.timeStart) : "局部字幕"}${anchor.timeEnd > anchor.timeStart ? `–${coreCall("formatClock", anchor.timeEnd)}` : ""}</small></div>
+        <div class="bsb-knowledge-anchor-title"><span class="bsb-knowledge-kicker">KNOWLEDGE ANCHOR</span><strong>${escapeHtml(anchor.selectedText)}</strong><small>${escapeHtml(anchor.title || anchor.bvid)} · ${anchor.timeStart != null ? coreCall("formatClock", anchor.timeStart) : "局部字幕"}${Number(anchor.timeEnd) > Number(anchor.timeStart) ? `–${coreCall("formatClock", anchor.timeEnd || 0)}` : ""}</small></div>
         <div class="bsb-knowledge-rail-actions">${state2.knowledgeBusy ? '<button type="button" class="bsb-icon-btn" data-knowledge-stop title="停止回答">■</button>' : ""}<button type="button" class="bsb-icon-btn${anchor.starred ? " active" : ""}" data-knowledge-star-anchor title="${anchor.starred ? "取消收藏锚点" : "收藏锚点"}">${anchor.starred ? "★" : "☆"}</button><button type="button" class="bsb-icon-btn" data-knowledge-new-root title="新建独立根问题">＋</button><button type="button" class="bsb-icon-btn${state2.knowledgeTreeOpen ? " active" : ""}" data-knowledge-tree-toggle title="${state2.knowledgeTreeOpen ? "收起追问树" : "展开追问树（并排）"}">☷</button><button type="button" class="bsb-icon-btn" data-knowledge-open-workspace title="在 Knowledge 工作区打开">↗</button><button type="button" class="bsb-icon-btn" data-knowledge-close title="关闭">×</button></div>
       </div>
       <div class="bsb-knowledge-rail-body">${knowledgeRailBodyHtml(anchor, activeNode)}</div>`;
@@ -16257,7 +16684,7 @@ ${addition}`.trim() };
       try {
         await knowledgeRefreshCache();
       } catch (error) {
-        setStatus(`知识库读取失败：${error.message || error}`, "err");
+        setStatus(`知识库读取失败：${errorMessage(error)}`, "err");
       }
       const anchor = knowledgeAnchorById(anchorId);
       if (!anchor) return;
@@ -16291,6 +16718,7 @@ ${addition}`.trim() };
         root.classList.add("knowledge-resizing");
         rail?.classList.add("resizing");
         const onMove = (ev) => {
+          if (!state2.ui) return;
           if (kind === "rail") {
             state2.ui.knowledgeRailW = clampKnowledgeRailW(startRail + (startX - ev.clientX), state2.ui.w);
           } else if (kind === "nav") {
@@ -16325,7 +16753,7 @@ ${addition}`.trim() };
         if (!q) return;
         knowledgeAsk(state2.knowledgeActiveAnchorId, state2.knowledgeActiveNodeId || null, q).then(() => {
           area.value = "";
-        }).catch((error) => setStatus(`Knowledge 追问失败：${error?.message || error}`, "err"));
+        }).catch((error) => setStatus(`Knowledge 追问失败：${errorMessage(error)}`, "err"));
       });
     }
     function hideKnowledgeSelectionToolbar() {
@@ -16342,13 +16770,13 @@ ${addition}`.trim() };
       const text = sel.toString().trim();
       if (text.length < KNOWLEDGE_SELECTION_MIN || text.length > KNOWLEDGE_SELECTION_MAX) return hideKnowledgeSelectionToolbar();
       const range = sel.getRangeAt(0);
-      const node = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
+      const node = range.commonAncestorContainer instanceof Element ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
       const body = node?.closest?.(".bsb-preprocess-block-body");
-      const article = body?.closest?.(".bsb-preprocess-block");
+      const article = body?.closest(".bsb-preprocess-block");
       if (!body || !article || !root.contains(body)) return hideKnowledgeSelectionToolbar();
       const source = currentKnowledgeSource();
       const articleSourceKey = article.dataset.knowledgeSourceKey || source.sourceKey;
-      const cards = Array.from(article.parentElement?.querySelectorAll?.(".bsb-preprocess-block") || []).filter((card) => (card.dataset.knowledgeSourceKey || articleSourceKey) === articleSourceKey);
+      const cards = Array.from(article.parentElement?.querySelectorAll(".bsb-preprocess-block") || []).filter((card) => (card.dataset.knowledgeSourceKey || articleSourceKey) === articleSourceKey);
       const idx = cards.indexOf(article);
       const contextCards = cards.slice(Math.max(0, idx - 1), Math.min(cards.length, idx + 2));
       const contextText = contextCards.map((card) => {
@@ -16372,7 +16800,8 @@ ${addition}`.trim() };
         sourceHash: coreCall("md5", currentInputPreviewText("processed") || "")
       };
       const compactSelection = text.replace(/\s+/g, " ");
-      toolbar.querySelector('[data-role="knowledge-selection-text"]').textContent = compactSelection.length > 42 ? `${compactSelection.slice(0, 42)}…` : compactSelection;
+      const selectionLabel = toolbar.querySelector('[data-role="knowledge-selection-text"]');
+      if (selectionLabel) selectionLabel.textContent = compactSelection.length > 42 ? `${compactSelection.slice(0, 42)}…` : compactSelection;
       const width = 300;
       const left = Math.min(window.innerWidth - width - 10, Math.max(10, rect.left + rect.width / 2 - width / 2));
       const top = Math.max(10, rect.top - 48);
@@ -16389,23 +16818,23 @@ ${addition}`.trim() };
       if (!anchor) {
         anchor = {
           id: makeKnowledgeId("anchor"),
-          sourceKey: sel.sourceKey,
-          bvid: sel.bvid,
-          page: sel.page,
-          title: sel.title,
-          author: sel.author,
-          segmentId: sel.segmentId,
+          sourceKey: sel.sourceKey || "",
+          bvid: sel.bvid || "",
+          page: sel.page || 1,
+          title: sel.title || "",
+          author: sel.author || "",
+          segmentId: sel.segmentId || "",
           selectedText: sel.selectedText,
-          timeStart: sel.timeStart,
-          timeEnd: sel.timeEnd,
-          contextText: sel.contextText,
-          sourceHash: sel.sourceHash,
+          timeStart: sel.timeStart || 0,
+          timeEnd: sel.timeEnd || 0,
+          contextText: sel.contextText || "",
+          sourceHash: sel.sourceHash || "",
           starred: !!starred,
           createdAt: now,
           updatedAt: now
         };
       } else {
-        anchor = { ...anchor, contextText: sel.contextText || anchor.contextText, sourceHash: sel.sourceHash || anchor.sourceHash, starred: anchor.starred || !!starred, updatedAt: now };
+        anchor = { ...anchor, contextText: sel.contextText || anchor.contextText || "", sourceHash: sel.sourceHash || anchor.sourceHash || "", starred: anchor.starred || !!starred, updatedAt: now };
       }
       await knowledgePutAnchor(anchor);
       state2.knowledgeActiveAnchorId = anchor.id;
@@ -16459,7 +16888,7 @@ ${addition}`.trim() };
       state2.knowledgeResetScroll = false;
       const vars = {
         title: anchor.title || "",
-        bvid: `${anchor.bvid || ""}${anchor.page > 1 ? ` P${anchor.page}` : ""}`,
+        bvid: `${anchor.bvid || ""}${(anchor.page || 1) > 1 ? ` P${anchor.page}` : ""}`,
         author: anchor.author || "",
         anchorText: anchor.selectedText || "",
         sourceContext: anchor.contextText || anchor.selectedText || "",
@@ -16484,7 +16913,7 @@ ${addition}`.trim() };
       const request2 = knowledgeController.begin(node.id);
       let latest = "";
       let lastPreviewPersistAt = 0;
-      await appCall("knowledge.runAnswer", {
+      await SubBatch2.SubBatchMonorepo.app.knowledge.runAnswer({
         node,
         generate: () => request2.stage(() => new Promise((resolve2, reject) => {
           requestChatCompletion({
@@ -16525,7 +16954,7 @@ ${addition}`.trim() };
         exists: () => !!knowledgeAnchorById(anchor.id),
         persist: (answer) => knowledgePutNode(answer),
         onSuccess: async () => {
-          request2.finish(node.status);
+          request2.finish(node.status === "stopped" ? "stopped" : node.status === "error" ? "error" : "done");
           anchor.updatedAt = node.updatedAt;
           await knowledgePutAnchor(anchor);
           await ensureKnowledgeRenderLibs(node.answer).catch(() => {
@@ -16533,7 +16962,7 @@ ${addition}`.trim() };
           setStatus(node.status === "stopped" ? "Knowledge 已停止" : `Knowledge · 已回答：${q.slice(0, 28)}${q.length > 28 ? "…" : ""}`, node.status === "stopped" ? "" : "ok");
         },
         onFailure: () => {
-          request2.finish(node.status);
+          request2.finish(node.status === "stopped" ? "stopped" : node.status === "error" ? "error" : "done");
           setStatus(node.status === "stopped" ? "Knowledge 已停止" : `Knowledge 失败：${node.error}`, node.status === "stopped" ? "" : "err");
         },
         cleanup: async () => {
@@ -16553,11 +16982,11 @@ ${addition}`.trim() };
       runtime2.abort = true;
       try {
         runtime2.abortController?.abort();
-      } catch (_) {
+      } catch {
       }
       try {
         runtime2.xhr?.abort?.();
-      } catch (_) {
+      } catch {
       }
       setStatus("正在停止 Knowledge 回答…");
     }
@@ -16575,7 +17004,9 @@ ${addition}`.trim() };
       if (!root || !value) return false;
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
       const nodes = [];
-      while (walker.nextNode()) nodes.push(walker.currentNode);
+      while (walker.nextNode()) {
+        if (walker.currentNode instanceof Text) nodes.push(walker.currentNode);
+      }
       for (const node of nodes) {
         const parent = node.parentElement;
         if (!parent) continue;
@@ -16605,7 +17036,7 @@ ${addition}`.trim() };
       if (!scope || !scope.querySelector(".bsb-preprocess-reading")) return;
       try {
         await knowledgeRefreshCache();
-      } catch (_) {
+      } catch {
         return;
       }
       const anchors = state2.knowledgeAnchors;
@@ -16615,15 +17046,15 @@ ${addition}`.trim() };
         const rich = body.classList.contains("bsb-md-rich");
         const original = body.getAttribute("data-knowledge-plain") || body.textContent || "";
         const articleSourceKey = article?.dataset.knowledgeSourceKey || currentKnowledgeSource().sourceKey;
-        const relevant = anchors.filter((a) => a.sourceKey === articleSourceKey && original.includes(a.selectedText));
+        const relevant = anchors.filter((a) => a.sourceKey === articleSourceKey && !!a.selectedText && original.includes(a.selectedText));
         if (!relevant.length) {
           if (article) article.classList.remove("has-knowledge");
           continue;
         }
         const ranges = relevant.map((a) => ({
           a,
-          start: original.indexOf(a.selectedText),
-          end: original.indexOf(a.selectedText) + a.selectedText.length
+          start: original.indexOf(a.selectedText || ""),
+          end: original.indexOf(a.selectedText || "") + (a.selectedText || "").length
         })).filter((x) => x.start >= 0).sort((x, y) => x.start - y.start || y.end - x.end);
         const accepted = [];
         let cursor = -1;
@@ -16635,7 +17066,7 @@ ${addition}`.trim() };
         if (rich) {
           unwrapKnowledgeAnchorMarks(body);
           for (const r of accepted) {
-            wrapFirstTextOccurrence(body, r.a.selectedText, (mid) => {
+            wrapFirstTextOccurrence(body, r.a.selectedText || "", (mid) => {
               const mark = document.createElement("mark");
               mark.className = "bsb-knowledge-anchor-mark";
               mark.dataset.knowledgeAnchorId = r.a.id;
@@ -16672,7 +17103,7 @@ ${addition}`.trim() };
       try {
         if (!state2.knowledgeBusy) await knowledgeRefreshCache();
       } catch (error) {
-        detail.innerHTML = `<div class="bsb-empty"><strong>知识库不可用</strong><span>${escapeHtml(error.message || error)}</span></div>`;
+        detail.innerHTML = `<div class="bsb-empty"><strong>知识库不可用</strong><span>${escapeHtml(errorMessage(error))}</span></div>`;
         return;
       }
       const anchors = SubBatch2.SubBatchMonorepo.ui.knowledgeNavigation.filterAnchors(
@@ -16695,7 +17126,7 @@ ${addition}`.trim() };
       const answerText = knowledgeVisibleAnswer(activeNode?.answer || activeNode?.preview || "");
       try {
         await ensureKnowledgeRenderLibs(answerText);
-      } catch (_) {
+      } catch {
       }
       list.innerHTML = knowledgeNavigatorHtml(anchors, state2.knowledgeActiveAnchorId, state2.knowledgeActiveNodeId);
       workspace?.classList.toggle("detail-open", !!anchor);
@@ -16712,7 +17143,7 @@ ${addition}`.trim() };
       return `output-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     }
     function normalizePostTask(seed, index = 0) {
-      const o = seed && typeof seed === "object" ? seed : {};
+      const o = seed && typeof seed === "object" && !Array.isArray(seed) ? seed : {};
       return {
         id: String(o.id || makePostTaskId()),
         promptId: String(o.promptId || ""),
@@ -16729,6 +17160,7 @@ ${addition}`.trim() };
       if (!out.length && createDefault && posts.length) {
         const preferred = posts.find((p) => p.id === state2.activePromptId) || posts[0];
         const enabledModels = (profiles || []).filter((p) => p.enabled).map((p) => p.id);
+        if (!preferred) return out;
         out = [normalizePostTask({ promptId: preferred.id, modelIds: enabledModels, enabled: true, order: 0 }, 0)];
       }
       return out;
@@ -16745,7 +17177,7 @@ ${addition}`.trim() };
           tasks = Array.isArray(parsed) ? parsed : parsed?.tasks;
           storedTaskVersion = Array.isArray(parsed) ? 1 : Number(parsed?.version || 1);
         }
-      } catch (_) {
+      } catch {
       }
       tasks = sanitizePostTasks(tasks, prompts, profiles, { createDefault: true });
       const htmlPrompt = prompts.find((p) => p.id === DEFAULT_HTML_FOLIO_PROMPT_ID && p.stage === "postprocess");
@@ -16761,7 +17193,7 @@ ${addition}`.trim() };
       if (storedTaskVersion < POST_TASKS_SCHEMA_VERSION) {
         try {
           storageSet(POST_TASKS_STORE_KEY, JSON.stringify({ version: POST_TASKS_SCHEMA_VERSION, tasks }));
-        } catch (_) {
+        } catch {
         }
       }
       state2.postTasks = tasks;
@@ -16774,7 +17206,7 @@ ${addition}`.trim() };
       const normalized = sanitizePostTasks(tasks, prompts, profiles, { createDefault: true });
       try {
         storageSet(POST_TASKS_STORE_KEY, JSON.stringify({ version: POST_TASKS_SCHEMA_VERSION, tasks: normalized }));
-      } catch (_) {
+      } catch {
       }
       state2.postTasks = normalized;
       if (!normalized.some((t) => t.id === state2.aiActiveTaskId)) state2.aiActiveTaskId = normalized[0]?.id || "";
@@ -16843,7 +17275,6 @@ ${addition}`.trim() };
     </section>`;
     }
     function readPromptEditor(editor, index) {
-      if (!editor) return null;
       const get = (key) => editor.querySelector(`[data-prompt-field="${key}"]`);
       return coreCall("createPromptProfile", {
         id: editor.dataset.promptId || coreCall("makePromptProfileId"),
@@ -16896,13 +17327,13 @@ ${addition}`.trim() };
       if (kind === "llm") {
         try {
           saveAiProfilesFromForm();
-        } catch (_) {
+        } catch {
         }
         const profiles = state2.aiProfiles?.length ? state2.aiProfiles.slice() : loadAiProfiles();
         const ids = profiles.map((p) => p.id);
         const nextIds = appCall("ordering.reorderIds", ids, fromId, toId);
         if (nextIds.join("\0") === ids.join("\0")) return false;
-        const next = appCall("ordering.applyConfigIdOrder", profiles, nextIds);
+        const next = SubBatch2.SubBatchMonorepo.app.ordering.applyConfigIdOrder(profiles, nextIds);
         saveAiProfiles(next);
         state2.aiEditorId = fromId;
         fillAiConfigForm(root);
@@ -16913,7 +17344,7 @@ ${addition}`.trim() };
       if (kind === "prompt") {
         try {
           savePromptProfilesFromForm({ activeId: state2.activePromptId });
-        } catch (_) {
+        } catch {
         }
         const library2 = state2.promptProfiles?.length ? {
           prompts: state2.promptProfiles.slice(),
@@ -16925,7 +17356,7 @@ ${addition}`.trim() };
         const stageIds = library2.prompts.filter((p) => p.stage === stage).map((p) => p.id);
         const nextStageIds = appCall("ordering.reorderIds", stageIds, fromId, toId);
         if (nextStageIds.join("\0") === stageIds.join("\0")) return false;
-        const prompts = appCall("ordering.applyPromptStageOrder", library2.prompts, stage, nextStageIds);
+        const prompts = SubBatch2.SubBatchMonorepo.app.ordering.applyPromptStageOrder(library2.prompts, stage, nextStageIds);
         savePromptProfiles(prompts, library2.activeId, library2.activePreprocessId, library2.activeKnowledgeId);
         state2.promptEditorId = fromId;
         fillPromptConfigForm(root);
@@ -16977,13 +17408,14 @@ ${p.hint}`.toLocaleLowerCase().includes(q)) : prompts;
       refreshPromptSelector(root);
     }
     function handlePromptProfileAction(button) {
-      const editor = button.closest?.("[data-prompt-id]");
+      const editor = button.closest("[data-prompt-id]");
       const action = button.dataset.promptAct;
       if (!editor || !action) return;
       const library2 = savePromptProfilesFromForm({ activeId: state2.activePromptId });
       const index = library2.prompts.findIndex((p) => p.id === editor.dataset.promptId);
       if (index < 0) return;
       const current = library2.prompts[index];
+      if (!current) return;
       if (action === "use") {
         if (current.stage === "preprocess") savePromptProfiles(library2.prompts, library2.activeId, current.id, library2.activeKnowledgeId);
         else if (current.stage === "knowledge") savePromptProfiles(library2.prompts, library2.activeId, library2.activePreprocessId, current.id);
@@ -17006,6 +17438,7 @@ ${p.hint}`.toLocaleLowerCase().includes(q)) : prompts;
       if (action === "delete") {
         const prompts = [...library2.prompts];
         const [removed] = prompts.splice(index, 1);
+        if (!removed) return;
         const sameStage = prompts.filter((p) => p.stage === removed.stage);
         let nextActiveId = library2.activeId;
         let nextPreId = library2.activePreprocessId;
@@ -17026,9 +17459,9 @@ ${p.hint}`.toLocaleLowerCase().includes(q)) : prompts;
     function renderPromptTemplate2(template, vars) {
       try {
         const api = typeof SubBatch2 !== "undefined" ? SubBatch2?.SubBatchMonorepo : null;
-        const pure = api?.core?.renderPromptTemplate || api?.renderPromptTemplate;
+        const pure = api?.core?.renderPromptTemplate;
         if (typeof pure === "function") return pure(template, vars);
-      } catch (_) {
+      } catch {
       }
       const values = {
         title: String(vars?.title || ""),
@@ -17073,7 +17506,7 @@ ${p.hint}`.toLocaleLowerCase().includes(q)) : prompts;
             return normalized;
           }
         }
-      } catch (_) {
+      } catch {
       }
       try {
         const raw = storageGet(AI_STORE_KEY, null);
@@ -17085,7 +17518,7 @@ ${p.hint}`.toLocaleLowerCase().includes(q)) : prompts;
             return migrated;
           }
         }
-      } catch (_) {
+      } catch {
       }
       return [coreCall("createAiProfile", { ...AI_DEFAULTS, name: "默认模型" }, 0)];
     }
@@ -17093,7 +17526,7 @@ ${p.hint}`.toLocaleLowerCase().includes(q)) : prompts;
       const normalized = coreCall("normalizeAiProfiles", profiles);
       try {
         storageSet(AI_PROFILES_STORE_KEY, JSON.stringify({ version: AI_PROFILES_SCHEMA_VERSION, profiles: normalized }));
-      } catch (_) {
+      } catch {
       }
       state2.aiProfiles = normalized;
       state2.ai = normalized.find((x) => x.enabled) || normalized[0] || null;
@@ -17125,7 +17558,7 @@ ${p.hint}`.toLocaleLowerCase().includes(q)) : prompts;
       select.disabled = !state2.preprocessEnabled;
       select.innerHTML = ready.map((p) => `<option value="${escapeAttr(p.id)}">${escapeHtml(p.name || p.model)}</option>`).join("");
       if (!ready.some((p) => p.id === state2.preprocessModelId)) {
-        state2.preprocessModelId = fallback?.id || ready[0].id;
+        state2.preprocessModelId = fallback?.id || "";
         storageSet(PREPROCESS_MODEL_STORE_KEY, state2.preprocessModelId);
       }
       select.value = state2.preprocessModelId;
@@ -17240,14 +17673,14 @@ ${p.baseUrl}`.toLocaleLowerCase().includes(q)) : profiles;
       const get = (key) => card.querySelector(`[data-ai-field="${key}"]`);
       return coreCall("createAiProfile", {
         id: card.dataset.aiProfileId || coreCall("makeAiProfileId"),
-        enabled: !!get("enabled")?.checked,
+        enabled: !!card.querySelector('[data-ai-field="enabled"]')?.checked,
         name: String(get("name")?.value || `模型 ${index + 1}`),
         baseUrl: String(get("baseUrl")?.value || "").trim().replace(/\/+$/, ""),
         apiKey: String(get("apiKey")?.value || "").trim(),
         model: String(get("model")?.value || AI_DEFAULTS.model).trim(),
         temperature: Number(get("temperature")?.value),
         maxTokens: Number(get("maxTokens")?.value) || AI_DEFAULTS.maxTokens,
-        stream: !!get("stream")?.checked
+        stream: !!card.querySelector('[data-ai-field="stream"]')?.checked
       }, index);
     }
     function saveAiProfilesFromForm() {
@@ -17261,14 +17694,16 @@ ${p.baseUrl}`.toLocaleLowerCase().includes(q)) : profiles;
       return saveAiProfiles(profiles);
     }
     function handleAiProfileAction(button) {
-      const editor = button.closest?.("[data-ai-profile-id]");
+      const editor = button.closest("[data-ai-profile-id]");
       const action = button.dataset.aiProfileAct;
       if (!editor || !action) return;
       const profiles = saveAiProfilesFromForm();
       const index = profiles.findIndex((x) => x.id === editor.dataset.aiProfileId);
       if (index < 0) return;
+      const current = profiles[index];
+      if (!current) return;
       if (action === "duplicate") {
-        const copy = coreCall("createAiProfile", { ...profiles[index], id: coreCall("makeAiProfileId"), name: `${profiles[index].name} 副本` }, index + 1);
+        const copy = coreCall("createAiProfile", { ...current, id: coreCall("makeAiProfileId"), name: `${current.name} 副本` }, index + 1);
         profiles.splice(index + 1, 0, copy);
         saveAiProfiles(profiles);
         state2.aiEditorId = copy.id;
@@ -17280,6 +17715,7 @@ ${p.baseUrl}`.toLocaleLowerCase().includes(q)) : profiles;
           return;
         }
         const [removed] = profiles.splice(index, 1);
+        if (!removed) return;
         const next = profiles[Math.min(index, profiles.length - 1)] || profiles[0];
         saveAiProfiles(profiles);
         state2.aiEditorId = next?.id || "";
@@ -17363,7 +17799,7 @@ ${p.baseUrl}`.toLocaleLowerCase().includes(q)) : profiles;
       if (parseStore2) {
         try {
           return parseStore2(storageGet(STUDIO_CHAT_STORE_KEY, null));
-        } catch (_) {
+        } catch {
           return {};
         }
       }
@@ -17372,7 +17808,7 @@ ${p.baseUrl}`.toLocaleLowerCase().includes(q)) : profiles;
         if (!raw) return {};
         const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
         return parsed && typeof parsed === "object" ? parsed : {};
-      } catch (_) {
+      } catch {
         return {};
       }
     }
@@ -17384,7 +17820,7 @@ ${p.baseUrl}`.toLocaleLowerCase().includes(q)) : profiles;
         const store2 = persist2(loadStudioChatStore(), key, state2, Date.now());
         try {
           storageSet(STUDIO_CHAT_STORE_KEY, JSON.stringify(store2));
-        } catch (_) {
+        } catch {
         }
         return;
       }
@@ -17401,7 +17837,7 @@ ${p.baseUrl}`.toLocaleLowerCase().includes(q)) : profiles;
       for (const extra of keys.slice(24)) delete store[extra];
       try {
         storageSet(STUDIO_CHAT_STORE_KEY, JSON.stringify(store));
-      } catch (_) {
+      } catch {
       }
     }
     function loadStudioChat(routeKey = currentRouteVideoKey()) {
@@ -17494,7 +17930,7 @@ ${p.baseUrl}`.toLocaleLowerCase().includes(q)) : profiles;
       const pack = state2.studioLastContextMeta;
       const bits = [ctx.source];
       if (route2?.bvid) bits.push(route2.bvid);
-      if (pack?.compressed) bits.push(`字幕 ${Math.round(pack.original / 100) / 10}k→${Math.round(pack.kept / 100) / 10}k`);
+      if (pack?.compressed) bits.push(`字幕 ${Math.round(Number(pack.original) / 100) / 10}k→${Math.round(Number(pack.kept) / 100) / 10}k`);
       if (state2.studioMemoryTurns) bits.push(`记忆 ${state2.studioMemoryTurns} 轮`);
       if (meta) meta.textContent = bits.join(" · ");
       if (!host2) return;
@@ -17505,7 +17941,7 @@ ${p.baseUrl}`.toLocaleLowerCase().includes(q)) : profiles;
       const joined = (state2.studioMessages || []).map((m) => m.content || "").join("\n");
       try {
         await ensureKnowledgeRenderLibs(joined);
-      } catch (_) {
+      } catch {
       }
       if (currentAiWorkbenchStage() !== "chat") return;
       const box = root.querySelector('[data-role="ai-md"]');
@@ -17513,7 +17949,7 @@ ${p.baseUrl}`.toLocaleLowerCase().includes(q)) : profiles;
       host2.innerHTML = `<div class="bsb-studio-thread">${state2.studioMessages.map(studioMessageHtml).join("")}</div>`;
       try {
         linkifyTimestamps(host2);
-      } catch (_) {
+      } catch {
       }
       await hydrateKnowledgeAnswerDom(host2, state2.renderEpoch);
       if (box) {
@@ -17540,11 +17976,11 @@ ${p.baseUrl}`.toLocaleLowerCase().includes(q)) : profiles;
       runtime2.abort = true;
       try {
         runtime2.abortController?.abort();
-      } catch (_) {
+      } catch {
       }
       try {
         runtime2.xhr?.abort?.();
-      } catch (_) {
+      } catch {
       }
     }
     function studioClearChat() {
@@ -17662,7 +18098,7 @@ ${memory}`
       } catch (error) {
         if (state2.studioRuntime !== runtime2) return;
         if (runtime2.abort) setStatus("已停止记忆压缩");
-        else setStatus(`记忆精炼失败，仍保留抽取稿：${error?.message || error}`, "err");
+        else setStatus(`记忆精炼失败，仍保留抽取稿：${errorMessage(error)}`, "err");
       } finally {
         if (state2.studioRuntime === runtime2) {
           state2.studioBusy = false;
@@ -17757,7 +18193,7 @@ ${memory}
         "studio.buildChatMessages",
         system,
         state2.studioMessages,
-        userMsg.id,
+        userMsg.id || "",
         text,
         STUDIO_CHAT_KEEP_RECENT
       );
@@ -17800,7 +18236,7 @@ ${memory}
         if (state2.studioRuntime !== runtime2) return;
         const stopped = !!runtime2.abort;
         appCall("studio.failTurn", botMsg, latest, error, stopped);
-        setStatus(stopped ? "对话已停止" : `对话失败：${error?.message || error}`, stopped ? "" : "err");
+        setStatus(stopped ? "对话已停止" : `对话失败：${errorMessage(error)}`, stopped ? "" : "err");
       } finally {
         if (state2.studioRuntime === runtime2) {
           state2.studioBusy = false;
@@ -17907,7 +18343,8 @@ ${memory}
         const segmentId = `seg-${kbvid || "local"}-p${kpage}-${Math.round(kstart * 10)}-${coreCall("md5", clean || block.text).slice(0, 7)}`;
         const sourceKey = knowledgeSourceKey(kbvid, kpage);
         const bodyHtml = renderProcessedTranscriptBodyHtml(clean || block.text);
-        return `<article class="bsb-preprocess-block" data-preprocess-block="${paragraphIndex}" data-knowledge-segment="${escapeAttr(segmentId)}" data-knowledge-source-key="${escapeAttr(sourceKey)}" data-knowledge-bvid="${escapeAttr(kbvid)}" data-knowledge-page="${kpage}" data-knowledge-start="${kstart}" data-knowledge-end="${kend}" data-knowledge-clock="${escapeAttr(first?.clock || "")}" data-knowledge-topic="${escapeAttr(block.topic || "")}" data-knowledge-title="${escapeAttr(fallbackSource.title || "")}" data-knowledge-author="${escapeAttr(fallbackSource.author || "")}"><div class="bsb-preprocess-block-head"><span class="bsb-preprocess-block-index">${String(paragraphIndex).padStart(2, "0")}</span>${block.topic ? `<span class="bsb-preprocess-block-topic">${escapeHtml(block.topic)}</span>` : ""}${warning}${timeHtml}</div><div class="bsb-preprocess-block-body bsb-md-rich" data-knowledge-plain="${escapeAttr(clean || block.text)}">${bodyHtml}</div></article>`;
+        const topic = "topic" in block ? block.topic : "";
+        return `<article class="bsb-preprocess-block" data-preprocess-block="${paragraphIndex}" data-knowledge-segment="${escapeAttr(segmentId)}" data-knowledge-source-key="${escapeAttr(sourceKey)}" data-knowledge-bvid="${escapeAttr(kbvid)}" data-knowledge-page="${kpage}" data-knowledge-start="${kstart}" data-knowledge-end="${kend}" data-knowledge-clock="${escapeAttr(first?.clock || "")}" data-knowledge-topic="${escapeAttr(topic || "")}" data-knowledge-title="${escapeAttr(fallbackSource.title || "")}" data-knowledge-author="${escapeAttr(fallbackSource.author || "")}"><div class="bsb-preprocess-block-head"><span class="bsb-preprocess-block-index">${String(paragraphIndex).padStart(2, "0")}</span>${topic ? `<span class="bsb-preprocess-block-topic">${escapeHtml(topic)}</span>` : ""}${warning}${timeHtml}</div><div class="bsb-preprocess-block-body bsb-md-rich" data-knowledge-plain="${escapeAttr(clean || block.text)}">${bodyHtml}</div></article>`;
       }).join("");
       return `<div class="bsb-preprocess-reading">${html}</div>`;
     }
@@ -17942,7 +18379,7 @@ ${memory}
         if (kind === "processed") {
           try {
             await ensureKnowledgeRenderLibs(text);
-          } catch (_) {
+          } catch {
           }
           content2.innerHTML = renderProcessedTranscriptCards(text);
           await decorateKnowledgeAnchors(content2);
@@ -18007,18 +18444,20 @@ ${memory}
         return;
       }
       outputHost.innerHTML = tasks.map((task) => {
-        const runs2 = state2.aiRunOrder.map((id) => state2.aiRuns.get(id)).filter((r) => r?.taskId === task.id);
+        const runs2 = state2.aiRunOrder.map((id) => state2.aiRuns.get(id)).filter((r) => !!r && r.taskId === task.id);
         const status2 = aggregateRunStatus(runs2);
         const active = task.id === state2.aiActiveTaskId ? " active" : "";
         const configuredModels = task.modelIds?.length || 0;
         return `<button type="button" class="bsb-output-tab ${escapeAttr(status2)}${active}" data-ai-output-task="${escapeAttr(task.id)}" title="${escapeAttr(taskDisplayName(task))}"><span class="dot"></span><span class="name">${escapeHtml(taskDisplayName(task))}</span><span class="count">${runs2.length || configuredModels}</span></button>`;
       }).join("");
       const activeTask = tasks.find((t) => t.id === state2.aiActiveTaskId) || tasks[0];
-      const runs = state2.aiRunOrder.map((id) => state2.aiRuns.get(id)).filter((r) => r?.taskId === activeTask.id);
+      if (!activeTask) return;
+      const runs = state2.aiRunOrder.map((id) => state2.aiRuns.get(id)).filter((r) => !!r && r.taskId === activeTask.id);
       if (runs.length) {
-        if (!runs.some((r) => r.id === state2.aiActiveRunId)) {
-          state2.aiActiveRunId = runs[0].id;
-          syncActiveRunBridge(runs[0]);
+        const firstRun = runs[0];
+        if (firstRun && !runs.some((r) => r.id === state2.aiActiveRunId)) {
+          state2.aiActiveRunId = firstRun.id;
+          syncActiveRunBridge(firstRun);
         }
         modelHost.innerHTML = runs.map((run) => {
           const active = run.id === state2.aiActiveRunId ? " active" : "";
@@ -18028,7 +18467,7 @@ ${memory}
         }).join("");
       } else {
         const profiles = state2.aiProfiles?.length ? state2.aiProfiles : loadAiProfiles();
-        const modelNames = (activeTask.modelIds || []).map((id) => profiles.find((p) => p.id === id)).filter(Boolean);
+        const modelNames = (activeTask.modelIds || []).map((id) => profiles.find((p) => p.id === id)).filter((p) => !!p);
         modelHost.innerHTML = modelNames.length ? modelNames.map((p) => `<span class="bsb-model-tab queued"><span class="dot"></span><span>${escapeHtml(p.name || p.model)}</span></span>`).join("") : '<span class="bsb-ai-result-empty">这个产物还没有选择 LLM</span>';
       }
     }
@@ -18128,7 +18567,7 @@ ${memory}
       if (kind === "processed") return String(input?.vars?.processedSubtitle || state2.preprocessRun?.text || "");
       if (input?.vars?.rawSubtitle) return String(input.vars.rawSubtitle);
       const routeKey = currentRouteVideoKey();
-      const current = routeKey ? state2.items.find((it) => routeVideoKey2(it.bvid, it.page || 1) === routeKey) || (routeVideoKey2(state2.transcriptItem?.bvid, state2.transcriptItem?.page || 1) === routeKey ? state2.transcriptItem : null) : null;
+      const current = routeKey ? state2.items.find((it) => routeVideoKey2(it.bvid, Number(it.page) || 1) === routeKey) || (routeVideoKey2(state2.transcriptItem?.bvid, state2.transcriptItem?.page || 1) === routeKey ? state2.transcriptItem : null) : null;
       if (current?.subStatus === "ok" && current.data?.length) return buildSubtitlePayload([current]);
       const ready = selectedItems().filter((it) => it.subStatus === "ok" && it.data?.length);
       return ready.length ? buildSubtitlePayload(ready) : "";
@@ -18169,9 +18608,9 @@ ${memory}
       const task = currentPostTasks().find((t) => t.id === String(taskId || ""));
       if (!task) return;
       state2.aiActiveTaskId = task.id;
-      const runs = state2.aiRunOrder.map((id) => state2.aiRuns.get(id)).filter((r) => r?.taskId === task.id);
+      const runs = state2.aiRunOrder.map((id) => state2.aiRuns.get(id)).filter((r) => !!r && r.taskId === task.id);
       renderAiResultTabs();
-      if (runs.length) await selectAiRun(runs[0].id);
+      if (runs[0]) await selectAiRun(runs[0].id);
       else {
         const root = ensurePanel();
         const content2 = root.querySelector('[data-role="ai-content"]');
@@ -18229,11 +18668,11 @@ ${memory}
       run.abort = true;
       try {
         run.abortController?.abort();
-      } catch (_) {
+      } catch {
       }
       try {
         if (run.xhr && typeof run.xhr.abort === "function") run.xhr.abort();
-      } catch (_) {
+      } catch {
       }
     }
     function abortAllAiRuns() {
@@ -18243,11 +18682,11 @@ ${memory}
         state2.preprocessRun.runtime.abort = true;
         try {
           state2.preprocessRun.runtime.abortController?.abort();
-        } catch (_) {
+        } catch {
         }
         try {
           state2.preprocessRun.runtime.xhr?.abort?.();
-        } catch (_) {
+        } catch {
         }
         for (const child of state2.preprocessRun.childRuntimes || []) abortPreprocessChildRuntime(child);
       }
@@ -18256,7 +18695,7 @@ ${memory}
       let profiles = [];
       try {
         profiles = saveAiProfilesFromForm();
-      } catch (_) {
+      } catch {
         profiles = loadAiProfiles();
       }
       const latest = profiles.find((profile2) => profile2.id === run?.profileId);
@@ -18271,9 +18710,11 @@ ${memory}
     function summarizeAiRuns(prefix = "全部产物生成结束") {
       setAiBusy(anyAiRunBusy());
       if (anyAiRunBusy()) return;
-      const runs = state2.aiRunOrder.map((id) => state2.aiRuns.get(id)).filter(Boolean);
+      const runs = state2.aiRunOrder.map((id) => state2.aiRuns.get(id)).filter((run) => !!run);
       if (!runs.length) return;
-      const { done, failed, stopped } = appCall("ai.summarizeRuns", runs);
+      const summary = appCall("ai.summarizeRuns", runs);
+      if (!summary) return;
+      const { done, failed, stopped } = summary;
       persistAiSessionCache().catch(() => {
       });
       setStatus(`${prefix} · 成功 ${done} · 失败 ${failed} · 停止 ${stopped}`, failed ? "err" : "ok");
@@ -18301,14 +18742,14 @@ ${memory}
       state2.aiActiveRunId = runId;
       syncActiveRunBridge(replacement);
       renderAiResultTabs();
-      await selectAiRun(runId);
+      await selectAiRun(runId || "");
       setStatus(`${replacement.promptName} · ${config.name || config.model} · 仅重新生成当前版本 · 复用现有${input.preprocessEnabled ? "规范化稿" : "原始字幕"}`);
       await runAiProfile(replacement, input.vars, replacement.promptProfile, input.commonMeta);
       summarizeAiRuns("当前模型重新生成结束");
     }
     async function regenerateAllAiRuns() {
       const input = appCall("ai.cloneSessionInput", state2.aiSessionInput);
-      const oldRuns = state2.aiRunOrder.map((id) => state2.aiRuns.get(id)).filter(Boolean);
+      const oldRuns = state2.aiRunOrder.map((id) => state2.aiRuns.get(id)).filter((run) => !!run);
       if (!input || !oldRuns.length) {
         setStatus("当前没有可重新生成的批次，请先完成一次分析", "err");
         return;
@@ -18344,7 +18785,8 @@ ${memory}
       setStatus(`正在重新生成全部 ${state2.aiRunOrder.length} 个产物版本 · 不重复运行输入整理…`);
       await Promise.allSettled(state2.aiRunOrder.map((id) => {
         const run = state2.aiRuns.get(id);
-        return runAiProfile(run, state2.aiSessionInput.vars, run.promptProfile, state2.aiSessionInput.commonMeta);
+        if (!run) return;
+        return runAiProfile(run, input.vars, run.promptProfile, input.commonMeta);
       }));
       if (sessionId === state2.aiSessionSeq) summarizeAiRuns("全部模型重新生成结束");
     }
@@ -18377,7 +18819,7 @@ ${memory}
       state2.aiUserReading = r.userReading;
       updateJumpLatestBtn();
     }
-    function detachAiFollow(_reason) {
+    function detachAiFollow() {
       applyAiScrollResolved(
         resolveAiScrollState(
           {
@@ -18420,11 +18862,13 @@ ${memory}
         },
         { passive: true, capture: true }
       );
+      let touchY = null;
+      let pointerY = null;
       box.addEventListener(
         "touchstart",
         (e) => {
           const t = e.touches && e.touches[0];
-          box._bsbTouchY = t ? t.clientY : null;
+          touchY = t ? t.clientY : null;
         },
         { passive: true, capture: true }
       );
@@ -18432,16 +18876,16 @@ ${memory}
         "touchmove",
         (e) => {
           const t = e.touches && e.touches[0];
-          if (!t || box._bsbTouchY == null) return;
-          if (t.clientY - box._bsbTouchY > 8) onLeaveBottom();
-          box._bsbTouchY = t.clientY;
+          if (!t || touchY == null) return;
+          if (t.clientY - touchY > 8) onLeaveBottom();
+          touchY = t.clientY;
         },
         { passive: true, capture: true }
       );
       box.addEventListener(
         "pointerdown",
         () => {
-          box._bsbPtrY = null;
+          pointerY = null;
         },
         { passive: true }
       );
@@ -18449,10 +18893,10 @@ ${memory}
         "pointermove",
         (e) => {
           if (e.buttons === 0 && e.pointerType === "mouse") return;
-          if (box._bsbPtrY != null && e.clientY - box._bsbPtrY > 8) {
+          if (pointerY != null && e.clientY - pointerY > 8) {
             onLeaveBottom();
           }
-          box._bsbPtrY = e.clientY;
+          pointerY = e.clientY;
         },
         { passive: true }
       );
@@ -18530,7 +18974,7 @@ ${memory}
             state2.aiRenderedText = "";
           }
           if (!state2.aiStreamTextNode || state2.aiStreamTextNode.parentNode !== pre) {
-            state2.aiStreamTextNode = pre.firstChild || pre.appendChild(document.createTextNode(""));
+            state2.aiStreamTextNode = pre.firstChild instanceof Text ? pre.firstChild : pre.appendChild(document.createTextNode(""));
             state2.aiRenderedText = state2.aiStreamTextNode.data || "";
           }
           if (activeAiRunBusy() && !caret) {
@@ -18570,13 +19014,14 @@ ${memory}
     }
     function buildSubtitlePayload(items) {
       return items.map((it) => {
-        const head = `=== ${it.bvid}${it.page > 1 ? " P" + it.page : ""} ${it.title || ""} ===`;
+        const head = `=== ${it.bvid}${(it.page || 1) > 1 ? " P" + it.page : ""} ${it.title || ""} ===`;
         return `${head}
 ${coreCall("cuesToAiText", it.data || [], it.bvid, it.page || 1)}`;
       }).join("\n\n");
     }
     function loadScriptOnce(src, globalCheck) {
       return new Promise((resolve2, reject) => {
+        if (!src) return reject(new Error("Missing script URL"));
         if (globalCheck && globalCheck()) return resolve2();
         const existed = document.querySelector(`script[data-bsb-src="${src}"]`);
         if (existed) {
@@ -18595,6 +19040,7 @@ ${coreCall("cuesToAiText", it.data || [], it.bvid, it.page || 1)}`;
       });
     }
     function loadCssOnce(href) {
+      if (!href) return;
       if (document.querySelector(`link[data-bsb-href="${href}"]`)) return;
       const l = document.createElement("link");
       l.rel = "stylesheet";
@@ -18671,8 +19117,9 @@ ${coreCall("cuesToAiText", it.data || [], it.bvid, it.page || 1)}`;
       return /```mermaid\s*\n/i.test(md);
     }
     async function yieldToMain() {
-      if (globalThis.scheduler && typeof globalThis.scheduler.yield === "function") {
-        await globalThis.scheduler.yield();
+      const scheduler = Reflect.get(globalThis, "scheduler");
+      if (scheduler && typeof scheduler === "object" && "yield" in scheduler && typeof scheduler.yield === "function") {
+        await scheduler.yield();
       } else {
         await new Promise((resolve2) => setTimeout(resolve2, 0));
       }
@@ -18688,7 +19135,7 @@ ${coreCall("cuesToAiText", it.data || [], it.bvid, it.page || 1)}`;
           output: "html"
         });
         return display2 ? `<div class="bsb-katex-display">${html}</div>` : `<span class="bsb-katex-inline">${html}</span>`;
-      } catch (_) {
+      } catch {
         return null;
       }
     }
@@ -18750,6 +19197,7 @@ ${coreCall("cuesToAiText", it.data || [], it.bvid, it.page || 1)}`;
       const walker = document.createTreeWalker(host2, NodeFilter.SHOW_TEXT);
       const nodes = [];
       while (walker.nextNode()) {
+        if (!(walker.currentNode instanceof Text)) continue;
         const p = walker.currentNode.parentElement;
         if (!p || p.closest("pre,code,a,button,.katex,.mermaid,.bsb-toc")) continue;
         if (/\[(?:BV[\w]+\s+)?(?:P\d+\s+)?(?:\d{1,2}:)?\d{1,2}:\d{2}\]/i.test(walker.currentNode.data)) nodes.push(walker.currentNode);
@@ -18762,8 +19210,7 @@ ${coreCall("cuesToAiText", it.data || [], it.bvid, it.page || 1)}`;
         const frag = document.createDocumentFragment();
         while (m = re.exec(text)) {
           if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
-          const parts = m[4].split(":").map(Number);
-          const sec = parts.length === 3 ? parts[0] * 3600 + parts[1] * 60 + parts[2] : parts[0] * 60 + parts[1];
+          const sec = (m[4] || "").split(":").map(Number).reduce((seconds, part) => seconds * 60 + part, 0);
           const btn = document.createElement("button");
           btn.type = "button";
           btn.className = "bsb-time-link";
@@ -18780,12 +19227,12 @@ ${coreCall("cuesToAiText", it.data || [], it.bvid, it.page || 1)}`;
       }
     }
     function seekToVideoTimestamp(seconds, bvid, page) {
-      if (!Number.isFinite(seconds)) return;
+      if (typeof seconds !== "number" || !Number.isFinite(seconds)) return;
       const currentBvid = extractBvid2(location.href);
       let currentPage = 1;
       try {
         currentPage = Math.max(1, Number(new URL(location.href).searchParams.get("p")) || 1);
-      } catch (_) {
+      } catch {
       }
       const targetPage = Math.max(1, Number(page) || 1);
       const sameVideo = !bvid || !currentBvid || bvid.toLowerCase() === currentBvid.toLowerCase();
@@ -18837,103 +19284,21 @@ ${coreCall("cuesToAiText", it.data || [], it.bvid, it.page || 1)}`;
       for (let i = 0; i < blocks.length; i++) {
         if (epoch !== state2.renderEpoch) return;
         const block = blocks[i];
+        if (!block) continue;
         const pre = block.parentElement;
         const m = (block.className || "").match(/language-([\w#+-]+)/i);
         if (m && pre && !pre.querySelector(".bsb-code-lang")) {
           const tag = document.createElement("span");
           tag.className = "bsb-code-lang";
-          tag.textContent = m[1];
+          tag.textContent = m[1] || "";
           pre.insertBefore(tag, block);
         }
         try {
           if (typeof hljs !== "undefined") hljs.highlightElement(block);
-        } catch (_) {
+        } catch {
         }
         if (i % 5 === 4) await yieldToMain();
       }
-    }
-    function parseMermaidViewBox(svg) {
-      const raw = String(svg?.getAttribute("viewBox") || "").trim();
-      const values = raw.split(/[\s,]+/).map(Number);
-      if (values.length === 4 && values.every(Number.isFinite) && values[2] > 0 && values[3] > 0) {
-        return { x: values[0], y: values[1], width: values[2], height: values[3] };
-      }
-      const width = Number.parseFloat(svg?.getAttribute("width")) || 960;
-      const height = Number.parseFloat(svg?.getAttribute("height")) || 540;
-      return { x: 0, y: 0, width, height };
-    }
-    function getMermaidScale(card) {
-      const scale = Number(card?.dataset?.scale);
-      return Number.isFinite(scale) && scale > 0 ? scale : 1;
-    }
-    function updateMermaidScaleLabel(card) {
-      const label = card?.querySelector(".bsb-mermaid-scale");
-      if (label) label.textContent = `${Math.round(getMermaidScale(card) * 100)}%`;
-    }
-    function setMermaidScale(card, scale, mode = "manual") {
-      if (!card) return;
-      const stage = card.querySelector(".bsb-mermaid-stage");
-      if (!stage) return;
-      const baseWidth = Number(stage.dataset.baseWidth) || 760;
-      const next = Math.max(0.35, Math.min(3, Number(scale) || 1));
-      card.dataset.scale = String(next);
-      card.dataset.fit = mode;
-      stage.style.setProperty("--bsb-mermaid-width", `${Math.max(240, Math.round(baseWidth * next))}px`);
-      updateMermaidScaleLabel(card);
-    }
-    function fitMermaidToViewport(card) {
-      const viewport = card?.querySelector(".bsb-mermaid-viewport");
-      const stage = card?.querySelector(".bsb-mermaid-stage");
-      if (!viewport || !stage) return;
-      const baseWidth = Number(stage.dataset.baseWidth) || 760;
-      const available = Math.max(240, viewport.clientWidth - 36);
-      setMermaidScale(card, Math.min(1.5, available / baseWidth), "fit");
-      viewport.scrollLeft = 0;
-      viewport.scrollTop = 0;
-    }
-    function closeMermaidFullscreen() {
-      const root = document.getElementById(PANEL_ID);
-      const modal = root?.querySelector(".bsb-mermaid-modal");
-      if (!modal) return;
-      const card = modal.querySelector(".bsb-mermaid-card");
-      const placeholder = card?._bsbMermaidPlaceholder;
-      if (card && placeholder?.parentNode) {
-        card.classList.remove("is-fullscreen");
-        placeholder.replaceWith(card);
-        card._bsbMermaidPlaceholder = null;
-        const full = card.querySelector('[data-mmd-act="fullscreen"]');
-        if (full) {
-          full.textContent = "全屏";
-          full.title = "全屏查看";
-        }
-      }
-      modal.remove();
-    }
-    function openMermaidFullscreen(card) {
-      if (!card || card.closest(".bsb-mermaid-modal")) return;
-      closeMermaidFullscreen();
-      const root = document.getElementById(PANEL_ID);
-      if (!root) return;
-      const placeholder = document.createComment("bsb-mermaid-placeholder");
-      card.before(placeholder);
-      card._bsbMermaidPlaceholder = placeholder;
-      const modal = document.createElement("div");
-      modal.className = "bsb-mermaid-modal";
-      modal.setAttribute("role", "dialog");
-      modal.setAttribute("aria-modal", "true");
-      modal.setAttribute("aria-label", "Mermaid 图表全屏查看");
-      modal.addEventListener("click", (e) => {
-        if (e.target === modal) closeMermaidFullscreen();
-      });
-      card.classList.add("is-fullscreen");
-      const full = card.querySelector('[data-mmd-act="fullscreen"]');
-      if (full) {
-        full.textContent = "退出";
-        full.title = "退出全屏";
-      }
-      modal.appendChild(card);
-      root.appendChild(modal);
-      requestAnimationFrame(() => fitMermaidToViewport(card));
     }
     function stripMermaidTimestampCitations2(code) {
       return String(code || "").replace(
@@ -18955,7 +19320,7 @@ ${stripMermaidTimestampCitations2(code)}
     function extractMermaidCode(text) {
       let source = String(text || "").trim();
       const fenced = source.match(/```(?:mermaid)?[ \t]*\r?\n([\s\S]*?)```/i);
-      if (fenced) source = fenced[1];
+      if (fenced) source = fenced[1] || "";
       source = source.replace(/^\s*```(?:mermaid)?\s*/i, "").replace(/```\s*$/i, "").replace(/^\s*mermaid\s*\r?\n/i, "").trim();
       return stripMermaidTimestampCitations2(source);
     }
@@ -18988,8 +19353,11 @@ ${stripMermaidTimestampCitations2(nextCode)}
       const payload = buildFn({
         routeKey,
         sessionInput: appCall("ai.cloneSessionInput", state2.aiSessionInput, state2.aiSessionInput?.sessionId),
-        preprocessRun: state2.preprocessRun,
-        runs: state2.aiRunOrder.map((id) => state2.aiRuns.get(id)).filter(Boolean),
+        preprocessRun: state2.preprocessRun ? { ...state2.preprocessRun, settings: { ...state2.preprocessRun.settings } } : null,
+        runs: state2.aiRunOrder.flatMap((id) => {
+          const run = state2.aiRuns.get(id);
+          return run ? [{ ...run, config: { ...run.config } }] : [];
+        }),
         activeRunId: state2.aiActiveRunId,
         activeTaskId: state2.aiActiveTaskId
       });
@@ -19010,10 +19378,10 @@ ${stripMermaidTimestampCitations2(nextCode)}
         const run = createAiRun(
           latestAiConfigForRun({ profileId: draft.profileId, config: draft.config }),
           sessionId,
-          draft.taskSnapshot,
-          draft.promptProfile
+          draft.taskSnapshot ? normalizePostTask(draft.taskSnapshot) : null,
+          draft.promptProfile ? coreCall("createPromptProfile", draft.promptProfile, 0) : null
         );
-        Object.assign(run, draft);
+        applyRestoredRunOutput(run, draft);
         state2.aiRuns.set(run.id, run);
         state2.aiRunOrder.push(run.id);
       }
@@ -19026,10 +19394,10 @@ ${stripMermaidTimestampCitations2(nextCode)}
         savedActive,
         state2.aiActiveTaskId
       );
-      state2.aiSessionInput = appCall("ai.cloneSessionInput", payload.sessionInput, sessionId);
+      state2.aiSessionInput = appCall("ai.cloneSessionInput", normalizeCachedSessionInput(payload.sessionInput), sessionId);
       if (state2.aiSessionInput) state2.aiSessionInput.routeKey = routeKey;
       const preprocess2 = coreCall("draftHydratedPreprocessRun", payload.preprocessRun);
-      state2.preprocessRun = preprocess2 ? { runtime: null, childRuntimes: /* @__PURE__ */ new Set(), ...preprocess2 } : null;
+      state2.preprocessRun = preprocess2 ? restorePreprocessRun(preprocess2, createAiRuntime("缓存预处理")) : null;
       state2.aiSessionRouteKey = routeKey;
       state2.autoAnalyzeKey = routeKey;
       state2.aiViewingPreprocess = false;
@@ -19062,7 +19430,7 @@ ${stripMermaidTimestampCitations2(nextCode)}
           if (!cacheKey) return false;
           const cached = await persistentCache.read(cacheKey);
           if (currentRouteVideoKey() && currentRouteVideoKey() !== key) return false;
-          if (!coreCall("isUsableAiSessionCache", cached?.value)) return false;
+          if (!cached || !coreCall("isUsableAiSessionCache", cached.value)) return false;
           return await hydrateAiSessionFromCache(cached.value, key);
         } catch (error) {
           console.warn("[bili-subbatch] restore ai session", error);
@@ -19097,7 +19465,7 @@ ${stripMermaidTimestampCitations2(nextCode)}
       });
       return true;
     }
-    function currentMermaidRepairResolution(targetRun, preferredProfileId) {
+    function currentMermaidRepairResolution(targetRun, preferredProfileId = "") {
       const run = targetRun || getActiveAiRun();
       const profiles = state2.aiProfiles?.length ? state2.aiProfiles : loadAiProfiles();
       const fn = coreFn("resolveMermaidRepairConfig");
@@ -19119,10 +19487,8 @@ ${stripMermaidTimestampCitations2(nextCode)}
     }
     function mermaidSetupError(resolution) {
       const hintFn = coreFn("mermaidRepairSetupHint");
-      const message = typeof hintFn === "function" ? hintFn(resolution?.missing) : "还没有可用的 LLM。打开 设置 → LLM 填写 API Key。";
-      const err = new Error(message);
-      err.mermaidSetup = true;
-      err.missing = resolution?.missing || [];
+      const message = typeof hintFn === "function" ? hintFn(resolution.missing.filter((key) => key === "apiKey" || key === "baseUrl" || key === "model")) : "还没有可用的 LLM。打开 设置 → LLM 填写 API Key。";
+      const err = Object.assign(new Error(message), { mermaidSetup: true, missing: resolution?.missing || [] });
       return err;
     }
     function openSettingsLlm(profileId) {
@@ -19179,7 +19545,7 @@ ${stripMermaidTimestampCitations2(nextCode)}
         throw mermaidSetupError(resolved);
       }
       const runtime2 = createAiRuntime(`Mermaid 修复 · ${cfg.name || cfg.model || "AI"}`);
-      const parseError = String(error?.message || error || "未知渲染错误").slice(0, 4e3);
+      const parseError = String(errorMessage(error) || "未知渲染错误").slice(0, 4e3);
       const originalCode = String(code || "").slice(0, 3e4);
       const messages = [
         {
@@ -19209,9 +19575,9 @@ ${originalCode}
         let latest = "";
         requestChatCompletion({
           runtime: runtime2,
-          baseUrl: cfg.baseUrl,
-          apiKey: cfg.apiKey,
-          model: cfg.model,
+          baseUrl: cfg.baseUrl || "",
+          apiKey: cfg.apiKey || "",
+          model: cfg.model || "",
           temperature: 0.1,
           maxTokens: 32768,
           messages,
@@ -19240,13 +19606,13 @@ ${originalCode}
       const action = button?.dataset?.mmdAct;
       const card = button?.closest(".bsb-mermaid-card, .bsb-mermaid-error");
       if (action === "open-llm") {
-        const host2 = button.closest?.(".mermaid[data-bsb-m]");
+        const host2 = button.closest(".mermaid[data-bsb-m]");
         const resolved = currentMermaidRepairResolution(getActiveAiRun(), host2?._bsbMermaidJob?.preferredProfileId);
         openSettingsLlm(resolved.config?.id || resolved.readyProfiles?.[0]?.id || state2.aiEditorId);
         return;
       }
       if (action === "retry" || action === "retry-with" || action === "save-inline") {
-        const host2 = button.closest?.(".mermaid[data-bsb-m]") || card?._bsbMermaidHost;
+        const host2 = button.closest(".mermaid[data-bsb-m]") || card?._bsbMermaidHost;
         const job = host2?._bsbMermaidJob || card?._bsbMermaidJob;
         if (!host2 || !job) {
           setStatus("重绘失败：没有找到该图对应的 Mermaid 源码", "err");
@@ -19258,7 +19624,7 @@ ${originalCode}
           if (!savedId) return;
           job.preferredProfileId = savedId;
         } else {
-          const picked = box?.querySelector?.('[data-role="mermaid-repair-model"]')?.value || "";
+          const picked = box?.querySelector('[data-role="mermaid-repair-model"]')?.value || "";
           if (picked) job.preferredProfileId = picked;
         }
         const targetRun = getActiveAiRun();
@@ -19310,7 +19676,7 @@ ${originalCode}
           if (persisted) {
             try {
               await persistAiSessionCache();
-            } catch (_) {
+            } catch {
             }
           }
           const currentJob = host2._bsbMermaidJob;
@@ -19337,8 +19703,8 @@ ${originalCode}
           };
           renderMermaidError(host2, originalCode, err, job.idx);
           setStatus(
-            err?.mermaidSetup ? String(err.message || "请在这张图里填写 API Key") : `Mermaid 图 ${job.idx + 1} 重绘失败：${err?.message || err}`,
-            err?.mermaidSetup ? "" : "err"
+            isMermaidSetupError(err) ? errorMessage(err) || "请在这张图里填写 API Key" : `Mermaid 图 ${job.idx + 1} 重绘失败：${errorMessage(err)}`,
+            isMermaidSetupError(err) ? "" : "err"
           );
         } finally {
           if (targetRun) targetRun.mermaidRepairing = false;
@@ -19365,80 +19731,15 @@ ${originalCode}
         viewport.scrollTop = 0;
       }
     }
-    function buildMermaidCard(svg, idx, host2) {
-      svg.classList.add("bsb-mermaid-svg");
-      svg.removeAttribute("width");
-      svg.removeAttribute("height");
-      svg.setAttribute("preserveAspectRatio", "xMinYMin meet");
-      svg.setAttribute("role", "img");
-      svg.setAttribute("aria-label", `架构流程图 ${idx + 1}`);
-      const viewBox = parseMermaidViewBox(svg);
-      if (!svg.hasAttribute("viewBox")) svg.setAttribute("viewBox", `${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`);
-      const baseWidth = Math.round(Math.max(760, Math.min(3600, viewBox.width)));
-      const card = document.createElement("section");
-      card.className = "bsb-mermaid-card";
-      card.dataset.scale = "1";
-      card.dataset.fit = "actual";
-      const toolbar = document.createElement("div");
-      toolbar.className = "bsb-mermaid-toolbar";
-      const title = document.createElement("span");
-      title.className = "bsb-mermaid-title";
-      const repaired = !!host2?._bsbMermaidJob?.repaired;
-      title.textContent = `架构流程图 ${idx + 1}${repaired ? " · AI 已修复" : ""} · 可滚动查看`;
-      const tools = document.createElement("span");
-      tools.className = "bsb-mermaid-tools";
-      const makeButton = (toolAction, text, titleText) => {
-        const toolButton = document.createElement("button");
-        toolButton.type = "button";
-        toolButton.className = "bsb-mermaid-tool";
-        toolButton.dataset.mmdAct = toolAction;
-        toolButton.textContent = text;
-        toolButton.title = titleText;
-        toolButton.setAttribute("aria-label", titleText);
-        return toolButton;
-      };
-      tools.append(
-        makeButton("fit", "适宽", "适应可视区域宽度"),
-        makeButton("actual", "100%", "恢复清晰原始尺寸"),
-        makeButton("zoom-out", "−", "缩小图表")
-      );
-      const scaleLabel = document.createElement("span");
-      scaleLabel.className = "bsb-mermaid-scale";
-      scaleLabel.textContent = "100%";
-      tools.append(
-        scaleLabel,
-        makeButton("zoom-in", "+", "放大图表"),
-        makeButton("retry", "重绘", "先重试渲染；若语法失败则只修复该 Mermaid 代码块"),
-        makeButton("fullscreen", "全屏", "全屏查看")
-      );
-      toolbar.append(title, tools);
-      const viewport = document.createElement("div");
-      viewport.className = "bsb-mermaid-viewport";
-      viewport.tabIndex = 0;
-      viewport.setAttribute("aria-label", "可滚动和缩放的 Mermaid 图表");
-      const stage = document.createElement("div");
-      stage.className = "bsb-mermaid-stage";
-      stage.dataset.baseWidth = String(baseWidth);
-      stage.style.setProperty("--bsb-mermaid-width", `${baseWidth}px`);
-      stage.appendChild(svg);
-      const hint = document.createElement("span");
-      hint.className = "bsb-mermaid-hint";
-      hint.textContent = "Ctrl + 滚轮缩放";
-      viewport.append(stage, hint);
-      card.append(toolbar, viewport);
-      card._bsbMermaidHost = host2 || null;
-      card._bsbMermaidJob = host2?._bsbMermaidJob || null;
-      return card;
-    }
     function enqueueMermaidRender(task) {
       const run = state2.mermaidQueue.catch(() => void 0).then(task);
-      state2.mermaidQueue = run.catch(() => void 0);
+      state2.mermaidQueue = run.then(() => void 0, () => void 0);
       return run;
     }
     function renderMermaidError(node, code, err, idx) {
-      const message = String(err?.message || err || "未知错误");
+      const message = err ? errorMessage(err) : "未知错误";
       const resolved = currentMermaidRepairResolution(getActiveAiRun(), node?._bsbMermaidJob?.preferredProfileId);
-      const needsSetup = !!(err?.mermaidSetup || resolved.source === "none");
+      const needsSetup = !!(isMermaidSetupError(err) || resolved.source === "none");
       node.replaceChildren();
       const box = document.createElement("section");
       box.className = needsSetup ? "bsb-mermaid-error is-setup" : "bsb-mermaid-error";
@@ -19467,8 +19768,8 @@ ${originalCode}
         setup.appendChild(path);
       }
       if (needsSetup && resolved.readyProfiles.length) {
-        const row = document.createElement("div");
-        row.className = "bsb-mermaid-setup-row";
+        const row2 = document.createElement("div");
+        row2.className = "bsb-mermaid-setup-row";
         const label = document.createElement("label");
         label.textContent = "用这个模型修";
         const select = document.createElement("select");
@@ -19485,8 +19786,8 @@ ${originalCode}
         useBtn.className = "bsb-btn accent";
         useBtn.dataset.mmdAct = "retry-with";
         useBtn.textContent = "用这个模型重绘";
-        row.append(label, useBtn);
-        setup.appendChild(row);
+        row2.append(label, useBtn);
+        setup.appendChild(row2);
       }
       if (!resolved.readyProfiles.length) {
         const grid = document.createElement("div");
@@ -19593,13 +19894,15 @@ ${message}`;
         state2.mermaidObserver = new IntersectionObserver((entries, observer) => {
           for (const entry of entries) if (entry.isIntersecting) {
             observer.unobserve(entry.target);
-            const idx = Number(entry.target.dataset.bsbM);
-            renderMermaidNode(entry.target, blocks[idx] || "", idx, epoch);
+            if (!(entry.target instanceof HTMLElement)) continue;
+            const node = entry.target;
+            const idx = Number(node.dataset.bsbM);
+            renderMermaidNode(node, blocks[idx] || "", idx, epoch);
           }
         }, { root: scrollRoot || null, rootMargin: "320px 0px", threshold: 0.01 });
         nodes.forEach((node) => {
           node.dataset.bsbState = "pending";
-          state2.mermaidObserver.observe(node);
+          state2.mermaidObserver?.observe(node);
         });
       } else {
         nodes.forEach((node, idx) => renderMermaidNode(node, blocks[idx] || "", idx, epoch));
@@ -19675,22 +19978,11 @@ ${message}`;
       return headings;
     }
     function folioOutlineFromHeadings(headings) {
-      const payload = headings.map((item) => ({ id: item.id, level: item.level, text: item.text }));
-      const build = coreFn("buildFolioOutline");
-      if (build) return build(payload);
-      const roots = [];
-      let chapter = null;
-      for (const item of payload) {
-        const node = { ...item, children: [] };
-        if (item.level === 2 || !chapter) {
-          node.level = 2;
-          roots.push(node);
-          chapter = node;
-        } else {
-          chapter.children.push(node);
-        }
-      }
-      return roots;
+      return coreCall("buildFolioOutline", headings.map((item) => ({
+        id: item.id,
+        level: item.level === 3 ? 3 : 2,
+        text: item.text
+      })));
     }
     function makeFolioTocLink(node, kind, index) {
       const link = document.createElement("button");
@@ -19698,10 +19990,10 @@ ${message}`;
       link.className = `bsb-folio-toc-link is-h${node.level}`;
       link.dataset.folioJump = node.id;
       if (kind === "h2") {
-        const num = document.createElement("span");
-        num.className = "bsb-folio-toc-index";
-        num.textContent = coreFn("formatFolioChapterIndex") ? coreFn("formatFolioChapterIndex")(index) : String(index).padStart(2, "0");
-        link.appendChild(num);
+        const num2 = document.createElement("span");
+        num2.className = "bsb-folio-toc-index";
+        num2.textContent = coreFn("formatFolioChapterIndex") ? coreCall("formatFolioChapterIndex", index || 0) : String(index).padStart(2, "0");
+        link.appendChild(num2);
       } else {
         const dot = document.createElement("span");
         dot.className = "bsb-folio-toc-dot";
@@ -19715,8 +20007,8 @@ ${message}`;
     }
     function buildFolioToc(headings) {
       const outline = folioOutlineFromHeadings(headings);
-      const stats = coreFn("countFolioOutline") ? coreFn("countFolioOutline")(outline) : { chapters: outline.length, sections: headings.length };
-      const summary = coreFn("folioOutlineSummary") ? coreFn("folioOutlineSummary")(stats) : `${stats.chapters} 章`;
+      const stats = coreCall("countFolioOutline", outline);
+      const summary = coreCall("folioOutlineSummary", stats);
       const aside = document.createElement("aside");
       aside.className = "bsb-folio-toc";
       aside.setAttribute("aria-label", "阅读大纲");
@@ -19729,16 +20021,16 @@ ${message}`;
         const item = document.createElement("div");
         item.className = `bsb-folio-toc-item${chapter.children.length ? " has-kids is-open" : ""}`;
         item.dataset.folioId = chapter.id;
-        const row = document.createElement("div");
-        row.className = "bsb-folio-toc-row";
+        const row2 = document.createElement("div");
+        row2.className = "bsb-folio-toc-row";
         const twist = document.createElement("button");
         twist.type = "button";
         twist.className = "bsb-folio-toc-twist";
         twist.dataset.folioTwist = "1";
         twist.setAttribute("aria-label", "展开或收起小节");
         twist.setAttribute("aria-expanded", chapter.children.length ? "true" : "false");
-        row.append(twist, makeFolioTocLink(chapter, "h2", index + 1));
-        item.appendChild(row);
+        row2.append(twist, makeFolioTocLink(chapter, "h2", index + 1));
+        item.appendChild(row2);
         if (chapter.children.length) {
           const kids = document.createElement("div");
           kids.className = "bsb-folio-toc-kids";
@@ -19774,7 +20066,7 @@ ${message}`;
       else if (linkRect.bottom > navRect.bottom) nav.scrollTop += linkRect.bottom - navRect.bottom + 10;
     }
     function syncFolioTocViewport(shell, box) {
-      const toc = shell?.querySelector?.(".bsb-folio-toc");
+      const toc = shell?.querySelector(".bsb-folio-toc");
       if (!toc || !box) return;
       toc.style.setProperty("--folio-toc-h", `${Math.max(180, Math.round(box.clientHeight))}px`);
     }
@@ -19788,12 +20080,13 @@ ${message}`;
       const box = scrollRoot || shell.closest("[data-role='ai-md']");
       syncFolioTocViewport(shell, box);
       shell.addEventListener("click", (e) => {
+        if (!(e.target instanceof Element)) return;
         if (e.target.closest?.("[data-folio-twist]")) {
           const item = e.target.closest(".bsb-folio-toc-item");
           if (!item?.classList.contains("has-kids")) return;
           const open = !item.classList.contains("is-open");
           item.classList.toggle("is-open", open);
-          e.target.closest("[data-folio-twist]").setAttribute("aria-expanded", open ? "true" : "false");
+          e.target.closest("[data-folio-twist]")?.setAttribute("aria-expanded", open ? "true" : "false");
           return;
         }
         if (e.target.closest?.("[data-folio-toc-fab]")) {
@@ -19804,7 +20097,7 @@ ${message}`;
           shell.classList.remove("is-toc-open");
           return;
         }
-        const link = e.target.closest?.("[data-folio-jump]");
+        const link = e.target.closest("[data-folio-jump]");
         if (!link) return;
         e.preventDefault();
         const target = shell.querySelector(`#${CSS.escape(link.dataset.folioJump || "")}`);
@@ -19818,7 +20111,7 @@ ${message}`;
         target.classList.remove("folio-flash");
         void target.offsetWidth;
         target.classList.add("folio-flash");
-        setFolioTocCurrent(shell, link.dataset.folioJump);
+        setFolioTocCurrent(shell, link.dataset.folioJump || "");
         shell.classList.remove("is-toc-open");
       });
       if (box) {
@@ -19927,7 +20220,7 @@ body{padding:48px 20px 80px}
 </html>
 `;
     }
-    async function renderAiMarkdown(md, { streaming } = {}) {
+    async function renderAiMarkdown(md, { streaming = false } = {}) {
       const root = ensurePanel();
       const box = root.querySelector('[data-role="ai-md"]');
       const host2 = root.querySelector('[data-role="ai-content"]') || box;
@@ -19957,7 +20250,7 @@ body{padding:48px 20px 80px}
       if (isHtmlFolioSource(source)) {
         try {
           await ensureMarkdownCore();
-        } catch (_) {
+        } catch {
         }
         if (epoch !== state2.renderEpoch) return;
         mountHtmlFolio(host2, source, box);
@@ -19985,7 +20278,7 @@ body{padding:48px 20px 80px}
       try {
         await ensureMarkdownCore();
         if (needsMath) await ensureKatex();
-      } catch (e) {
+      } catch {
         host2.innerHTML = simpleMarkdownFallback(source) + `<p style="color:var(--ctp-peach)">增强渲染库加载失败，已使用安全简易渲染。</p>`;
         if (box) box.scrollTop = 0;
         return;
@@ -20005,7 +20298,7 @@ body{padding:48px 20px 80px}
       let html;
       try {
         html = marked.parse(md2);
-      } catch (_) {
+      } catch {
         html = simpleMarkdownFallback(md2);
       }
       if (maths.length) html = replaceMathPlaceholders(html, maths, katexToHtml);
@@ -20050,11 +20343,11 @@ body{padding:48px 20px 80px}
       runtime2.abort = true;
       try {
         runtime2.abortController?.abort();
-      } catch (_) {
+      } catch {
       }
       try {
         runtime2.xhr?.abort?.();
-      } catch (_) {
+      } catch {
       }
     }
     async function requestPreprocessChunk(runtime2, cfg, prompt2, vars, statusPrefix) {
@@ -20064,11 +20357,11 @@ body{padding:48px 20px 80px}
       return await new Promise((resolve2, reject) => {
         requestChatCompletion({
           runtime: runtime2,
-          baseUrl: cfg.baseUrl,
-          apiKey: cfg.apiKey,
-          model: cfg.model,
-          temperature: cfg.temperature,
-          maxTokens: cfg.maxTokens,
+          baseUrl: cfg.baseUrl || "",
+          apiKey: cfg.apiKey || "",
+          model: cfg.model || "",
+          ...cfg.temperature === void 0 ? {} : { temperature: cfg.temperature },
+          ...cfg.maxTokens === void 0 ? {} : { maxTokens: cfg.maxTokens },
           messages,
           stream: cfg.stream !== false,
           onStatus(msg) {
@@ -20098,7 +20391,7 @@ ${latest}`;
     async function preprocessItemsForAi(items, prompt2, cfg) {
       const settings2 = appCall("preprocess.settings", state2);
       const modelName = cfg.name || cfg.model;
-      return appCall("preprocess.runPipeline", items, prompt2.name, modelName, settings2, {
+      return SubBatch2.SubBatchMonorepo.app.preprocess.runPipeline(items, prompt2.name, modelName, settings2, {
         createRuntime: () => createAiRuntime("字幕预处理 · " + modelName),
         onStart: (run) => {
           state2.preprocessRun = run;
@@ -20118,11 +20411,11 @@ ${latest}`;
         getRaw: (item) => coreCall("cuesToAiText", item.data || [], item.bvid, item.page || 1),
         cacheKey: (item, raw) => coreCall("preprocessCacheKey", item, raw, prompt2, cfg, settings2),
         readCache: (key) => persistentCache.read(key),
-        split: (item) => coreCall("splitCuesForPreprocess", item, settings2),
+        split: (item) => coreCall("splitCuesForPreprocess", { ...item, data: item.data || [] }, settings2),
         forceRefresh: state2.forcePreprocessOnce,
         cacheModel: cfg.model,
-        runPool: (jobs, concurrency, handler, cancelled) => appCall("ai.runPool", jobs, concurrency, handler, cancelled),
-        runChunk: (job, workerId, run) => appCall("preprocess.runChunkWithRetry", job, settings2.retries, workerId, {
+        runPool: (jobs, concurrency, handler, cancelled) => SubBatch2.SubBatchMonorepo.app.ai.runPool(jobs, concurrency, handler, cancelled),
+        runChunk: (job, workerId, run) => SubBatch2.SubBatchMonorepo.app.preprocess.runChunkWithRetry(job, settings2.retries, workerId, {
           isCancelled: () => !!state2.aiAbort || !!run.runtime.abort,
           createRuntime: (label) => createAiRuntime(label),
           register: (child) => run.childRuntimes.add(child),
@@ -20167,7 +20460,7 @@ ${latest}`;
       return [
         system ? { role: "system", content: system } : null,
         user ? { role: "user", content: user } : null
-      ].filter(Boolean);
+      ].filter((message) => message !== null);
     }
     function isCurrentAiRun(run) {
       return !!run && state2.aiRuns.get(run.id) === run;
@@ -20180,6 +20473,7 @@ ${latest}`;
       setAiBusy(anyAiRunBusy());
     }
     async function runAiProfile(run, vars, promptProfile, commonMeta) {
+      if (!isCurrentAiRun(run)) return run;
       const cfg = run.config;
       run.abort = false;
       updateAiRun(run, {
@@ -20187,7 +20481,7 @@ ${latest}`;
         status: "running",
         statusText: `正在连接 · max_tokens=${cfg.maxTokens}`,
         startedAt: Date.now(),
-        sourceBvids: [...commonMeta.sourceBvids]
+        sourceBvids: [...commonMeta.sourceBvids || []]
       });
       const messages = buildAiMessagesForProfile(cfg, vars, promptProfile);
       if (!messages.length) {
@@ -20199,11 +20493,11 @@ ${latest}`;
         await new Promise((resolve2, reject) => {
           requestChatCompletion({
             runtime: run,
-            baseUrl: cfg.baseUrl,
-            apiKey: cfg.apiKey,
-            model: cfg.model,
-            temperature: cfg.temperature,
-            maxTokens: cfg.maxTokens,
+            baseUrl: cfg.baseUrl || "",
+            apiKey: cfg.apiKey || "",
+            model: cfg.model || "",
+            ...cfg.temperature === void 0 ? {} : { temperature: cfg.temperature },
+            ...cfg.maxTokens === void 0 ? {} : { maxTokens: cfg.maxTokens },
             messages,
             stream: useStream,
             onStatus(msg) {
@@ -20224,7 +20518,7 @@ ${latest}`;
               if (isCurrentAiRun(run)) {
                 run.raw = sanitizeMermaidTimestampCitationsInMarkdown2(full || run.raw || "");
               }
-              resolve2(isCurrentAiRun(run) ? run.raw : "");
+              resolve2();
             },
             onError(err) {
               reject(err instanceof Error ? err : new Error(String(err || "AI 请求失败")));
@@ -20245,7 +20539,7 @@ ${latest}`;
         }
       } catch (error) {
         if (!isCurrentAiRun(run)) return run;
-        const message = String(error?.message || error || "未知错误");
+        const message = String(errorMessage(error) || "未知错误");
         if (run.abort || state2.aiAbort || /用户停止|abort/i.test(message)) {
           if (run.raw && !/\*\(已停止\)\*\s*$/.test(run.raw)) run.raw += "\n\n*(已停止)*";
           updateAiRun(run, { busy: false, status: "stopped", statusText: "已停止", finishedAt: Date.now() });
@@ -20286,9 +20580,9 @@ ${latest}`;
       let cachedPayload = null;
       if (!forceAll && routeKeyForCache && coreFn("aiSessionCacheKey") && coreFn("isUsableAiSessionCache")) {
         try {
-          const rec = await persistentCache.read(coreFn("aiSessionCacheKey")(routeKeyForCache));
-          if (coreFn("isUsableAiSessionCache")(rec?.value)) cachedPayload = rec.value;
-        } catch (_) {
+          const rec = await persistentCache.read(coreCall("aiSessionCacheKey", routeKeyForCache));
+          if (rec && coreCall("isUsableAiSessionCache", rec.value)) cachedPayload = rec.value;
+        } catch {
         }
       }
       const root = ensurePanel();
@@ -20301,13 +20595,13 @@ ${latest}`;
       } else {
         try {
           profiles = saveAiProfilesFromForm();
-        } catch (_) {
+        } catch {
           profiles = loadAiProfiles();
           state2.aiProfiles = profiles;
         }
         try {
           promptLibrary = savePromptProfilesFromForm({ activeId: state2.activePromptId });
-        } catch (_) {
+        } catch {
           promptLibrary = loadPromptProfiles();
         }
       }
@@ -20319,7 +20613,7 @@ ${latest}`;
       }
       if (!automatic) toggleAiPanel(true);
       const configuredTasks = (automatic ? currentPostTasks() : savePostTasks(currentPostTasks())).filter((t) => t.enabled !== false);
-      const planned = appCall("ai.planTasks", configuredTasks, promptLibrary.prompts, profiles);
+      const planned = SubBatch2.SubBatchMonorepo.app.ai.planTasks(configuredTasks, promptLibrary.prompts, profiles);
       const taskPlans = planned.plans;
       if (!taskPlans.length) {
         setStatus("当前处理方案没有可运行的产物：请为至少一个 POST Prompt 选择已启用的 LLM", "err");
@@ -20327,7 +20621,7 @@ ${latest}`;
         return;
       }
       const plannedRuns = planned.runs;
-      const partitionFn = appFn("ai.partitionRuns");
+      const partitionFn = SubBatch2.SubBatchMonorepo.app.ai.partitionRuns;
       const skipPrepareFn = coreFn("shouldSkipPrepareForCachedSession");
       if (!forceAll && cachedPayload && typeof partitionFn === "function") {
         const preview = partitionFn(plannedRuns, cachedPayload.runs, "");
@@ -20339,7 +20633,7 @@ ${latest}`;
               setStatus(`已从缓存恢复 ${preview.reuse.length} 个模型版本 · 改模型后点“运行”只会重跑变化项`, "ok");
               return;
             }
-          } catch (_) {
+          } catch {
           }
         }
       }
@@ -20364,7 +20658,7 @@ ${latest}`;
         if (!state2.items.length) {
           try {
             await doScan();
-          } catch (_) {
+          } catch {
           }
         }
         targets = selectedItems();
@@ -20403,7 +20697,7 @@ ${latest}`;
         await renderPreprocessCanvas();
       }
       try {
-        const ready = await batch.stage(() => appCall("ai.ensureSubtitles", targets, state2.delayMs, {
+        const ready = await batch.stage(() => SubBatch2.SubBatchMonorepo.app.ai.ensureSubtitles(targets, state2.delayMs, {
           cancelled: () => !!state2.aiAbort,
           onFetching: (item, index, total) => setStatus("AI 准备字幕 " + (index + 1) + "/" + total + " · " + item.bvid + "…"),
           fetchSubtitle: (bvid, page) => fetchSubtitle(bvid, page),
@@ -20423,7 +20717,7 @@ ${latest}`;
         if (state2.aiAbort) throw new Error("用户停止");
         const rawBuilt = buildSubtitlePayload(ready);
         let stageInput = rawBuilt;
-        if (state2.preprocessEnabled) {
+        if (state2.preprocessEnabled && preprocessPrompt && preprocessConfig) {
           setStatus(`阶段 1/2 · 字幕预处理 · ${preprocessPrompt.name} · ${preprocessConfig.name || preprocessConfig.model}`);
           stageInput = await batch.stage(() => preprocessItemsForAi(ready, preprocessPrompt, preprocessConfig));
           if (state2.aiAbort) throw new Error("用户停止");
@@ -20459,14 +20753,13 @@ ${latest}`;
         renderAiInputDrawer();
         refreshAiChips();
         if (currentAiWorkbenchStage() === "preprocess") await renderPreprocessCanvas();
-        const inputHash = coreFn("aiSessionInputHash") ? coreFn("aiSessionInputHash")(vars) : "";
+        const inputHash = coreCall("aiSessionInputHash", vars);
         const split = !forceAll && cachedPayload && typeof partitionFn === "function" ? partitionFn(plannedRuns, cachedPayload.runs, inputHash) : { reuse: [], generate: plannedRuns };
-        const { reused, generateIds } = appCall(
-          "ai.hydratePlannedRuns",
-          state2.aiRunOrder.map((id) => state2.aiRuns.get(id)).filter(Boolean),
+        const { reused, generateIds } = SubBatch2.SubBatchMonorepo.app.ai.hydratePlannedRuns(
+          state2.aiRunOrder.map((id) => state2.aiRuns.get(id)).filter((run) => !!run),
           split,
           sourceBvids,
-          (cached) => coreFn("draftHydratedAiRun") ? coreFn("draftHydratedAiRun")(cached) : null
+          (cached) => coreCall("draftHydratedAiRun", cached)
         );
         renderAiResultTabs();
         if (state2.aiActiveRunId) {
@@ -20484,12 +20777,13 @@ ${latest}`;
         setStatus(`复用缓存 ${reused} · 新生成 ${generateIds.length} · ${ready.length} 条字幕${cut.truncated ? " · 输入已截断" : ""}`);
         const outcome = await batch.stage(() => appCall("ai.executeTasks", generateIds.map((id) => async () => {
           const run = state2.aiRuns.get(id);
+          if (!run) throw new Error("AI run was replaced");
           return runAiProfile(run, vars, run.promptProfile, commonMeta);
         })));
         batch.finish(state2.aiAbort ? "stopped" : outcome.status);
         if (sessionId === state2.aiSessionSeq) summarizeAiRuns(reused ? "部分模型复用缓存后生成结束" : "全部产物生成结束");
       } catch (error) {
-        const message = String(error?.message || error);
+        const message = String(errorMessage(error));
         batch.finish(state2.aiAbort ? "stopped" : "error");
         if (sessionId === state2.aiSessionSeq) {
           if (!state2.aiAbort) setStatus(`AI 准备失败: ${message}`, "err");
@@ -20538,7 +20832,7 @@ ${latest}`;
         if (season.title && !ctx.collectionTitleHint) ctx.collectionTitleHint = String(season.title);
         if (view2.owner?.name && !ctx.authorHint) ctx.authorHint = String(view2.owner.name);
       } catch (error) {
-        console.warn("[bili-subbatch] ensureCollectionContext", error?.message || error);
+        console.warn("[bili-subbatch] ensureCollectionContext", errorMessage(error));
       }
       return ctx;
     }
@@ -20553,7 +20847,7 @@ ${latest}`;
         if (!view2.ugc_season?.id) return list;
         return applyUgcSeasonToItems2(list, view2);
       } catch (error) {
-        console.warn("[bili-subbatch] stampUgcSeasonGroupMeta", error?.message || error);
+        console.warn("[bili-subbatch] stampUgcSeasonGroupMeta", errorMessage(error));
         return list;
       }
     }
@@ -20585,11 +20879,11 @@ ${latest}`;
         const root = ensurePanel();
         state2.maxPages = Math.max(
           1,
-          Math.min(100, Number(root.querySelector('[data-role="max-pages"]').value) || DEFAULT_MAX_PAGES)
+          Math.min(100, Number(root.querySelector('[data-role="max-pages"]')?.value) || DEFAULT_MAX_PAGES)
         );
         state2.delayMs = Math.max(
           0,
-          Math.min(5e3, Number(root.querySelector('[data-role="delay"]').value) || DEFAULT_DELAY_MS)
+          Math.min(5e3, Number(root.querySelector('[data-role="delay"]')?.value) || DEFAULT_DELAY_MS)
         );
         if (ctx.type === "collection") {
           setStatus("解析合集信息…");
@@ -20613,7 +20907,7 @@ ${latest}`;
           if (!bvid) throw new Error("未识别 BV 号");
           const expandParts = ctx.type === "selection";
           setStatus(
-            expandParts ? `读取选集 ${bvid}（全部分P）…` : `读取单个视频 ${bvid}${ctx.page > 1 ? " P" + ctx.page : ""}…`
+            expandParts ? `读取选集 ${bvid}（全部分P）…` : `读取单个视频 ${bvid}${(ctx.page || 1) > 1 ? " P" + ctx.page : ""}…`
           );
           const loaded = await loadVideoAsItems(bvid, expandParts);
           if (!expandParts) {
@@ -20623,7 +20917,7 @@ ${latest}`;
               items = [
                 {
                   bvid,
-                  aid: loaded.items[0]?.aid,
+                  aid: loaded.items[0]?.aid ?? null,
                   title: part ? `${loaded.meta?.title || bvid} - P${page}【${part.part || ""}】` : loaded.meta?.title || bvid,
                   author: loaded.meta?.author || "",
                   page,
@@ -20655,7 +20949,7 @@ ${latest}`;
           if (res.truncated) meta.truncated = true;
           if (ctx.type === "user") {
             const author = String(meta.author || "").trim() || String(items.find((it) => String(it?.author || "").trim())?.author || "").trim() || "";
-            items = attachUserSpaceGroupMeta2(items, { author, mid: ctx.mid });
+            items = attachUserSpaceGroupMeta2(items, { author, mid: ctx.mid || "" });
             if (author) meta.author = author;
             try {
               setStatus("拉取合集列表（名称+地址）…");
@@ -20696,9 +20990,9 @@ ${latest}`;
                 }
               }
             } catch (err) {
-              if (err?.name === "AbortError") throw err;
-              console.warn("[bili-subbatch] loadUserSpaceSeasons", err?.message || err);
-              meta.collectionError = String(err?.message || err || "合集列表失败");
+              if (isAbortError2(err)) throw err;
+              console.warn("[bili-subbatch] loadUserSpaceSeasons", errorMessage(err));
+              meta.collectionError = String(errorMessage(err) || "合集列表失败");
             }
             items = attachSpaceLooseVideosMeta2(items);
           }
@@ -20707,7 +21001,7 @@ ${latest}`;
             if (!meta.name && ctx.collectionTitleHint) meta.name = ctx.collectionTitleHint;
             const archiveCount = items.length;
             setStatus(`展开合集内多分P单元（${archiveCount} 个稿件）…`);
-            items = await expandCollectionArchivesWithParts(items, {
+            items = await expandCollectionArchivesWithParts(items.map((item) => ({ ...item, aid: Number(item.aid) || 0, pages: item.pages || [] })), {
               delayMs: Math.min(state2.delayMs, 280),
               onProgress: (t) => setStatus(t),
               shouldCancel: () => state2.cancelScan || scanId !== state2.scanSeq
@@ -20719,7 +21013,7 @@ ${latest}`;
                 `已展开单元内分P ${archiveCount} → ${items.length} 条`
               ].filter(Boolean).join(" · ");
             }
-            items = attachCollectionGroupMeta2(items, meta, ctx);
+            items = attachCollectionGroupMeta2(items, meta, { mid: ctx.mid || "", season_id: ctx.season_id || "", collectionTitleHint: ctx.collectionTitleHint || "", authorHint: ctx.authorHint || "", parentFolder: "" });
           }
         } else {
           const fromDom = harvestBvidsFromDom();
@@ -20769,11 +21063,11 @@ ${latest}`;
           }
         }
       } catch (e) {
-        if (e?.name === "AbortError" || state2.cancelScan) {
+        if (isAbortError2(e) || state2.cancelScan) {
           setStatus(state2.pendingRescan ? "旧扫描已停止 · 准备重新扫描…" : "扫描已停止");
         } else {
           console.error("[bili-subbatch] scan", e);
-          setStatus(`扫描失败: ${e.message || e}`, "err");
+          setStatus(`扫描失败: ${errorMessage(e)}`, "err");
         }
       } finally {
         if (scanId === state2.scanSeq) {
@@ -20807,7 +21101,7 @@ ${latest}`;
         return;
       }
       const batchId = ++state2.batchSeq;
-      let targets = act === "dl-ok-only" ? state2.items.filter((it) => it.selected && it.subStatus === "ok" && it.data) : selectedItems();
+      const targets = act === "dl-ok-only" ? state2.items.filter((it) => it.selected && it.subStatus === "ok" && it.data) : selectedItems();
       if (!targets.length) {
         setStatus(act === "dl-ok-only" ? "没有已成功的勾选项" : "请先勾选视频", "err");
         return;
@@ -20819,7 +21113,7 @@ ${latest}`;
       if (act === "fetch-selected") {
         try {
           setWorkspace("subs", { silent: true });
-        } catch (_) {
+        } catch {
         }
       }
       setLibraryJob({
@@ -20841,7 +21135,8 @@ ${latest}`;
             break;
           }
           const it = targets[i];
-          const itemLabel = `${it.bvid}${it.page > 1 ? " P" + it.page : ""}`;
+          if (!it) continue;
+          const itemLabel = `${it.bvid}${(it.page || 1) > 1 ? " P" + it.page : ""}`;
           setLibraryJob({
             kind: "fetch",
             index: i + 1,
@@ -20864,7 +21159,7 @@ ${latest}`;
               else err++;
             } catch (e) {
               it.subStatus = "error";
-              it.error = e.message || String(e);
+              it.error = errorMessage(e);
               err++;
             }
             renderList();
@@ -20893,9 +21188,9 @@ ${latest}`;
             return;
           }
           const text = ready.map((it) => {
-            const head = ready.length > 1 ? `=== ${it.bvid}${it.page > 1 ? " P" + it.page : ""} ${it.title || ""} ===
+            const head = ready.length > 1 ? `=== ${it.bvid}${(it.page || 1) > 1 ? " P" + it.page : ""} ${it.title || ""} ===
 ` : "";
-            return head + coreCall("cuesToTxt", it.data);
+            return head + coreCall("cuesToTxt", it.data || []);
           }).join("\n\n");
           clipboardWrite(text);
           setStatus(`已复制 ${ready.length} 条字幕全文`, "ok");
@@ -20917,7 +21212,7 @@ ${latest}`;
         }
       } catch (e) {
         console.error("[bili-subbatch] batch", e);
-        setStatus(`失败: ${e.message || e}`, "err");
+        setStatus(`失败: ${errorMessage(e)}`, "err");
       } finally {
         if (batchId === state2.batchSeq) {
           state2.cancelBatch = false;
@@ -21004,7 +21299,7 @@ ${latest}`;
       if (!state2.autoCaptureEnabled) return;
       state2.autoCaptureTimer = window.setTimeout(() => {
         autoCaptureCurrentVideo(reason).catch((error) => {
-          if (error?.name !== "AbortError") {
+          if (!isAbortError2(error)) {
             console.warn("[bili-subbatch] auto capture", error);
           }
         });
@@ -21025,7 +21320,7 @@ ${latest}`;
       const existing = state2.items.find(
         (item2) => routeVideoKey2(item2.bvid, item2.page || 1) === captureKey
       ) || (state2.transcriptItem && routeVideoKey2(state2.transcriptItem.bvid, state2.transcriptItem.page || 1) === captureKey ? state2.transcriptItem : null);
-      if (!options.forceNetwork && state2.autoCaptureKey === captureKey && ["ok", "empty"].includes(existing?.subStatus)) {
+      if (!options.forceNetwork && state2.autoCaptureKey === captureKey && ["ok", "empty"].includes(existing?.subStatus || "")) {
         if (existing?.subStatus === "ok") selectTranscriptItem(existing);
         return;
       }
@@ -21051,8 +21346,8 @@ ${latest}`;
         const placeholderIndex = state2.items.findIndex(
           (entry) => routeVideoKey2(entry.bvid, entry.page || 1) === captureKey
         );
-        if (placeholderIndex >= 0) {
-          const existingItem = state2.items[placeholderIndex];
+        const existingItem = state2.items[placeholderIndex];
+        if (existingItem) {
           Object.assign(existingItem, {
             title: placeholder.title || existingItem.title,
             author: placeholder.author || existingItem.author,
@@ -21073,7 +21368,7 @@ ${latest}`;
       try {
         result = await fetchCurrentSubtitleFast(bvid, page, controller.signal, { forceNetwork: !!options.forceNetwork });
       } catch (error) {
-        if (error?.name === "AbortError") throw error;
+        if (isAbortError2(error)) throw error;
         fastError = error;
       }
       if (!result || result.status !== "ok") {
@@ -21082,7 +21377,7 @@ ${latest}`;
           result = await fetchSubtitle(bvid, page);
           if (result && result.status === "ok") result.source = "robust_fallback";
         } catch (error) {
-          if (!result) result = { bvid, page, status: "error", error: error.message || String(error) };
+          if (!result) result = { bvid, page, status: "error", error: errorMessage(error) };
         }
       }
       if (epoch !== state2.autoCaptureEpoch || controller.signal.aborted) return;
@@ -21092,7 +21387,7 @@ ${latest}`;
         bvid: result?.bvid || bvid,
         aid: result?.aid || null,
         cid: result?.cid || null,
-        title: result?.title || placeholder.title,
+        title: result?.title || placeholder.title || "",
         author: result?.author || "",
         page: result?.page || page,
         pages: result?.pages || [],
@@ -21100,11 +21395,11 @@ ${latest}`;
         subStatus: result?.status || "error",
         cue_count: result?.cue_count || 0,
         data: result?.data || null,
-        error: result?.error || fastError?.message || "",
+        error: result?.error || (fastError ? errorMessage(fastError) : ""),
         lan: result?.lan || "",
         lan_doc: result?.lan_doc || "",
         tracks: result?.tracks || placeholder.tracks || [],
-        activeTrackIndex: Number.isInteger(result?.activeTrackIndex) ? result.activeTrackIndex : placeholder.activeTrackIndex ?? -1,
+        activeTrackIndex: typeof result?.activeTrackIndex === "number" && Number.isInteger(result.activeTrackIndex) ? result.activeTrackIndex : placeholder.activeTrackIndex ?? -1,
         cachePath: result?.cachePath || "",
         cacheLevel: result?.cacheLevel || "",
         cacheStale: !!result?.cacheStale,
@@ -21114,22 +21409,23 @@ ${latest}`;
       try {
         const stamped = await stampUgcSeasonGroupMeta([item], item.bvid);
         if (stamped[0]) item = stamped[0];
-      } catch (_) {
+      } catch {
       }
       rememberTranscriptItem(item);
       const sameIndex = state2.items.findIndex(
         (entry) => routeVideoKey2(entry.bvid, entry.page || 1) === captureKey
       );
-      if (sameIndex >= 0) {
-        let target = state2.items[sameIndex];
-        target.title = item.title || target.title;
-        target.author = item.author || target.author;
-        target.aid = item.aid ?? target.aid;
-        target.cid = item.cid ?? target.cid;
-        target.pages = item.pages || target.pages;
+      const existingTarget = state2.items[sameIndex];
+      if (existingTarget) {
+        let target = existingTarget;
+        target.title = item.title || target.title || "";
+        target.author = item.author || target.author || "";
+        target.aid = item.aid ?? target.aid ?? null;
+        target.cid = item.cid ?? target.cid ?? null;
+        target.pages = item.pages || target.pages || [];
         target = mergeGroupFields2(target, item);
-        Object.assign(state2.items[sameIndex], target);
-        target = state2.items[sameIndex];
+        Object.assign(existingTarget, target);
+        target = existingTarget;
         target.sources = Array.from(new Set([...target.sources || [], "打开视频"].filter(Boolean)));
         SubBatch2.SubBatchMonorepo.ui.transcriptController.copySubtitleState(target, item);
         state2.transcriptItem = target;
@@ -21166,7 +21462,7 @@ ${latest}`;
         if (item.cacheStale && !options.forceNetwork) {
           window.setTimeout(() => {
             if (currentRouteVideoKey() === captureKey) {
-              autoCaptureCurrentVideo("stale-revalidate", { forceNetwork: true, silent: true, requestedBvid: item.bvid, requestedPage: item.page }).catch(() => {
+              autoCaptureCurrentVideo("stale-revalidate", { forceNetwork: true, silent: true, requestedBvid: item.bvid, requestedPage: item.page || 1 }).catch(() => {
               });
             }
           }, 80);

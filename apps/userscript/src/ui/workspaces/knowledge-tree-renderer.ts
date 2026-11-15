@@ -36,7 +36,7 @@ export function breadcrumbHtml(node: KnowledgeTreeNode | null | undefined, ances
   }
 
 
-export function suggestionsHtml(node: KnowledgeTreeNode | null | undefined, escapeAttr: Escaper, escapeHtml: Escaper): string {
+export function suggestionsHtml<T extends Pick<KnowledgeTreeNode, "suggestions">>(node: T | null | undefined, escapeAttr: Escaper, escapeHtml: Escaper): string {
     const suggestions = Array.isArray(node?.suggestions) ? node.suggestions.filter(Boolean).slice(0, 4) : [];
     if (!suggestions.length) return "";
     return `<div class="bsb-knowledge-suggestions"><span class="bsb-knowledge-kicker">继续深入</span>${suggestions.map((q) => `<button type="button" data-knowledge-suggestion="${escapeAttr(q)}"><span>→</span>${escapeHtml(q)}</button>`).join("")}</div>`;

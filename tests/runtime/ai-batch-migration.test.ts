@@ -2,6 +2,23 @@ import { describe, expect, it, vi } from "vitest";
 import { ai } from "../../apps/userscript/src/app";
 
 describe("AI Batch application migration", () => {
+  it("does not publish subtitles that finish after their batch was cancelled", async () => {
+    let cancelled = false;
+    let complete: (result: { status: string; data: string[] }) => void = () => {};
+    const response = new Promise<{ status: string; data: string[] }>(resolve => { complete = resolve; });
+    const target = { bvid: "BVpending", subStatus: "waiting", data: null as string[] | null };
+    const onUpdated = vi.fn();
+    const pending = ai.ensureSubtitles([target], 0, {
+      cancelled: () => cancelled, fetchSubtitle: () => response,
+      onFetching: () => {}, onUpdated, sleep: async () => {},
+    });
+    cancelled = true;
+    complete({ status: "ok", data: ["stale response"] });
+    await expect(pending).rejects.toThrow("用户停止");
+    expect(target).toEqual({ bvid: "BVpending", subStatus: "waiting", data: null });
+    expect(onUpdated).not.toHaveBeenCalled();
+  });
+
   it("clones the persisted v1 session and isolates nested editable arrays", () => {
     const input = {
       sessionId: 7, routeKey: "BVabc", vars: { subtitle: "abc" },

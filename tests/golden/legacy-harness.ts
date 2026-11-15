@@ -1,3 +1,4 @@
+import ts from "typescript";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -7,65 +8,26 @@ const legacyPath = fileURLToPath(
 
 export const legacySource = readFileSync(legacyPath, "utf8");
 
-function matchingParen(source: string, openIndex: number): number {
-  let depth = 0;
-  let quote = "";
-  let escaped = false;
-
-  for (let index = openIndex; index < source.length; index += 1) {
-    const char = source[index];
-
-    if (quote) {
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (char === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (char === quote) quote = "";
-      continue;
-    }
-
-    if (char === '"' || char === "'" || char === "`") {
-      quote = char;
-      continue;
-    }
-    if (char === "(") depth += 1;
-    if (char === ")") {
-      depth -= 1;
-      if (depth === 0) return index;
-    }
-  }
-
-  return -1;
-}
+const parsedSources = new Map<string, ts.SourceFile>();
 
 export function extractFunctionSource(source: string, name: string): string {
-  const marker = `function ${name}(`;
-  const start = source.indexOf(marker);
-  if (start < 0) throw new Error(`Legacy function not found: ${name}`);
-
-  const paramsStart = start + marker.length - 1;
-  const paramsEnd = matchingParen(source, paramsStart);
-  if (paramsEnd < 0) {
-    throw new Error(`Legacy function parameters not terminated: ${name}`);
+  let file = parsedSources.get(source);
+  if (!file) {
+    file = ts.createSourceFile("golden-workbench.ts", source, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
+    parsedSources.set(source, file);
   }
-
-  const bodyStart = source.indexOf("{", paramsEnd + 1);
-  if (bodyStart < 0) throw new Error(`Legacy function body not found: ${name}`);
-
-  let depth = 0;
-  for (let index = bodyStart; index < source.length; index += 1) {
-    const char = source[index];
-    if (char === "{") depth += 1;
-    if (char === "}") {
-      depth -= 1;
-      if (depth === 0) return source.slice(start, index + 1);
+  let found: ts.FunctionDeclaration | null = null;
+  function visit(node: ts.Node): void {
+    if (found) return;
+    if (ts.isFunctionDeclaration(node) && node.name?.text === name) {
+      found = node;
+      return;
     }
+    ts.forEachChild(node, visit);
   }
-  throw new Error(`Unterminated legacy function: ${name}`);
+  visit(file);
+  if (!found) throw new Error("Function not found: " + name);
+  return (found as ts.FunctionDeclaration).getText(file);
 }
 
 export function extractLegacyFunctionSource(name: string): string {
@@ -81,10 +43,13 @@ export function sourceFunction<
 ): TFunction {
   const names = Object.keys(scope);
   const values = Object.values(scope);
-  const factory = new Function(
-    ...names,
-    `"use strict"; return (${extractFunctionSource(source, name)});`,
-  );
+  // Maintained workbench is strict TypeScript. Transpile the isolated function
+  // before evaluating it; legacy untyped JavaScript remains source-compatible.
+  const typed = "const extracted = (" + extractFunctionSource(source, name) + ");";
+  const compiled = ts.transpileModule(typed, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
+  }).outputText;
+  const factory = new Function(...names, '"use strict"; ' + compiled + ' return extracted;');
   return factory(...values) as TFunction;
 }
 

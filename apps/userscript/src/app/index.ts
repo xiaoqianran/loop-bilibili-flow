@@ -1,3 +1,4 @@
+import * as listResponse from "./bilibili-list-response";
 import * as scanContext from "./scan-context";
 import * as configOrder from "./config-order";
 import * as libraryScanController from "./library-scan-controller";
@@ -22,6 +23,7 @@ export const ordering = {
 } as const;
 
 export const scan = {
+  parseListResponse: listResponse.parseListResponse,
   validateContext: scanContext.validateContext,
   pageSizeFor: scanContext.pageSizeFor,
 } as const;

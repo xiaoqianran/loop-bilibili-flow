@@ -310,21 +310,21 @@ function plannedAiRunFromCache(cached: AiRunCacheSnapshot): PlannedAiRun {
   return next;
 }
 
-export function partitionPlannedAiRuns(
-  planned: PlannedAiRun[] | null | undefined,
+export function partitionPlannedAiRuns<T extends PlannedAiRun>(
+  planned: T[] | null | undefined,
   cachedRuns: Array<AiRunCacheSnapshot | null | undefined> | null | undefined,
   inputHash = "",
 ): {
-  reuse: Array<{ plan: PlannedAiRun; cached: AiRunCacheSnapshot }>;
-  generate: PlannedAiRun[];
+  reuse: Array<{ plan: T; cached: AiRunCacheSnapshot }>;
+  generate: T[];
 } {
   const byKey = new Map<string, AiRunCacheSnapshot>();
   for (const cached of cachedRuns || []) {
     if (!cached || !String(cached.raw || "").trim()) continue;
     byKey.set(aiRunIdentityKey(plannedAiRunFromCache(cached), inputHash), cached);
   }
-  const reuse: Array<{ plan: PlannedAiRun; cached: AiRunCacheSnapshot }> = [];
-  const generate: PlannedAiRun[] = [];
+  const reuse: Array<{ plan: T; cached: AiRunCacheSnapshot }> = [];
+  const generate: T[] = [];
   const used = new Set<string>();
   for (const plan of planned || []) {
     const key = aiRunIdentityKey(plan, inputHash);

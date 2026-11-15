@@ -1,5 +1,7 @@
 /** Pure Knowledge navigation policies. DOM rendering stays with the workbench. */
 export interface KnowledgeAnchor {
+  updatedAt?: number; createdAt?: number; starred?: boolean; timeStart?: number; timeEnd?: number;
+  author?: string; segmentId?: string; sourceHash?: string;
   id: string; selectedText?: string; title?: string; contextText?: string;
   sourceKey?: string; bvid?: string; page?: number; [key: string]: unknown;
 }

@@ -5,18 +5,86 @@
 import type { LibraryItem } from "../ui/workspaces/library-controller";
 import type { KnowledgeAnchor, KnowledgeNode } from "../ui/workspaces/knowledge-navigation-controller";
 import type { StudioMessage } from "../app/studio-controller";
+import type { ScanContext } from "../app/scan-context";
+import type { AiRequestRuntime } from "../app/ai-controller";
+import type { AiSessionInput, BatchModel, BatchTask } from "../app/ai-batch-coordinator";
+import type { AiProfile, PromptProfile, SubtitleCue } from "@subbatch/core";
+import type { BilibiliVideoView, BilibiliVideoPage, SubtitleTrack } from "@subbatch/bilibili";
+import type { PipelineRun } from "../app/preprocess-controller";
 
 export interface WorkbenchLibraryItem extends LibraryItem {
   bvid: string;
+  title?: string;
+  author?: string;
   page?: number;
   selected?: boolean;
+  groupType?: string;
+  groupKey?: string;
+  part?: string;
+  groupFolder?: string;
+  parentFolder?: string;
+  collectionName?: string;
+  collectionShortUrl?: string;
+  videoTitle?: string;
+  sources?: string[];
+  subStatus?: string;
+  lan?: string;
+  lan_doc?: string;
+  activeTrackIndex?: number;
+  cachePath?: string;
+  source?: string;
+  data?: SubtitleCue[] | null;
+  tracks?: SubtitleTrack[];
+  aid?: string | number | null;
+  cid?: string | number | null;
+  pages?: BilibiliVideoPage[] | null;
+  error?: string;
+  cacheLevel?: string;
+  cacheStale?: boolean;
   [key: string]: unknown;
 }
+/** Actual AI run record stored by the workbench, not a bag of unknown values. */
+export interface WorkbenchSubtitleResult extends WorkbenchLibraryItem {
+  status: "ok" | "empty" | "error";
+}
+export interface WorkbenchKnowledgeNode extends KnowledgeNode {
+  question: string; answer: string; preview: string; suggestions: string[];
+  status: string; updatedAt: number; error?: string;
+  parentId?: string | null; starred?: boolean; createdAt?: number;
+}
+export interface WorkbenchAiRuntime extends AiRequestRuntime {
+  label: string;
+  xhr: { abort?: () => void } | null;
+}
+export interface WorkbenchAiRun extends WorkbenchAiRuntime {
+  id: string;
+  profileId: string;
+  taskId: string;
+  taskSnapshot: WorkbenchPostTask | BatchTask | null;
+  promptId: string;
+  promptName: string;
+  promptProfile: PromptProfile | null;
+  config: BatchModel & Partial<AiProfile>;
+  raw: string;
+  status: string;
+  statusText: string;
+  busy: boolean;
+  error: string;
+  sourceBvids: string[];
+  startedAt: number;
+  finishedAt: number;
+  scrollTop: number;
+  stickBottom: boolean;
+  userReading: boolean;
+  mermaidRepairing: boolean;
+}
+
 export interface WorkbenchPostTask {
   id: string;
   modelIds: string[];
-  promptId?: string;
-  [key: string]: unknown;
+  promptId: string;
+  enabled?: boolean;
+  order?: number;
 }
 export interface ShortcutPreferences {
   schemaVersion: number;
@@ -70,8 +138,8 @@ export interface WorkbenchState {
   pendingRescan: boolean;
   pendingAiSend: boolean;
   mode: string;
-  autoCtx: Record<string, unknown> | null;
-  ctx: Record<string, unknown> | null;
+  autoCtx: ScanContext | null;
+  ctx: ScanContext | null;
   items: WorkbenchLibraryItem[];
   libraryFolderCollapsed: Record<string, boolean>;
   meta: Record<string, unknown>;
@@ -79,9 +147,9 @@ export interface WorkbenchState {
   maxPages: number;
   ui: WorkbenchUi | null;
   aiFocus: boolean;
-  ai: Record<string, unknown> | null;
-  aiProfiles: Array<Record<string, unknown>>;
-  promptProfiles: Array<Record<string, unknown>>;
+  ai: (BatchModel & Partial<AiProfile>) | null;
+  aiProfiles: AiProfile[];
+  promptProfiles: PromptProfile[];
   activePromptId: string;
   activePrePromptId: string;
   activeKnowledgePromptId: string;
@@ -92,9 +160,9 @@ export interface WorkbenchState {
   preprocessOverlapSeconds: number;
   preprocessMaxChars: number;
   preprocessRetries: number;
-  preprocessRun: Record<string,unknown> | null;
+  preprocessRun: PipelineRun<WorkbenchAiRuntime> | null;
   studioBusy: boolean;
-  studioRuntime: Record<string,unknown> | null;
+  studioRuntime: WorkbenchAiRuntime | null;
   studioMessages: StudioMessage[];
   studioMemory: string;
   studioMemoryUntilId: string;
@@ -113,11 +181,11 @@ export interface WorkbenchState {
   aiEditorId: string;
   promptSearch: string;
   aiSearch: string;
-  aiRuns: Map<string, unknown>;
+  aiRuns: Map<string, WorkbenchAiRun>;
   aiRunOrder: string[];
   aiActiveRunId: string;
   aiSessionSeq: number;
-  aiSessionInput: Record<string, unknown> | null;
+  aiSessionInput: AiSessionInput | null;
   aiBusy: boolean;
   aiAbort: boolean;
   aiRaw: string;
@@ -133,7 +201,7 @@ export interface WorkbenchState {
   aiStreamTextNode: Text | null;
   renderEpoch: number;
   renderLibs: { core: boolean; highlight: boolean; mermaid: boolean; katex: boolean };
-  mermaidObserver: MutationObserver | null;
+  mermaidObserver: IntersectionObserver | null;
   mermaidRenderSeq: number;
   mermaidQueue: Promise<void>;
   mermaidRepairing: boolean;
@@ -148,12 +216,12 @@ export interface WorkbenchState {
   autoAnalyzePendingKey: string;
   autoAnalyzeTimer: number;
   aiSessionRouteKey: string;
-  aiSessionRestorePromise: unknown;
+  aiSessionRestorePromise: Promise<boolean> | null;
   aiSessionRestoreKey: string;
-  fastViewCache: Map<string, unknown>;
-  fastTrackCache: Map<string, unknown>;
-  fastSubtitleCache: Map<string, unknown>;
-  fastTrackBodyCache: Map<string, unknown>;
+  fastViewCache: Map<string, BilibiliVideoView>;
+  fastTrackCache: Map<string, SubtitleTrack[]>;
+  fastSubtitleCache: Map<string, WorkbenchSubtitleResult>;
+  fastTrackBodyCache: Map<string, WorkbenchSubtitleResult>;
   transcriptItemKey: string;
   transcriptItem: WorkbenchLibraryItem | null;
   transcriptQuery: string;
@@ -171,16 +239,16 @@ export interface WorkbenchState {
   libraryFilter: string;
   captureDrawerOpen: boolean;
   knowledgeAnchors: KnowledgeAnchor[];
-  knowledgeNodes: KnowledgeNode[];
+  knowledgeNodes: WorkbenchKnowledgeNode[];
   knowledgeSearch: string;
   knowledgeActiveAnchorId: string;
   knowledgeActiveNodeId: string;
   knowledgeRailOpen: boolean;
   knowledgeTreeOpen: boolean;
-  knowledgeSelection: Record<string,unknown> | null;
+  knowledgeSelection: Pick<KnowledgeAnchor, "sourceKey" | "bvid" | "page" | "title" | "author" | "segmentId" | "timeStart" | "timeEnd" | "contextText" | "sourceHash"> & { selectedText: string } | null;
   knowledgeBusy: boolean;
   knowledgeResetScroll: boolean;
-  knowledgeRuntime: Record<string,unknown> | null;
+  knowledgeRuntime: WorkbenchAiRuntime | null;
   knowledgePaintRaf: number;
   knowledgeModelId: string;
   shortcutConfig: ShortcutPreferences;

@@ -230,6 +230,53 @@ export interface UserSeasonPage {
     };
   };
 }
+/** Decode the personal-space seasons response at the HTTP boundary. */
+export function parseUserSeasonPage(input: unknown): UserSeasonPage {
+  const object = (value: unknown): Record<string, unknown> =>
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown> : {};
+  const response = object(input);
+  if (typeof response.code !== "number" && (typeof response.code !== "string" || !response.code.trim())) {
+    throw new Error("Bilibili 合集列表响应缺少有效 code");
+  }
+  const code = Number(response.code);
+  if (!Number.isInteger(code)) throw new Error("Bilibili 合集列表响应缺少有效 code");
+  const data = object(response.data);
+  const lists = object(data.items_lists);
+  const page = object(lists.page);
+  const seasons: SeasonEntry[] = Array.isArray(lists.seasons_list)
+    ? lists.seasons_list.map((entry: unknown): SeasonEntry => {
+      const raw = object(entry);
+      const meta = object(raw.meta);
+      const seasonMeta: NonNullable<SeasonEntry["meta"]> = {
+        ...(typeof meta.season_id === "string" || typeof meta.season_id === "number" ? { season_id: meta.season_id } : {}),
+        ...(typeof meta.mid === "string" || typeof meta.mid === "number" ? { mid: meta.mid } : {}),
+        ...(typeof meta.name === "string" ? { name: meta.name } : {}),
+        ...(typeof meta.title === "string" ? { title: meta.title } : {}),
+        ...(Number.isFinite(Number(meta.total)) && meta.total != null ? { total: Number(meta.total) } : {}),
+      };
+      return {
+        meta: seasonMeta,
+        ...(Array.isArray(raw.archives) ? {
+          archives: raw.archives.map((item: unknown) => {
+            const archive = object(item);
+            return typeof archive.bvid === "string" ? { bvid: archive.bvid } : {};
+          }),
+        } : {}),
+      };
+    }) : [];
+  return {
+    code,
+    ...(typeof response.message === "string" ? { message: response.message } : {}),
+    ...(response.data !== undefined ? { data: { items_lists: {
+      seasons_list: seasons,
+      ...(Array.isArray(lists.series_list) ? { series_list: lists.series_list } : {}),
+      ...(page.total === null || typeof page.total === "number" || typeof page.total === "string"
+        ? { page: { total: page.total } } : {}),
+    } } } : {}),
+  };
+}
+
 export interface UserSeason {
   mid: string;
   season_id: string;
