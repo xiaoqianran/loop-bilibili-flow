@@ -313,7 +313,7 @@ export function createWorkbenchState(defaults: Readonly<WorkbenchSettings>): Wor
     postTasks: [], // output artifacts: each POST Prompt + selected LLMs
     aiActiveTaskId: "", // first-level result navigation: output artifact
     aiDrawer: "", // "flow" | "input" | ""
-    aiInputView: "raw", // raw | processed
+    aiInputView: "raw", // raw | timeline | processed
     promptEditorId: "", // settings master-detail current prompt editor
     aiEditorId: "", // settings master-detail current LLM editor
     promptSearch: "",

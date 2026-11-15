@@ -30,9 +30,18 @@ export function renderReadingStyles(panelId: string): string {
       #${panelId} .bsb-preprocess-tabs button.active { background:var(--ctp-surface0); color:var(--ctp-text); box-shadow:inset 0 -2px 0 var(--ctp-sapphire); }
       #${panelId} .bsb-preprocess-tabs .dot { width:7px; height:7px; border-radius:50%; background:var(--ctp-overlay0); }
       #${panelId} .bsb-preprocess-tabs .dot.raw { background:var(--ctp-blue); }
+      #${panelId} .bsb-preprocess-tabs .dot.timeline { background:var(--ctp-teal); }
       #${panelId} .bsb-preprocess-tabs .dot.processed { background:var(--ctp-green); }
       #${panelId} .bsb-preprocess-status { color:var(--ctp-overlay1); font-size:9.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
       #${panelId} .bsb-main-input-preview { margin:0; min-height:100%; white-space:pre-wrap; word-break:break-word; color:var(--ctp-text); background:transparent; border:0; padding:2px 0 24px; font:inherit; line-height:1.8; }
+      #${panelId} .bsb-transcript-reading { padding:2px 0 24px; color:var(--ctp-text); font-size:var(--bsb-note-font); line-height:1.85; }
+      #${panelId} .bsb-transcript-reading-source { display:flex; flex-direction:column; gap:3px; margin:16px 0 12px; padding-bottom:9px; border-bottom:1px solid var(--ctp-surface0); }
+      #${panelId} .bsb-transcript-reading-source:first-child { margin-top:0; }
+      #${panelId} .bsb-transcript-reading-source small { color:var(--ctp-overlay1); font-size:11px; }
+      #${panelId} .bsb-transcript-reading-text { min-width:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+      #${panelId} .bsb-transcript-timeline-row { display:grid; grid-template-columns:76px minmax(0,1fr); align-items:baseline; gap:12px; padding:5px 0; }
+      #${panelId} .bsb-transcript-timeline-time .bsb-time-link { margin:0; font:inherit; font-size:12px; color:var(--ctp-overlay1); }
+      #${panelId} .bsb-preprocess-tabs { flex-wrap:wrap; }
 
       /* v5.10.2 · 规范化字幕阅读卡片：让“处理后的字幕”具有明显的学习材料层级 */
       #${panelId} .bsb-preprocess-reading {

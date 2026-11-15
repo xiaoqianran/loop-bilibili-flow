@@ -6463,7 +6463,8 @@ ${prompt2.userPromptTemplate}`
             </div>
             <div class="bsb-preprocess-nav" data-role="ai-preprocess-nav" aria-label="预处理字幕导航">
               <div class="bsb-preprocess-tabs">
-                <button type="button" data-ai-preprocess-view="raw" class="active"><span class="dot raw"></span><span>原始字幕</span></button>
+                <button type="button" data-ai-preprocess-view="raw" class="active"><span class="dot raw"></span><span>字幕</span></button>
+                <button type="button" data-ai-preprocess-view="timeline"><span class="dot timeline"></span><span>字幕时间线</span></button>
                 <button type="button" data-ai-preprocess-view="processed"><span class="dot processed"></span><span>AI 处理字幕</span></button>
               </div>
               <span class="bsb-preprocess-status" data-role="ai-preprocess-status">等待字幕</span>
@@ -6483,7 +6484,7 @@ ${prompt2.userPromptTemplate}`
                 <span class="bsb-bar-left">
                   <span class="bsb-live-dot" aria-hidden="true"></span>
                   <span data-role="ai-canvas-stage-label">预处理</span>
-                  <span data-role="ai-canvas-meta">原始字幕</span>
+                  <span data-role="ai-canvas-meta">字幕</span>
                 </span>
                 <span class="bsb-bar-actions">
                   <button type="button" class="bsb-mini bsb-focus-stop" data-act="ai-stop" title="停止本批次所有仍在生成的模型" style="display:none">停止</button>
@@ -8585,9 +8586,18 @@ ${prompt2.userPromptTemplate}`
       #${panelId} .bsb-preprocess-tabs button.active { background:var(--ctp-surface0); color:var(--ctp-text); box-shadow:inset 0 -2px 0 var(--ctp-sapphire); }
       #${panelId} .bsb-preprocess-tabs .dot { width:7px; height:7px; border-radius:50%; background:var(--ctp-overlay0); }
       #${panelId} .bsb-preprocess-tabs .dot.raw { background:var(--ctp-blue); }
+      #${panelId} .bsb-preprocess-tabs .dot.timeline { background:var(--ctp-teal); }
       #${panelId} .bsb-preprocess-tabs .dot.processed { background:var(--ctp-green); }
       #${panelId} .bsb-preprocess-status { color:var(--ctp-overlay1); font-size:9.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
       #${panelId} .bsb-main-input-preview { margin:0; min-height:100%; white-space:pre-wrap; word-break:break-word; color:var(--ctp-text); background:transparent; border:0; padding:2px 0 24px; font:inherit; line-height:1.8; }
+      #${panelId} .bsb-transcript-reading { padding:2px 0 24px; color:var(--ctp-text); font-size:var(--bsb-note-font); line-height:1.85; }
+      #${panelId} .bsb-transcript-reading-source { display:flex; flex-direction:column; gap:3px; margin:16px 0 12px; padding-bottom:9px; border-bottom:1px solid var(--ctp-surface0); }
+      #${panelId} .bsb-transcript-reading-source:first-child { margin-top:0; }
+      #${panelId} .bsb-transcript-reading-source small { color:var(--ctp-overlay1); font-size:11px; }
+      #${panelId} .bsb-transcript-reading-text { min-width:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+      #${panelId} .bsb-transcript-timeline-row { display:grid; grid-template-columns:76px minmax(0,1fr); align-items:baseline; gap:12px; padding:5px 0; }
+      #${panelId} .bsb-transcript-timeline-time .bsb-time-link { margin:0; font:inherit; font-size:12px; color:var(--ctp-overlay1); }
+      #${panelId} .bsb-preprocess-tabs { flex-wrap:wrap; }
 
       /* v5.10.2 · 规范化字幕阅读卡片：让“处理后的字幕”具有明显的学习材料层级 */
       #${panelId} .bsb-preprocess-reading {
@@ -11557,6 +11567,45 @@ ${prompt2.userPromptTemplate}`
     const allowPaintScroll = stick && !userReading;
     return { stick, userReading, allowPaintScroll };
   }
+  function transcriptTimestampPattern() {
+    return /\[([\w-]+)\s+P(\d+)\s+(\d{1,2}:\d{2}(?::\d{2})?)\]/gi;
+  }
+  function transcriptTimestamps(text) {
+    return Array.from(text.matchAll(transcriptTimestampPattern()), (match) => ({
+      bvid: match[1],
+      page: Number(match[2]) || 1,
+      clock: match[3],
+      seconds: match[3].split(":").map(Number).reduce((total, part) => total * 60 + part, 0)
+    }));
+  }
+  function sourceHeading(line) {
+    return line.match(/^===\s+([\w-]+)(?:\s+P(\d+))?(?:\s+(.*?))?\s+===$/);
+  }
+  function transcriptReadingText(text) {
+    return text.replace(/\r\n?/g, "\n").split("\n").map((line) => {
+      const heading = sourceHeading(line.trim());
+      if (heading) return heading[3]?.trim() || "";
+      const hadPrefix = /^\s*\[[\w-]+\s+P\d+\s+\d{1,2}:\d{2}(?::\d{2})?\]/i.test(line);
+      const clean = line.replace(transcriptTimestampPattern(), "").trimEnd();
+      return hadPrefix ? clean.trimStart() : clean;
+    }).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  }
+  function renderTranscriptReading(text, timeline, escapeHtml) {
+    const rows2 = text.replace(/\r\n?/g, "\n").split("\n").map((line) => {
+      const heading = sourceHeading(line.trim());
+      if (heading) {
+        const identity = `${heading[1]} · P${heading[2] || 1}`;
+        return `<header class="bsb-transcript-reading-source"><strong>${escapeHtml(heading[3]?.trim() || "字幕")}</strong><small>${escapeHtml(identity)}</small></header>`;
+      }
+      const clean = line.replace(transcriptTimestampPattern(), "").trim();
+      if (!clean) return "";
+      if (!timeline) return `<div class="bsb-transcript-reading-text">${escapeHtml(clean)}</div>`;
+      const time = transcriptTimestamps(line)[0];
+      const button = time ? `<button type="button" class="bsb-time-link" data-seconds="${time.seconds}" data-bvid="${escapeHtml(time.bvid)}" data-page="${time.page}" title="跳到视频对应时间">${escapeHtml(time.clock)}</button>` : "";
+      return `<div class="bsb-transcript-timeline-row"><span class="bsb-transcript-timeline-time">${button}</span><div class="bsb-transcript-reading-text">${escapeHtml(clean)}</div></div>`;
+    }).join("");
+    return `<div class="bsb-transcript-reading${timeline ? " is-timeline" : ""}">${rows2}</div>`;
+  }
   function readSessionCache(storage, prefix, kind, key, ttlMs, now = Date.now()) {
     try {
       const fullKey = prefix + kind + ":" + key;
@@ -11739,7 +11788,7 @@ ${prompt2.userPromptTemplate}`
       aiDrawer: "",
       // "flow" | "input" | ""
       aiInputView: "raw",
-      // raw | processed
+      // raw | timeline | processed
       promptEditorId: "",
       // settings master-detail current prompt editor
       aiEditorId: "",
@@ -15606,14 +15655,14 @@ ${prompt2.userPromptTemplate}`
         return;
       }
       if (act === "ai-copy-input") {
-        const text = currentInputPreviewText(state2.aiInputView);
+        const text = transcriptReadingText(currentInputPreviewText(state2.aiInputView));
         if (!text) {
           setStatus("当前没有可复制的输入", "err");
           return;
         }
         if (typeof GM_setClipboard === "function") GM_setClipboard(text);
         else await navigator.clipboard.writeText(text);
-        setStatus(`已复制${state2.aiInputView === "processed" ? "规范化稿" : "原始字幕"}`, "ok");
+        setStatus(`已复制${state2.aiInputView === "processed" ? "AI 处理字幕" : "字幕"}正文`, "ok");
         return;
       }
       if (act === "post-task-add") {
@@ -18361,11 +18410,11 @@ ${memory}
       let paragraphIndex = 0;
       let sourceCount = 0;
       let readingSource = currentKnowledgeSource();
-      const timestampRe = /\[(BV[\w]+)\s+P(\d+)\s+(\d{1,2}:\d{2}(?::\d{2})?)\]/gi;
+      const timestampRe = transcriptTimestampPattern();
       const html = blocks.map((block) => {
         if (block.type === "source") {
           sourceCount += 1;
-          const match = block.text.match(/^(BV[\w]+)(?:\s+P(\d+))?\s*(.*)$/i);
+          const match = block.text.match(/^([\w-]+)(?:\s+P(\d+))?\s*(.*)$/i);
           const id = match?.[1] || "字幕";
           const page = Number(match?.[2]) || 1;
           const title = (match?.[3] || block.text).trim() || id;
@@ -18376,13 +18425,7 @@ ${memory}
           return `<div class="bsb-preprocess-section-title">${escapeHtml(block.text)}</div>`;
         }
         paragraphIndex += 1;
-        const timestamps = [];
-        let m;
-        timestampRe.lastIndex = 0;
-        while (m = timestampRe.exec(block.text)) {
-          const parsed = appCall("preprocess.parseTimestamp", m[0]);
-          if (parsed) timestamps.push(parsed);
-        }
+        const timestamps = transcriptTimestamps(block.text);
         const clean = block.text.replace(timestampRe, "").replace(/[ \t]+\n/g, "\n").replace(/\n[ \t]+/g, "\n").trim();
         const first = timestamps[0] || null;
         const last = timestamps[timestamps.length - 1] || first;
@@ -18395,7 +18438,8 @@ ${memory}
         const kend = last?.seconds ?? kstart;
         const segmentId = `seg-${kbvid || "local"}-p${kpage}-${Math.round(kstart * 10)}-${coreCall("md5", clean || block.text).slice(0, 7)}`;
         const sourceKey = knowledgeSourceKey(kbvid, kpage);
-        const bodyHtml = renderProcessedTranscriptBodyHtml(clean || block.text);
+        if (!clean) return "";
+        const bodyHtml = renderProcessedTranscriptBodyHtml(clean);
         const topic = "topic" in block ? block.topic : "";
         return `<article class="bsb-preprocess-block" data-preprocess-block="${paragraphIndex}" data-knowledge-segment="${escapeAttr(segmentId)}" data-knowledge-source-key="${escapeAttr(sourceKey)}" data-knowledge-bvid="${escapeAttr(kbvid)}" data-knowledge-page="${kpage}" data-knowledge-start="${kstart}" data-knowledge-end="${kend}" data-knowledge-clock="${escapeAttr(first?.clock || "")}" data-knowledge-topic="${escapeAttr(topic || "")}" data-knowledge-title="${escapeAttr(fallbackSource.title || "")}" data-knowledge-author="${escapeAttr(fallbackSource.author || "")}"><div class="bsb-preprocess-block-head"><span class="bsb-preprocess-block-index">${String(paragraphIndex).padStart(2, "0")}</span>${topic ? `<span class="bsb-preprocess-block-topic">${escapeHtml(topic)}</span>` : ""}${warning}${timeHtml}</div><div class="bsb-preprocess-block-body bsb-md-rich" data-knowledge-plain="${escapeAttr(clean || block.text)}">${bodyHtml}</div></article>`;
       }).join("");
@@ -18410,7 +18454,7 @@ ${memory}
         state2.aiInputView = "raw";
       }
       applyAiWorkbenchStageUi();
-      const kind = state2.aiInputView === "processed" ? "processed" : "raw";
+      const kind = state2.aiInputView === "processed" ? "processed" : state2.aiInputView === "timeline" ? "timeline" : "raw";
       const text = kind === "processed" ? processed : raw;
       const status2 = root.querySelector('[data-role="ai-preprocess-status"]');
       if (status2) {
@@ -18421,7 +18465,7 @@ ${memory}
         else status2.textContent = "原始字幕已就绪 · 尚未生成 AI 字幕";
       }
       const meta = root.querySelector('[data-role="ai-canvas-meta"]');
-      if (meta) meta.textContent = kind === "processed" ? "AI 处理字幕" : "原始字幕";
+      if (meta) meta.textContent = kind === "processed" ? "AI 处理字幕" : kind === "timeline" ? "字幕时间线" : "字幕";
       state2.renderEpoch += 1;
       state2.aiViewingPreprocess = kind === "processed";
       const content2 = root.querySelector('[data-role="ai-content"]');
@@ -18438,7 +18482,7 @@ ${memory}
           await decorateKnowledgeAnchors(content2);
           await hydrateKnowledgeAnswerDom(content2, state2.renderEpoch);
         } else {
-          content2.innerHTML = toTrustedHTML(`<pre class="bsb-main-input-preview">${escapeHtml(text)}</pre>`);
+          content2.innerHTML = toTrustedHTML(renderTranscriptReading(text, kind === "timeline", escapeHtml));
         }
       } else {
         const title = kind === "processed" ? "还没有 AI 处理字幕" : "还没有原始字幕";
@@ -18636,8 +18680,8 @@ ${memory}
       const preLabel = state2.preprocessEnabled ? processed ? "已规范化" : "等待规范化" : "预处理关闭";
       host2.innerHTML = toTrustedHTML(`<div class="bsb-drawer-head"><div class="bsb-drawer-title"><strong>输入</strong><span>${escapeHtml(preLabel)} · 这里用于核查 AI 真正读取的材料</span></div><button type="button" class="bsb-icon-btn" data-act="ai-drawer-close" aria-label="关闭">×</button></div>
       <div class="bsb-drawer-body">
-        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><div class="bsb-input-tabs"><button type="button" data-input-view="raw" class="${state2.aiInputView === "raw" ? "active" : ""}">原始字幕</button><button type="button" data-input-view="processed" class="${state2.aiInputView === "processed" ? "active" : ""}" ${processed ? "" : "disabled"}>规范化稿</button></div><button type="button" class="bsb-mini" data-act="ai-copy-input">复制当前输入</button></div>
-        ${text ? `<pre class="bsb-input-preview">${escapeHtml(text)}</pre>` : '<div class="bsb-input-empty">当前没有可查看的输入。先在字幕库选择有字幕的视频，或运行一次处理方案。</div>'}
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><div class="bsb-input-tabs"><button type="button" data-input-view="raw" class="${state2.aiInputView === "raw" ? "active" : ""}">字幕</button><button type="button" data-input-view="timeline" class="${state2.aiInputView === "timeline" ? "active" : ""}">字幕时间线</button><button type="button" data-input-view="processed" class="${state2.aiInputView === "processed" ? "active" : ""}" ${processed ? "" : "disabled"}>AI 处理字幕</button></div><button type="button" class="bsb-mini" data-act="ai-copy-input">复制正文</button></div>
+        ${text ? state2.aiInputView === "processed" ? `<pre class="bsb-input-preview">${escapeHtml(transcriptReadingText(text))}</pre>` : renderTranscriptReading(text, state2.aiInputView === "timeline", escapeHtml) : '<div class="bsb-input-empty">当前没有可查看的输入。先在字幕库选择有字幕的视频，或运行一次处理方案。</div>'}
       </div>`);
     }
     function setAiDrawer(kind = "") {

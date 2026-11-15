@@ -24,7 +24,8 @@ export function renderAiWorkspace(): string {
             </div>
             <div class="bsb-preprocess-nav" data-role="ai-preprocess-nav" aria-label="预处理字幕导航">
               <div class="bsb-preprocess-tabs">
-                <button type="button" data-ai-preprocess-view="raw" class="active"><span class="dot raw"></span><span>原始字幕</span></button>
+                <button type="button" data-ai-preprocess-view="raw" class="active"><span class="dot raw"></span><span>字幕</span></button>
+                <button type="button" data-ai-preprocess-view="timeline"><span class="dot timeline"></span><span>字幕时间线</span></button>
                 <button type="button" data-ai-preprocess-view="processed"><span class="dot processed"></span><span>AI 处理字幕</span></button>
               </div>
               <span class="bsb-preprocess-status" data-role="ai-preprocess-status">等待字幕</span>
@@ -44,7 +45,7 @@ export function renderAiWorkspace(): string {
                 <span class="bsb-bar-left">
                   <span class="bsb-live-dot" aria-hidden="true"></span>
                   <span data-role="ai-canvas-stage-label">预处理</span>
-                  <span data-role="ai-canvas-meta">原始字幕</span>
+                  <span data-role="ai-canvas-meta">字幕</span>
                 </span>
                 <span class="bsb-bar-actions">
                   <button type="button" class="bsb-mini bsb-focus-stop" data-act="ai-stop" title="停止本批次所有仍在生成的模型" style="display:none">停止</button>

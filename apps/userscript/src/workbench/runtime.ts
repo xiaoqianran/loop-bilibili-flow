@@ -12,6 +12,7 @@ import { buildMermaidCard, getMermaidScale, setMermaidScale, fitMermaidToViewpor
 import type { MermaidElement } from "../ui/workspaces/mermaid-presentation";
 import { normalizeCachedSessionInput, applyRestoredRunOutput, restorePreprocessRun } from "../app/ai-session-hydration";
 import { resolveAiScrollState } from "../ui/workspaces/ai-scroll-state";
+import { renderTranscriptReading, transcriptReadingText, transcriptTimestampPattern, transcriptTimestamps } from "../ui/workspaces/transcript-reading";
 // Full-feature workbench. Bundled by the composition root; no standalone compatibility script.
 /**
  * v6.10.6 — YouTube Trusted Types 隔离适配：修复面板与字幕 HTML 写入。
@@ -4138,10 +4139,10 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
       return;
     }
     if (act === "ai-copy-input") {
-      const text = currentInputPreviewText(state.aiInputView);
+      const text = transcriptReadingText(currentInputPreviewText(state.aiInputView));
       if (!text) { setStatus("当前没有可复制的输入", "err"); return; }
       if (typeof GM_setClipboard === "function") GM_setClipboard(text); else await navigator.clipboard.writeText(text);
-      setStatus(`已复制${state.aiInputView === "processed" ? "规范化稿" : "原始字幕"}`, "ok");
+      setStatus(`已复制${state.aiInputView === "processed" ? "AI 处理字幕" : "字幕"}正文`, "ok");
       return;
     }
     if (act === "post-task-add") {
@@ -6976,11 +6977,11 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     let paragraphIndex = 0;
     let sourceCount = 0;
     let readingSource = currentKnowledgeSource();
-    const timestampRe = /\[(BV[\w]+)\s+P(\d+)\s+(\d{1,2}:\d{2}(?::\d{2})?)\]/gi;
+    const timestampRe = transcriptTimestampPattern();
     const html = blocks.map((block) => {
       if (block.type === "source") {
         sourceCount += 1;
-        const match = block.text.match(/^(BV[\w]+)(?:\s+P(\d+))?\s*(.*)$/i);
+        const match = block.text.match(/^([\w-]+)(?:\s+P(\d+))?\s*(.*)$/i);
         const id = match?.[1] || "字幕";
         const page = Number(match?.[2]) || 1;
         const title = (match?.[3] || block.text).trim() || id;
@@ -6991,13 +6992,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
         return `<div class="bsb-preprocess-section-title">${escapeHtml(block.text)}</div>`;
       }
       paragraphIndex += 1;
-      const timestamps = [];
-      let m;
-      timestampRe.lastIndex = 0;
-      while ((m = timestampRe.exec(block.text))) {
-        const parsed = appCall("preprocess.parseTimestamp", m[0]);
-        if (parsed) timestamps.push(parsed);
-      }
+      const timestamps = transcriptTimestamps(block.text);
       const clean = block.text.replace(timestampRe, "").replace(/[ \t]+\n/g, "\n").replace(/\n[ \t]+/g, "\n").trim();
       const first = timestamps[0] || null;
       const last = timestamps[timestamps.length - 1] || first;
@@ -7012,7 +7007,8 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
       const kend = last?.seconds ?? kstart;
       const segmentId = `seg-${kbvid || "local"}-p${kpage}-${Math.round(kstart * 10)}-${coreCall("md5", clean || block.text).slice(0, 7)}`;
       const sourceKey = knowledgeSourceKey(kbvid, kpage);
-      const bodyHtml = renderProcessedTranscriptBodyHtml(clean || block.text);
+      if (!clean) return "";
+      const bodyHtml = renderProcessedTranscriptBodyHtml(clean);
       const topic = "topic" in block ? block.topic : "";
       return `<article class="bsb-preprocess-block" data-preprocess-block="${paragraphIndex}" data-knowledge-segment="${escapeAttr(segmentId)}" data-knowledge-source-key="${escapeAttr(sourceKey)}" data-knowledge-bvid="${escapeAttr(kbvid)}" data-knowledge-page="${kpage}" data-knowledge-start="${kstart}" data-knowledge-end="${kend}" data-knowledge-clock="${escapeAttr(first?.clock || "")}" data-knowledge-topic="${escapeAttr(topic || "")}" data-knowledge-title="${escapeAttr(fallbackSource.title || "")}" data-knowledge-author="${escapeAttr(fallbackSource.author || "")}"><div class="bsb-preprocess-block-head"><span class="bsb-preprocess-block-index">${String(paragraphIndex).padStart(2, "0")}</span>${topic ? `<span class="bsb-preprocess-block-topic">${escapeHtml(topic)}</span>` : ""}${warning}${timeHtml}</div><div class="bsb-preprocess-block-body bsb-md-rich" data-knowledge-plain="${escapeAttr(clean || block.text)}">${bodyHtml}</div></article>`;
     }).join("");
@@ -7030,7 +7026,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
       state.aiInputView = "raw";
     }
     applyAiWorkbenchStageUi();
-    const kind = state.aiInputView === "processed" ? "processed" : "raw";
+    const kind = state.aiInputView === "processed" ? "processed" : state.aiInputView === "timeline" ? "timeline" : "raw";
     const text = kind === "processed" ? processed : raw;
     const status = root.querySelector<HTMLElement>('[data-role="ai-preprocess-status"]');
     if (status) {
@@ -7041,7 +7037,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
       else status.textContent = "原始字幕已就绪 · 尚未生成 AI 字幕";
     }
     const meta = root.querySelector<HTMLElement>('[data-role="ai-canvas-meta"]');
-    if (meta) meta.textContent = kind === "processed" ? "AI 处理字幕" : "原始字幕";
+    if (meta) meta.textContent = kind === "processed" ? "AI 处理字幕" : kind === "timeline" ? "字幕时间线" : "字幕";
     state.renderEpoch += 1;
     state.aiViewingPreprocess = kind === "processed";
     const content = root.querySelector<HTMLElement>('[data-role="ai-content"]');
@@ -7059,7 +7055,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
         await decorateKnowledgeAnchors(content);
         await hydrateKnowledgeAnswerDom(content, state.renderEpoch);
       } else {
-        content.innerHTML = toTrustedHTML(`<pre class="bsb-main-input-preview">${escapeHtml(text)}</pre>`);
+        content.innerHTML = toTrustedHTML(renderTranscriptReading(text, kind === "timeline", escapeHtml));
       }
     } else {
       const title = kind === "processed" ? "还没有 AI 处理字幕" : "还没有原始字幕";
@@ -7278,8 +7274,8 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     const preLabel = state.preprocessEnabled ? (processed ? "已规范化" : "等待规范化") : "预处理关闭";
     host.innerHTML = toTrustedHTML(`<div class="bsb-drawer-head"><div class="bsb-drawer-title"><strong>输入</strong><span>${escapeHtml(preLabel)} · 这里用于核查 AI 真正读取的材料</span></div><button type="button" class="bsb-icon-btn" data-act="ai-drawer-close" aria-label="关闭">×</button></div>
       <div class="bsb-drawer-body">
-        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><div class="bsb-input-tabs"><button type="button" data-input-view="raw" class="${state.aiInputView === "raw" ? "active" : ""}">原始字幕</button><button type="button" data-input-view="processed" class="${state.aiInputView === "processed" ? "active" : ""}" ${processed ? "" : "disabled"}>规范化稿</button></div><button type="button" class="bsb-mini" data-act="ai-copy-input">复制当前输入</button></div>
-        ${text ? `<pre class="bsb-input-preview">${escapeHtml(text)}</pre>` : '<div class="bsb-input-empty">当前没有可查看的输入。先在字幕库选择有字幕的视频，或运行一次处理方案。</div>'}
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><div class="bsb-input-tabs"><button type="button" data-input-view="raw" class="${state.aiInputView === "raw" ? "active" : ""}">字幕</button><button type="button" data-input-view="timeline" class="${state.aiInputView === "timeline" ? "active" : ""}">字幕时间线</button><button type="button" data-input-view="processed" class="${state.aiInputView === "processed" ? "active" : ""}" ${processed ? "" : "disabled"}>AI 处理字幕</button></div><button type="button" class="bsb-mini" data-act="ai-copy-input">复制正文</button></div>
+        ${text ? (state.aiInputView === "processed" ? `<pre class="bsb-input-preview">${escapeHtml(transcriptReadingText(text))}</pre>` : renderTranscriptReading(text, state.aiInputView === "timeline", escapeHtml)) : '<div class="bsb-input-empty">当前没有可查看的输入。先在字幕库选择有字幕的视频，或运行一次处理方案。</div>'}
       </div>`);
   }
 
