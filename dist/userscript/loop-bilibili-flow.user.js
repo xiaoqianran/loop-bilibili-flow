@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Bili SubBatch (loop-bilibili)
 // @namespace    https://github.com/loop-bilibili/bili-subbatch
-// @version      6.10.7
+// @version      6.10.8
 // @updateURL    https://raw.githubusercontent.com/xiaoqianran/loop-bilibili-flow/main/dist/userscript/loop-bilibili-flow.user.js
 // @downloadURL  https://raw.githubusercontent.com/xiaoqianran/loop-bilibili-flow/main/dist/userscript/loop-bilibili-flow.user.js
 // @description  B站 / YouTube 知识阅读工作台：字幕预处理、多产物后处理、Anchor 局部追问树与持久 Knowledge Workspace
@@ -41,7 +41,7 @@
 // @license      MIT
 // ==/UserScript==
 
-// SubBatch bundled application (6.10.7)
+// SubBatch bundled application (6.10.8)
 var SubBatch = (function(exports) {
   "use strict";var __defProp = Object.defineProperty;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
@@ -8755,16 +8755,21 @@ ${prompt2.userPromptTemplate}`
         max-width: none;
         width: 100%;
         margin: 0;
+        min-width: 0;
+        container: bsb-folio-reader / inline-size;
       }
       #${panelId} .bsb-folio-shell {
         position: relative;
-        display: grid; grid-template-columns: 16.25rem minmax(0, 1fr);
+        display: grid; grid-template-columns: minmax(0, 1fr);
         align-items: start;
-        gap: 0; min-height: 0;
+        gap: 0; min-height: 0; min-width: 0; width: 100%;
         background: var(--ctp-base);
       }
       #${panelId} .bsb-folio-toc {
-        position: sticky; top: 0; align-self: start; z-index: 3;
+        position: absolute; left: 0; top: 0; bottom: 0; align-self: start; z-index: 3;
+        width: min(18.5rem, 88%);
+        transform: translateX(-104%); visibility: hidden;
+        transition: transform .2s ease, visibility .2s ease;
         display: flex; flex-direction: column; gap: 12px;
         height: var(--folio-toc-h, 100%);
         max-height: var(--folio-toc-h, 100%);
@@ -8874,7 +8879,23 @@ ${prompt2.userPromptTemplate}`
       #${panelId} .bsb-folio-toc-kids .bsb-folio-toc-link.is-current .bsb-folio-toc-dot {
         background: var(--ctp-sapphire);
       }
-      #${panelId} .bsb-folio-toc-fab, #${panelId} .bsb-folio-toc-scrim { display: none; }
+      #${panelId} .bsb-folio-shell.is-toc-open > .bsb-folio-toc {
+        transform: none; visibility: visible; box-shadow: 16px 0 40px rgba(0,0,0,.28);
+      }
+      #${panelId} .bsb-folio-toc-fab {
+        display: inline-flex; align-items: center; gap: 6px;
+        position: absolute; top: 10px; left: 10px; z-index: 4;
+        height: 30px; padding: 0 10px 0 8px; border-radius: 999px;
+        border: 1px solid color-mix(in srgb, var(--ctp-surface1) 70%, transparent);
+        background: color-mix(in srgb, var(--ctp-mantle) 88%, transparent);
+        color: var(--ctp-text); font-size: 12px; font-weight: 700; cursor: pointer;
+        backdrop-filter: blur(10px);
+      }
+      #${panelId} .bsb-folio-toc-scrim {
+        display: none; position: absolute; inset: 0; z-index: 2;
+        background: color-mix(in srgb, var(--ctp-crust) 42%, transparent);
+      }
+      #${panelId} .bsb-folio-shell.is-toc-open > .bsb-folio-toc-scrim { display: block; }
       #${panelId} .bsb-folio h2.folio-flash, #${panelId} .bsb-folio h3.folio-flash {
         animation: bsb-folio-flash .9s ease;
       }
@@ -8882,9 +8903,11 @@ ${prompt2.userPromptTemplate}`
         from { background: color-mix(in srgb, var(--ctp-lavender) 22%, transparent); }
         to { background: transparent; }
       }
-      #${panelId} .bsb-folio-frame { min-width: 0; padding: 28px 28px 64px; }
+      #${panelId} .bsb-folio-frame { min-width: 0; width: 100%; padding: 28px clamp(16px, 3cqi, 28px) 64px; }
+      #${panelId} .bsb-folio-shell:has(> .bsb-folio-toc) > .bsb-folio-frame { padding-top: 52px; }
       #${panelId} .bsb-folio {
-        max-width: 40rem; margin: 0 auto;
+        width: 100%; min-width: 0; max-width: 40rem; margin: 0 auto;
+        overflow-wrap: anywhere;
         color: var(--ctp-text);
         font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Songti SC", "Source Han Serif SC", "Noto Serif SC", Georgia, serif;
         font-size: 14px; line-height: 1.72; letter-spacing: .005em;
@@ -8981,33 +9004,19 @@ ${prompt2.userPromptTemplate}`
         border: 0; height: 1px; margin: 1.8em 0;
         background: color-mix(in srgb, var(--ctp-surface1) 70%, transparent);
       }
-      @media (max-width: 820px) {
-        #${panelId} .bsb-folio-shell { grid-template-columns: 1fr; }
+      @container bsb-folio-reader (min-width: 760px) {
+        #${panelId} .bsb-folio-shell:has(> .bsb-folio-toc) { grid-template-columns: 14rem minmax(0, 1fr); }
         #${panelId} .bsb-folio-toc {
-          position: absolute; left: 0; top: 0; bottom: 0; width: min(18.5rem, 88vw);
-          height: auto; max-height: none;
-          transform: translateX(-104%); transition: transform .2s ease;
-          box-shadow: none; border-right: 1px solid var(--ctp-surface0);
+          position: sticky; top: 0; bottom: auto; width: auto;
+          transform: none; visibility: visible; transition: none;
         }
-        #${panelId} .bsb-folio-shell.is-toc-open .bsb-folio-toc {
-          transform: none;
-          box-shadow: 16px 0 40px rgba(0,0,0,.28);
+        #${panelId} .bsb-folio-shell.is-toc-open > .bsb-folio-toc { box-shadow: none; }
+        #${panelId} .bsb-folio-toc-fab,
+        #${panelId} .bsb-folio-shell > .bsb-folio-toc-scrim,
+        #${panelId} .bsb-folio-shell.is-toc-open > .bsb-folio-toc-scrim { display: none; }
+        #${panelId} .bsb-folio-shell:has(> .bsb-folio-toc) > .bsb-folio-frame {
+          padding-top: 28px;
         }
-        #${panelId} .bsb-folio-toc-fab {
-          display: inline-flex; align-items: center; gap: 6px;
-          position: absolute; top: 10px; left: 10px; z-index: 4;
-          height: 30px; padding: 0 10px 0 8px; border-radius: 999px;
-          border: 1px solid color-mix(in srgb, var(--ctp-surface1) 70%, transparent);
-          background: color-mix(in srgb, var(--ctp-mantle) 88%, transparent);
-          color: var(--ctp-text); font-size: 12px; font-weight: 700; cursor: pointer;
-          backdrop-filter: blur(10px);
-        }
-        #${panelId} .bsb-folio-toc-scrim {
-          display: none; position: absolute; inset: 0; z-index: 2;
-          background: color-mix(in srgb, var(--ctp-crust) 42%, transparent);
-        }
-        #${panelId} .bsb-folio-shell.is-toc-open .bsb-folio-toc-scrim { display: block; }
-        #${panelId} .bsb-folio-frame { padding: 48px 16px 48px; }
       }
 
 `;
@@ -74242,7 +74251,7 @@ ${lines.join("\n")}`);
     function isMermaidSetupError(value2) {
       return !!value2 && typeof value2 === "object" && "mermaidSetup" in value2 && value2.mermaidSetup === true;
     }
-    const SCRIPT_VERSION = typeof GM_info !== "undefined" && GM_info?.script?.version || "6.10.7";
+    const SCRIPT_VERSION = typeof GM_info !== "undefined" && GM_info?.script?.version || "6.10.8";
     const PANEL_ID = "bili-subbatch-panel";
     const UI_STORE_KEY = "bili-subbatch-ui-v2";
     const DEFAULT_CTP_FLAVOR = "mocha";
@@ -82334,6 +82343,7 @@ ${message}`;
         USE_PROFILES: { html: true },
         SANITIZE_NAMED_PROPS: true,
         FORBID_TAGS: ["script", "style", "iframe", "object", "embed", "form", "link", "meta", "svg", "img", "video", "audio", "base"],
+        FORBID_ATTR: ["style", "width", "height", "align"],
         ADD_TAGS: ["article", "header", "footer", "section", "aside", "figure", "figcaption", "mark", "nav"],
         ADD_ATTR: ["class", "id", "data-kind", "aria-label", "role"]
       });
@@ -83961,7 +83971,7 @@ ${latest}`;
   const host = createUserscriptHost();
   const runtime = userscript.create(host);
   const SubBatchMonorepo = {
-    version: "6.10.7",
+    version: "6.10.8",
     runtime,
     core: core$3,
     bilibili,

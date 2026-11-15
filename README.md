@@ -6,7 +6,9 @@ Bilibili / YouTube Userscript。**[点击安装 / 更新油猴脚本（Tampermon
 dist/userscript/loop-bilibili-flow.user.js
 ```
 
-**版本检查：** GitHub 正式构建与 Greasy Fork 站内发布并不自动同步。如果 Greasy Fork 仍显示旧版，请使用上方 GitHub 直链在 Tampermonkey 更新，并确认已安装版本为 **v6.10.7**；更新后刷新 YouTube 视频页，未展开面板时可按 `Ctrl+B` 召唤。
+**版本检查：** GitHub 正式构建与 Greasy Fork 站内发布并不自动同步。如果 Greasy Fork 仍显示旧版，请使用上方 GitHub 直链在 Tampermonkey 更新，并确认已安装版本为 **v6.10.8**；更新后刷新 YouTube 视频页，未展开面板时可按 `Ctrl+B` 召唤。
+
+v6.10.8 修复 HTML 阅读页正文被挤进左侧窄列的问题：无目录时正文居中，目录按阅读区域实际宽度切换为侧栏或抽屉，模型生成的内联布局样式会被移除。
 
 v6.10.7 将 Markdown、HTML 净化、公式、代码高亮和 Mermaid 图表库，以及公式字体直接内置到安装文件。渲染不再依赖运行时访问 CDN；YouTube 的 Trusted Types 适配仅作用于工作台和内置图表库，不安装页面全局默认策略。
 
@@ -45,6 +47,7 @@ pnpm build
 ```
 
 `pnpm verify:rendering` 使用本机 Chrome 验证断网渲染，覆盖普通页面和强制 Trusted Types 的页面；需要先安装 Chrome。
+`pnpm verify:folio` 使用本机 Chrome 验证 HTML 阅读页在不同面板宽度下的正文布局、目录跳转及缩放行为，截图保存在 `dist/qa/`。
 
 `pnpm build` 只生成正式产物：
 

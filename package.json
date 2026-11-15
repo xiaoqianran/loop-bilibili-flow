@@ -20,6 +20,7 @@
     "build": "pnpm build:userscript",
     "verify:dist": "tsx scripts/verify-dist.ts",
     "verify:rendering": "tsx scripts/verify-rendering.ts",
+    "verify:folio": "tsx scripts/verify-folio-layout.ts",
     "verify:pure-dist": "tsx scripts/verify-pure-dist.ts",
     "audit:workbench-types": "tsx scripts/audit-workbench-types.ts"
   },

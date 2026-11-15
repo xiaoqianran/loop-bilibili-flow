@@ -671,10 +671,10 @@ describe("Bundled full-feature workbench source", () => {
     expect(maintainedSource).toContain("function paintStudioAnswer(");
     expect(maintainedSource).toContain("data-role=\"studio-answer\"");
     expect(renderAiStyles("bili-subbatch-panel")).toContain("align-self: flex-end");
-    expect(userscriptMetadata.version).toBe("6.10.7");
+    expect(userscriptMetadata.version).toBe("6.10.8");
     expect(userscriptMetadata.match).toContain("*://www.bilibili.com/festival/*");
     expect(userscriptMetadata.match).toContain("*://www.bilibili.com/blackboard/*");
-    expect(maintainedSource).toContain('|| "6.10.7"');
+    expect(maintainedSource).toContain('|| "6.10.8"');
     expect(maintainedSource).not.toContain("function isDeferredVideoCarrierPage(");
     expect(maintainedSource).toContain("function startUserscript(");
     const startSource = extractFunctionSource(maintainedSource, "startUserscript");

@@ -16,6 +16,7 @@ import { marked, DOMPurify, katex, hljs, mermaid, installRenderingStyles } from 
 import { renderTranscriptReading, transcriptReadingText, transcriptTimestampPattern, transcriptTimestamps } from "../ui/workspaces/transcript-reading";
 // Full-feature workbench. Bundled by the composition root; no standalone compatibility script.
 /**
+ * v6.10.8 — HTML 阅读页按阅读区域宽度布局，无目录时正文占满空间，移除模型内联布局样式。
  * v6.10.7 — 内置 Markdown、净化、公式、高亮和图表依赖，移除运行时 CDN 加载。
  * v6.10.6 — YouTube Trusted Types 隔离适配：修复面板与字幕 HTML 写入。
  * v6.10.5 — YouTube 全工作台入口、字幕与时间跳转适配。
@@ -146,7 +147,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
    */
 
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.10.7";
+    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.10.8";
   const PANEL_ID = "bili-subbatch-panel";
   const UI_STORE_KEY = "bili-subbatch-ui-v2";
   /** Catppuccin flavors — official palette https://catppuccin.com/palette/ */
