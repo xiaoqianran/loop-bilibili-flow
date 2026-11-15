@@ -13,7 +13,7 @@ import { normalizeCachedSessionInput, applyRestoredRunOutput, restorePreprocessR
 import { resolveAiScrollState } from "../ui/workspaces/ai-scroll-state";
 // Full-feature workbench. Bundled by the composition root; no standalone compatibility script.
 /**
- * v6.10.2 — Video Carrier 抽象：festival/blackboard 仅在检测到真实 BV / active player 后启动完整工作台；修正 live-player helper bridge。
+ * v6.10.3 — Video Carrier 抽象：festival/blackboard 仅在检测到真实 BV / active player 后启动完整工作台；修正 live-player helper bridge。
  * v6.9.15 — 支持 B 站 /festival/* 专题页：复用 BV 路由与现有字幕链路，不引入专题页专用抓取分支。
  * v6.9.14 — 工作台可见文字默认统一 14px。
  * v6.9.13 — 单独安装 loop-bilibili-flow 时补齐 core 回退，避免字幕库渲染崩溃；打开页面先点开中文字幕。
@@ -140,7 +140,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
    */
 
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.10.2";
+    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.10.3";
   const PANEL_ID = "bili-subbatch-panel";
   const UI_STORE_KEY = "bili-subbatch-ui-v2";
   /** Catppuccin flavors — official palette https://catppuccin.com/palette/ */
@@ -9979,9 +9979,7 @@ body{padding:48px 20px 80px}
 
       // export after fetch (or reuse)
       const ready = targets.filter((it) => it.subStatus === "ok" && it.data?.length);
-      if ((state.cancelBatch || state.cancel) && act !== "dl-ok-only") {
-        // still allow export of what we have if user stopped mid-way? skip for clarity
-      }
+
 
       if (act === "fetch-selected") {
         if (stoppedAt >= 0) {
