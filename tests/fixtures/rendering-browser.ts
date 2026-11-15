@@ -12,11 +12,13 @@ async function run() {
   const math = document.createElement("div");
   math.innerHTML = toTrustedHTML(DOMPurify.sanitize(katex.renderToString("\\frac{a}{b}")));
   host.appendChild(math);
-  mermaid.initialize({ startOnLoad: false, securityLevel: "strict", flowchart: { htmlLabels: false } });
+  mermaid.initialize({ startOnLoad: false, securityLevel: "strict", htmlLabels: false, flowchart: { htmlLabels: false } });
   const { svg } = await mermaid.render("offline-graph", 'flowchart TD\nA["字幕"] --> B["阅读"]');
   const graph = document.createElement("div");
   graph.id = "diagram";
-  graph.innerHTML = toTrustedHTML(DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true } }));
+  const safeSvg = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true } });
+  document.body.dataset.graphDiag = JSON.stringify({rawText: (svg.match(/<text\b/gi) || []).length, rawForeign: (svg.match(/<foreignObject\b/gi) || []).length, safeText: (safeSvg.match(/<text\b/gi) || []).length, safeForeign: (safeSvg.match(/<foreignObject\b/gi) || []).length, safeHasLabels: safeSvg.includes("字幕") && safeSvg.includes("阅读")});
+  graph.innerHTML = toTrustedHTML(safeSvg);
   host.appendChild(graph);
   await document.fonts.ready;
   document.body.dataset.result = "ok";

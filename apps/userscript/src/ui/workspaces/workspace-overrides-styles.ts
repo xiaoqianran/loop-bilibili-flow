@@ -25,26 +25,14 @@ export function renderWorkspaceOverrides(panelId: string): string {
       #${panelId}[data-panel-size="small"] .bsb-knowledge-mobile-back { display:inline-flex; }
       #${panelId}[data-panel-size="small"] .bsb-knowledge-rail-split.with-tree { grid-template-columns:1fr; grid-template-rows:minmax(90px,36%) 1fr; }
       #${panelId}[data-panel-size="small"] .bsb-knowledge-rail-split.with-tree .bsb-knowledge-tree-pane { border-bottom:1px solid var(--ctp-surface0); border-right:0; }
-      /* 可见文字默认 14px。图标/公式除外。 */
+      /* Only panel chrome uses the default 14px. Reading surfaces must retain
+         their own typography (A± / --bsb-note-font, hierarchy and CSS em units).
+         Never force all descendants to 14px !important. */
       #${panelId} .bsb-fab,
       #${panelId} .bsb-sidebar,
       #${panelId} .bsb-dock-tab,
       #${panelId} .bsb-selection-toolbar {
-        font-size: 14px;
-      }
-      #${panelId} .bsb-sidebar :is(h1,h2,h3,h4,h5,h6,p,li,td,th,dt,dd,button,input,textarea,select,label,span,strong,small,em,b,i,a,code,pre,summary,option,legend,blockquote,cite,figcaption):not(.bsb-empty-ico):not(.bsb-knowledge-orb),
-      #${panelId} .bsb-selection-toolbar :is(button,span),
-      #${panelId} .bsb-dock-tab,
-      #${panelId} .bsb-folio,
-      #${panelId} .bsb-folio :is(h1,h2,h3,h4,p,li,td,th,code,pre,blockquote,figcaption,.kicker,.lede),
-      #${panelId} .bsb-ai-md,
-      #${panelId} .bsb-ai-md :is(h1,h2,h3,h4,p,li,td,th,code,pre,blockquote),
-      #${panelId} .bsb-preprocess-block-body,
-      #${panelId} .bsb-knowledge-card-body,
-      #${panelId} .bsb-knowledge-card-body :is(h1,h2,h3,h4,p,li),
-      #${panelId}[data-panel-size="small"] .bsb-preprocess-block-body,
-      #${panelId}[data-panel-size="small"] .bsb-knowledge-card-body {
-        font-size: 14px !important;
+        font-size: var(--bsb-ui-font, 14px);
       }
       #${panelId} [hidden] { display:none !important; }
       #${panelId} .bsb-output-nav { flex:0 0 auto; border-bottom:1px solid var(--ctp-surface0); background:color-mix(in srgb,var(--ctp-mantle) 78%,transparent); }

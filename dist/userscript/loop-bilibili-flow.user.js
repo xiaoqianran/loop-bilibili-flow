@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Bili SubBatch (loop-bilibili)
 // @namespace    https://github.com/loop-bilibili/bili-subbatch
-// @version      6.10.8
+// @version      6.10.9
 // @updateURL    https://raw.githubusercontent.com/xiaoqianran/loop-bilibili-flow/main/dist/userscript/loop-bilibili-flow.user.js
 // @downloadURL  https://raw.githubusercontent.com/xiaoqianran/loop-bilibili-flow/main/dist/userscript/loop-bilibili-flow.user.js
 // @description  B站 / YouTube 知识阅读工作台：字幕预处理、多产物后处理、Anchor 局部追问树与持久 Knowledge Workspace
@@ -41,7 +41,7 @@
 // @license      MIT
 // ==/UserScript==
 
-// SubBatch bundled application (6.10.8)
+// SubBatch bundled application (6.10.9)
 var SubBatch = (function(exports) {
   "use strict";var __defProp = Object.defineProperty;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
@@ -7440,7 +7440,7 @@ ${prompt2.userPromptTemplate}`
       }
       #${panelId} .bsb-studio-msg.user .bsb-studio-role { text-align: right; }
       #${panelId} .bsb-studio-msg.assistant {
-        align-self: center; width: min(100%, 40em);
+        align-self: stretch; width: 100%; min-width: 0;
       }
       #${panelId} .bsb-studio-msg.assistant .bsb-studio-answer,
       #${panelId} .bsb-studio-msg.assistant .bsb-preprocess-block-body,
@@ -7553,16 +7553,16 @@ ${prompt2.userPromptTemplate}`
         line-height: 1.35;
       }
       #${panelId} .bsb-ai-md h1 {
-        font-size: 14px; margin: 1.6em 0 0.8em;
+        font-size: 1.8em; margin: 1.6em 0 0.8em;
         padding-bottom: 0.4em;
         border-bottom: 1px solid color-mix(in srgb, var(--ctp-surface1) 50%, transparent);
       }
       #${panelId} .bsb-ai-md h1:first-child { margin-top: 0.15em; }
       #${panelId} .bsb-ai-md h2 {
-        font-size: 14px; margin: 1.55em 0 0.7em; color: var(--ctp-mauve);
+        font-size: 1.4em; margin: 1.55em 0 0.7em; color: var(--ctp-mauve);
       }
       #${panelId} .bsb-ai-md h3 {
-        font-size: 14px; margin: 1.4em 0 0.6em; color: var(--ctp-sapphire);
+        font-size: 1.18em; margin: 1.4em 0 0.6em; color: var(--ctp-sapphire);
       }
       #${panelId} .bsb-ai-md p {
         margin: 1.15em 0;
@@ -8756,6 +8756,8 @@ ${prompt2.userPromptTemplate}`
         width: 100%;
         margin: 0;
         min-width: 0;
+        padding: 0;
+        background: var(--ctp-base);
         container: bsb-folio-reader / inline-size;
       }
       #${panelId} .bsb-folio-shell {
@@ -8910,31 +8912,31 @@ ${prompt2.userPromptTemplate}`
         overflow-wrap: anywhere;
         color: var(--ctp-text);
         font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Songti SC", "Source Han Serif SC", "Noto Serif SC", Georgia, serif;
-        font-size: 14px; line-height: 1.72; letter-spacing: .005em;
+        font-size: var(--bsb-note-font, 14px); line-height: 1.72; letter-spacing: .005em;
       }
       #${panelId} .bsb-folio header { margin: 0 0 2.2em; }
       #${panelId} .bsb-folio .kicker {
         margin: 0 0 .7em; font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-        font-size: 14px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+        font-size: .72em; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
         color: var(--ctp-overlay0);
       }
-      #${panelId} .bsb-folio h1 {
-        margin: 0 0 .55em; font-size: 14px; font-weight: 650; line-height: 1.22;
+      #${panelId} .bsb-ai-md .bsb-folio h1 {
+        margin: 0 0 .55em; font-size: 1.75em; font-weight: 700; line-height: 1.25;
         letter-spacing: -.02em; color: var(--ctp-text);
       }
       #${panelId} .bsb-folio .lede {
-        margin: 0; font-size: 14px; line-height: 1.65; color: var(--ctp-subtext0);
+        margin: 0; font-size: 1.04em; line-height: 1.65; color: var(--ctp-subtext0);
       }
       #${panelId} .bsb-folio section { margin: 0 0 2.1em; }
-      #${panelId} .bsb-folio h2 {
+      #${panelId} .bsb-ai-md .bsb-folio h2 {
         margin: 0 0 .7em; padding-top: .2em; scroll-margin-top: 18px;
-        font-size: 14px; font-weight: 650; letter-spacing: -.015em;
+        font-size: 1.3em; font-weight: 700; letter-spacing: -.015em;
       }
-      #${panelId} .bsb-folio h3 {
+      #${panelId} .bsb-ai-md .bsb-folio h3 {
         margin: 1.2em 0 .45em; scroll-margin-top: 18px;
-        font-size: 14px; font-weight: 650; color: var(--ctp-subtext1);
+        font-size: 1.12em; font-weight: 650; color: var(--ctp-subtext1);
       }
-      #${panelId} .bsb-folio p { margin: 0 0 .9em; }
+      #${panelId} .bsb-ai-md .bsb-folio p { margin: 0 0 .9em; }
       #${panelId} .bsb-folio ul, #${panelId} .bsb-folio ol { margin: 0 0 1em; padding-left: 1.25em; }
       #${panelId} .bsb-folio li { margin: .28em 0; }
       #${panelId} .bsb-folio ol.steps {
@@ -9051,26 +9053,14 @@ ${prompt2.userPromptTemplate}`
       #${panelId}[data-panel-size="small"] .bsb-knowledge-mobile-back { display:inline-flex; }
       #${panelId}[data-panel-size="small"] .bsb-knowledge-rail-split.with-tree { grid-template-columns:1fr; grid-template-rows:minmax(90px,36%) 1fr; }
       #${panelId}[data-panel-size="small"] .bsb-knowledge-rail-split.with-tree .bsb-knowledge-tree-pane { border-bottom:1px solid var(--ctp-surface0); border-right:0; }
-      /* 可见文字默认 14px。图标/公式除外。 */
+      /* Only panel chrome uses the default 14px. Reading surfaces must retain
+         their own typography (A± / --bsb-note-font, hierarchy and CSS em units).
+         Never force all descendants to 14px !important. */
       #${panelId} .bsb-fab,
       #${panelId} .bsb-sidebar,
       #${panelId} .bsb-dock-tab,
       #${panelId} .bsb-selection-toolbar {
-        font-size: 14px;
-      }
-      #${panelId} .bsb-sidebar :is(h1,h2,h3,h4,h5,h6,p,li,td,th,dt,dd,button,input,textarea,select,label,span,strong,small,em,b,i,a,code,pre,summary,option,legend,blockquote,cite,figcaption):not(.bsb-empty-ico):not(.bsb-knowledge-orb),
-      #${panelId} .bsb-selection-toolbar :is(button,span),
-      #${panelId} .bsb-dock-tab,
-      #${panelId} .bsb-folio,
-      #${panelId} .bsb-folio :is(h1,h2,h3,h4,p,li,td,th,code,pre,blockquote,figcaption,.kicker,.lede),
-      #${panelId} .bsb-ai-md,
-      #${panelId} .bsb-ai-md :is(h1,h2,h3,h4,p,li,td,th,code,pre,blockquote),
-      #${panelId} .bsb-preprocess-block-body,
-      #${panelId} .bsb-knowledge-card-body,
-      #${panelId} .bsb-knowledge-card-body :is(h1,h2,h3,h4,p,li),
-      #${panelId}[data-panel-size="small"] .bsb-preprocess-block-body,
-      #${panelId}[data-panel-size="small"] .bsb-knowledge-card-body {
-        font-size: 14px !important;
+        font-size: var(--bsb-ui-font, 14px);
       }
       #${panelId} [hidden] { display:none !important; }
       #${panelId} .bsb-output-nav { flex:0 0 auto; border-bottom:1px solid var(--ctp-surface0); background:color-mix(in srgb,var(--ctp-mantle) 78%,transparent); }
@@ -74251,7 +74241,7 @@ ${lines.join("\n")}`);
     function isMermaidSetupError(value2) {
       return !!value2 && typeof value2 === "object" && "mermaidSetup" in value2 && value2.mermaidSetup === true;
     }
-    const SCRIPT_VERSION = typeof GM_info !== "undefined" && GM_info?.script?.version || "6.10.8";
+    const SCRIPT_VERSION = typeof GM_info !== "undefined" && GM_info?.script?.version || "6.10.9";
     const PANEL_ID = "bili-subbatch-panel";
     const UI_STORE_KEY = "bili-subbatch-ui-v2";
     const DEFAULT_CTP_FLAVOR = "mocha";
@@ -77229,6 +77219,8 @@ ${lines.join("\n")}`);
           startOnLoad: false,
           theme: "base",
           securityLevel: "strict",
+          htmlLabels: false,
+          // Mermaid 12 uses the root setting; flowchart.htmlLabels is deprecated.
           fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif',
           suppressErrorRendering: true,
           deterministicIds: false,
@@ -81472,6 +81464,8 @@ ${coreCall("cuesToAiText", it2.data || [], it2.bvid, it2.page || 1)}`;
           startOnLoad: false,
           theme: "base",
           securityLevel: "strict",
+          htmlLabels: false,
+          // Mermaid 12 uses the root setting; flowchart.htmlLabels is deprecated.
           fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif',
           suppressErrorRendering: true,
           deterministicIds: false,
@@ -82372,9 +82366,19 @@ ${message}`;
     function decorateFolioArticle(article) {
       if (!article.classList.contains("bsb-folio")) article.classList.add("bsb-folio");
       const headings = collectFolioHeadings(article);
-      headings.forEach((item) => {
-        if (!item.el.id) item.el.id = item.id;
-        item.id = item.el.id;
+      const usedIds = new Set(Array.from(article.querySelectorAll("[id]:not(h2):not(h3)")).map((el) => el.id));
+      headings.forEach((item, index2) => {
+        const base = item.el.id || item.id;
+        let id38 = base;
+        if (usedIds.has(id38)) {
+          const uniqueBase = slugFolioHeading2(item.text, index2);
+          id38 = uniqueBase;
+          let suffix = 2;
+          while (usedIds.has(id38)) id38 = `${uniqueBase}-${suffix++}`;
+        }
+        item.el.id = id38;
+        item.id = id38;
+        usedIds.add(id38);
       });
       article.querySelectorAll("aside").forEach((aside) => {
         const kind = String(aside.getAttribute("data-kind") || "").toLowerCase();
@@ -83971,7 +83975,7 @@ ${latest}`;
   const host = createUserscriptHost();
   const runtime = userscript.create(host);
   const SubBatchMonorepo = {
-    version: "6.10.8",
+    version: "6.10.9",
     runtime,
     core: core$3,
     bilibili,

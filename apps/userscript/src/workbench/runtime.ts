@@ -16,6 +16,7 @@ import { marked, DOMPurify, katex, hljs, mermaid, installRenderingStyles } from 
 import { renderTranscriptReading, transcriptReadingText, transcriptTimestampPattern, transcriptTimestamps } from "../ui/workspaces/transcript-reading";
 // Full-feature workbench. Bundled by the composition root; no standalone compatibility script.
 /**
+ * v6.10.9 — 修复 Mermaid 节点文字丢失、HTML/Markdown 字号与标题层级、目录重复 ID 和 SML 对话宽度。
  * v6.10.8 — HTML 阅读页按阅读区域宽度布局，无目录时正文占满空间，移除模型内联布局样式。
  * v6.10.7 — 内置 Markdown、净化、公式、高亮和图表依赖，移除运行时 CDN 加载。
  * v6.10.6 — YouTube Trusted Types 隔离适配：修复面板与字幕 HTML 写入。
@@ -147,7 +148,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
    */
 
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.10.8";
+    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.10.9";
   const PANEL_ID = "bili-subbatch-panel";
   const UI_STORE_KEY = "bili-subbatch-ui-v2";
   /** Catppuccin flavors — official palette https://catppuccin.com/palette/ */
@@ -3320,6 +3321,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
         startOnLoad: false,
         theme: "base",
         securityLevel: "strict",
+        htmlLabels: false, // Mermaid 12 uses the root setting; flowchart.htmlLabels is deprecated.
         fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif',
         suppressErrorRendering: true,
         deterministicIds: false,
@@ -7796,6 +7798,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
         startOnLoad: false,
         theme: "base",
         securityLevel: "strict",
+        htmlLabels: false, // Mermaid 12 uses the root setting; flowchart.htmlLabels is deprecated.
         fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif',
         suppressErrorRendering: true,
         deterministicIds: false,
@@ -8744,9 +8747,20 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
   function decorateFolioArticle(article: HTMLElement) {
     if (!article.classList.contains("bsb-folio")) article.classList.add("bsb-folio");
     const headings = collectFolioHeadings(article);
-    headings.forEach((item) => {
-      if (!item.el.id) item.el.id = item.id;
-      item.id = item.el.id;
+    // Generated articles may repeat heading IDs; every TOC jump needs its own target.
+    const usedIds = new Set(Array.from(article.querySelectorAll<HTMLElement>("[id]:not(h2):not(h3)")).map(el => el.id));
+    headings.forEach((item, index) => {
+      const base = item.el.id || item.id;
+      let id = base;
+      if (usedIds.has(id)) {
+        const uniqueBase = slugFolioHeading(item.text, index);
+        id = uniqueBase;
+        let suffix = 2;
+        while (usedIds.has(id)) id = `${uniqueBase}-${suffix++}`;
+      }
+      item.el.id = id;
+      item.id = id;
+      usedIds.add(id);
     });
     article.querySelectorAll("aside").forEach((aside) => {
       const kind = String(aside.getAttribute("data-kind") || "").toLowerCase();

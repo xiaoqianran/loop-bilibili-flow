@@ -44,10 +44,10 @@ async function verify() {
   try {
     for (const [viewport, width, toc] of [[1440, 1000, false], [1440, 1000, true], [1440, 520, true], [1440, 320, true], [760, 680, true], [1440, 520, false]] as const) {
       const page = await browser.newPage({ viewport: { width: viewport, height: 900 } });
-      await page.setContent(`<style>${css}</style><div id="folio-test" class="open" data-panel-size="${width < 600 ? "small" : "large"}"><div class="bsb-sidebar" style="width:${width}px;height:800px;top:20px;left:20px"><header class="bsb-head">HTML 阅读页</header><nav class="bsb-nav"></nav><div class="bsb-body"><section class="bsb-view active" data-view-panel="ai"><div class="bsb-ai-canvas-wrap"><div class="bsb-ai-md" data-role="ai-md"><div class="bsb-ai-content"></div></div></div></section></div></div></div>`);
+      await page.setContent(`<style>${css}</style><div id="folio-test" class="open" data-panel-size="${width < 600 ? "small" : "large"}" style="--bsb-note-font:19px"><div class="bsb-sidebar" style="width:${width}px;height:800px;top:20px;left:20px"><header class="bsb-head">HTML 阅读页</header><nav class="bsb-nav"></nav><div class="bsb-body"><section class="bsb-view active" data-view-panel="ai"><div class="bsb-ai-canvas-wrap"><div class="bsb-ai-md" data-role="ai-md"><div class="bsb-ai-content"></div></div></div></section></div></div></div>`);
       await page.addScriptTag({ content: purifier });
       await page.addScriptTag({ content: script });
-      const html = `<article class="bsb-folio" style="width:80px;float:left;display:grid;grid-template-columns:30px"><header><h1>正常宽度的阅读页</h1><p class="lede">正文应占据阅读区域，不能挤成左侧一条窄列。</p></header>${Array.from({ length: 6 }, (_, i) => `<section>${toc ? `<h2>章节 ${i + 1}</h2>` : ""}<p>这里是连续阅读的中文正文。${"文字应自然换行，保留足够的阅读空间。".repeat(12)}</p></section>`).join("")}</article>`;
+      const html = `<article class="bsb-folio" style="width:80px;float:left;display:grid;grid-template-columns:30px"><header><h1>正常宽度的阅读页</h1><p class="lede">正文应占据阅读区域，不能挤成左侧一条窄列。</p></header>${Array.from({ length: 6 }, (_, i) => `<section>${toc ? `<h2 id="reused-heading">章节 ${i + 1}</h2><h3>知识点 ${i + 1}</h3>` : ""}<p>这里是连续阅读的中文正文。${"文字应自然换行，保留足够的阅读空间。".repeat(12)}</p></section>`).join("")}</article>`;
       await page.evaluate(html => {
         const mount = (window as unknown as { mountHtmlFolio(host: Element, html: string, root: Element): void }).mountHtmlFolio;
         mount(document.querySelector(".bsb-ai-content")!, html, document.querySelector(".bsb-ai-md")!);
@@ -60,13 +60,18 @@ async function verify() {
         const box = article.getBoundingClientRect();
         const frameBox = frame.getBoundingClientRect();
         const sidebar = document.querySelector<HTMLElement>(".bsb-folio-toc");
-        return { width: box.width, frameWidth: frameBox.width, readerWidth: reader.clientWidth, centered: Math.abs((box.left + box.right - frameBox.left - frameBox.right) / 2), overflow: body.scrollWidth - body.clientWidth, inlineStyle: article.getAttribute("style"), tocPosition: sidebar ? getComputedStyle(sidebar).position : "none" };
+        return { width: box.width, frameWidth: frameBox.width, readerWidth: reader.clientWidth, centered: Math.abs((box.left + box.right - frameBox.left - frameBox.right) / 2), overflow: body.scrollWidth - body.clientWidth, inlineStyle: article.getAttribute("style"), tocPosition: sidebar ? getComputedStyle(sidebar).position : "none", paragraphFont: parseFloat(getComputedStyle(article.querySelector("section > p")!).fontSize), titleFont: parseFloat(getComputedStyle(article.querySelector("h1")!).fontSize), subtitleFont: parseFloat(getComputedStyle(article.querySelector("h2") || article.querySelector("h1")!).fontSize), markdownFont: parseFloat(getComputedStyle(body).fontSize), headingIds: Array.from(article.querySelectorAll("h2,h3")).map(el => el.id), tocCount: document.querySelectorAll(".bsb-folio-toc-link").length };
       });
       const wide = toc && metrics.readerWidth >= 760;
       assert.equal(metrics.inlineStyle, null, "Generated HTML must not override reader layout");
       assert(metrics.width >= Math.min(640, metrics.readerWidth - (wide ? 224 : 0) - 56) - 2, JSON.stringify(metrics));
       assert(metrics.centered < 2 && metrics.overflow <= 1, JSON.stringify(metrics));
+      assert.equal(metrics.markdownFont, 19, `A± font setting ignored in Markdown: ${JSON.stringify(metrics)}`);
+      assert.equal(metrics.paragraphFont, 19, `A± font setting ignored in HTML folio: ${JSON.stringify(metrics)}`);
+      assert(metrics.titleFont > metrics.paragraphFont && (!toc || metrics.subtitleFont > metrics.paragraphFont), `Folio headings must preserve typographic hierarchy: ${JSON.stringify(metrics)}`);
       if (toc) {
+        assert.equal(metrics.tocCount, metrics.headingIds.length, "TOC must match every section heading");
+        assert.equal(new Set(metrics.headingIds).size, metrics.headingIds.length, "Section heading IDs must be unique");
         assert.equal(metrics.tocPosition, wide ? "sticky" : "absolute");
         if (!wide) {
           await page.locator(".bsb-folio-toc-fab").click();
@@ -88,6 +93,21 @@ async function verify() {
       console.log(`Folio layout verified: viewport=${viewport}, panel=${width}, toc=${toc}, text=${Math.round(metrics.width)}px`);
       await page.close();
     }
+    const assistantWidths: number[] = [];
+    for (const [preset, width] of [["small", 480], ["medium", 740], ["large", 1080]] as const) {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+      await page.setContent(`<style>${css}</style><div id="folio-test" class="open" data-panel-size="${preset}" style="--bsb-note-font:19px"><div class="bsb-sidebar" style="width:${width}px;height:800px;top:20px;left:20px"><div class="bsb-body"><section class="bsb-view active" data-view-panel="ai"><div class="bsb-ai-canvas-wrap is-studio" style="height:580px"><div class="bsb-ai-stream"><div class="bsb-ai-md"><div class="bsb-ai-content"><div class="bsb-studio-thread"><div class="bsb-studio-msg assistant"><div class="bsb-studio-answer">对话回复宽度应随面板调整</div></div></div></div></div></div></div></section></div></div></div>`);
+      const metrics = await page.evaluate(() => {
+        const answer = document.querySelector<HTMLElement>(".bsb-studio-msg.assistant")!;
+        const content = document.querySelector<HTMLElement>(".bsb-ai-content")!;
+        return { answer: answer.getBoundingClientRect().width, available: content.getBoundingClientRect().width };
+      });
+      assert(metrics.answer >= metrics.available - 4, `S/M/L assistant box does not fill reading width: ${preset} ${JSON.stringify(metrics)}`);
+      assistantWidths.push(metrics.answer);
+      await page.screenshot({ path: `dist/qa/studio-${preset}.png` });
+      await page.close();
+    }
+    assert(assistantWidths[0]! < assistantWidths[1]! && assistantWidths[1]! < assistantWidths[2]!, `Assistant widths should grow with S/M/L: ${assistantWidths}`);
   } finally {
     await browser.close();
   }

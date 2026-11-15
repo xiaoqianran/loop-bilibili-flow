@@ -52,11 +52,14 @@ async function verify() {
         status: document.body.dataset.result, error: document.body.dataset.error,
         table: !!document.querySelector("table td"), math: !!document.querySelector(".katex .mfrac"),
         highlight: !!document.querySelector(".hljs-keyword"), graph: !!document.querySelector("#diagram svg"),
+        graphLabels: Array.from(document.querySelectorAll("#diagram svg text")).map(el => el.textContent?.trim() || "").filter(Boolean),
+        graphDiag: document.body.dataset.graphDiag,
         unsafe: !!document.querySelector("#content script,#content [onerror]"),
         fonts: Array.from(document.fonts).filter(font => font.status === "error").length,
       }));
       assert.equal(result.status, "ok", JSON.stringify(result));
       assert(result.table && result.math && result.highlight && result.graph, JSON.stringify(result));
+      assert(result.graphLabels.includes("字幕") && result.graphLabels.includes("阅读"), `Mermaid labels were lost during SVG sanitization: ${JSON.stringify(result)}`);
       assert(!result.unsafe && result.fonts === 0, JSON.stringify(result));
       assert.deepEqual(external, [], "Rendering must not request remote resources");
       console.log(`Rendering verified ${path}: Markdown, sanitizer, KaTeX/fonts, highlighting, Mermaid; zero external requests`);

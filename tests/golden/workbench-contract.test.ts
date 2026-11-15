@@ -671,10 +671,10 @@ describe("Bundled full-feature workbench source", () => {
     expect(maintainedSource).toContain("function paintStudioAnswer(");
     expect(maintainedSource).toContain("data-role=\"studio-answer\"");
     expect(renderAiStyles("bili-subbatch-panel")).toContain("align-self: flex-end");
-    expect(userscriptMetadata.version).toBe("6.10.8");
+    expect(userscriptMetadata.version).toBe("6.10.9");
     expect(userscriptMetadata.match).toContain("*://www.bilibili.com/festival/*");
     expect(userscriptMetadata.match).toContain("*://www.bilibili.com/blackboard/*");
-    expect(maintainedSource).toContain('|| "6.10.8"');
+    expect(maintainedSource).toContain('|| "6.10.9"');
     expect(maintainedSource).not.toContain("function isDeferredVideoCarrierPage(");
     expect(maintainedSource).toContain("function startUserscript(");
     const startSource = extractFunctionSource(maintainedSource, "startUserscript");
@@ -682,7 +682,11 @@ describe("Bundled full-feature workbench source", () => {
     expect(startSource).not.toContain("isDeferredVideoCarrierPage(location.href)");
     expect(maintainedSource).toContain('bilibiliFn("extractPlayingVideoHint")');
     expect(renderShellStyles("bili-subbatch-panel", 420, 520, 32)).toContain("--bsb-ui-font: 14px");
-    expect(renderWorkspaceOverrides("bili-subbatch-panel")).toContain("font-size: 14px !important");
+    expect(renderWorkspaceOverrides("bili-subbatch-panel")).toContain("font-size: var(--bsb-ui-font, 14px)");
+    expect(renderWorkspaceOverrides("bili-subbatch-panel")).not.toContain("font-size: 14px !important");
+    expect(renderAiStyles("bili-subbatch-panel")).toContain("align-self: stretch; width: 100%; min-width: 0");
+    expect(extractFunctionSource(maintainedSource, "ensureMermaid")).toContain("htmlLabels: false");
+    expect(extractFunctionSource(maintainedSource, "refreshMermaidTheme")).toContain("htmlLabels: false");
     expect(maintainedSource).not.toContain("CORE_LOCAL_FALLBACKS");
     expect(maintainedSource).toContain("NOTE_FONT_DEFAULT = 14");
     expect(renderShellStyles("bili-subbatch-panel", 420, 520, 32)).toContain("--bsb-knowledge-font: 14px");

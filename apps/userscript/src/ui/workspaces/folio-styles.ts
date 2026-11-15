@@ -11,6 +11,8 @@ export function renderFolioStyles(panelId: string): string {
         width: 100%;
         margin: 0;
         min-width: 0;
+        padding: 0;
+        background: var(--ctp-base);
         container: bsb-folio-reader / inline-size;
       }
       #${panelId} .bsb-folio-shell {
@@ -165,31 +167,31 @@ export function renderFolioStyles(panelId: string): string {
         overflow-wrap: anywhere;
         color: var(--ctp-text);
         font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Songti SC", "Source Han Serif SC", "Noto Serif SC", Georgia, serif;
-        font-size: 14px; line-height: 1.72; letter-spacing: .005em;
+        font-size: var(--bsb-note-font, 14px); line-height: 1.72; letter-spacing: .005em;
       }
       #${panelId} .bsb-folio header { margin: 0 0 2.2em; }
       #${panelId} .bsb-folio .kicker {
         margin: 0 0 .7em; font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-        font-size: 14px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+        font-size: .72em; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
         color: var(--ctp-overlay0);
       }
-      #${panelId} .bsb-folio h1 {
-        margin: 0 0 .55em; font-size: 14px; font-weight: 650; line-height: 1.22;
+      #${panelId} .bsb-ai-md .bsb-folio h1 {
+        margin: 0 0 .55em; font-size: 1.75em; font-weight: 700; line-height: 1.25;
         letter-spacing: -.02em; color: var(--ctp-text);
       }
       #${panelId} .bsb-folio .lede {
-        margin: 0; font-size: 14px; line-height: 1.65; color: var(--ctp-subtext0);
+        margin: 0; font-size: 1.04em; line-height: 1.65; color: var(--ctp-subtext0);
       }
       #${panelId} .bsb-folio section { margin: 0 0 2.1em; }
-      #${panelId} .bsb-folio h2 {
+      #${panelId} .bsb-ai-md .bsb-folio h2 {
         margin: 0 0 .7em; padding-top: .2em; scroll-margin-top: 18px;
-        font-size: 14px; font-weight: 650; letter-spacing: -.015em;
+        font-size: 1.3em; font-weight: 700; letter-spacing: -.015em;
       }
-      #${panelId} .bsb-folio h3 {
+      #${panelId} .bsb-ai-md .bsb-folio h3 {
         margin: 1.2em 0 .45em; scroll-margin-top: 18px;
-        font-size: 14px; font-weight: 650; color: var(--ctp-subtext1);
+        font-size: 1.12em; font-weight: 650; color: var(--ctp-subtext1);
       }
-      #${panelId} .bsb-folio p { margin: 0 0 .9em; }
+      #${panelId} .bsb-ai-md .bsb-folio p { margin: 0 0 .9em; }
       #${panelId} .bsb-folio ul, #${panelId} .bsb-folio ol { margin: 0 0 1em; padding-left: 1.25em; }
       #${panelId} .bsb-folio li { margin: .28em 0; }
       #${panelId} .bsb-folio ol.steps {

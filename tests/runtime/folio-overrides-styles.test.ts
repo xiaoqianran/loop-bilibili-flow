@@ -6,12 +6,15 @@ describe("Extracted folio and workspace override CSS", () => {
   it("retains HTML folio reading layout", () => {
     const css = renderFolioStyles("test-panel");
     expect(css).toContain("#test-panel .bsb-folio-shell");
+    expect(css).toContain("font-size: var(--bsb-note-font, 14px)");
+    expect(css).toContain(".bsb-ai-md .bsb-folio h1");
     expect(css).not.toContain("${PANEL_ID}");
   });
   it("retains scoped Knowledge toast and font overrides", () => {
     const css = renderWorkspaceOverrides("test-panel");
     expect(css).toContain('[data-panel-view="knowledge"]');
-    expect(css).toContain("font-size: 14px !important");
+    expect(css).toContain("font-size: var(--bsb-ui-font, 14px)");
+    expect(css).not.toContain("font-size: 14px !important");
     expect(css).not.toContain("${PANEL_ID}");
   });
 });

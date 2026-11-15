@@ -210,7 +210,7 @@ export function renderAiStyles(panelId: string): string {
       }
       #${panelId} .bsb-studio-msg.user .bsb-studio-role { text-align: right; }
       #${panelId} .bsb-studio-msg.assistant {
-        align-self: center; width: min(100%, 40em);
+        align-self: stretch; width: 100%; min-width: 0;
       }
       #${panelId} .bsb-studio-msg.assistant .bsb-studio-answer,
       #${panelId} .bsb-studio-msg.assistant .bsb-preprocess-block-body,
@@ -323,16 +323,16 @@ export function renderAiStyles(panelId: string): string {
         line-height: 1.35;
       }
       #${panelId} .bsb-ai-md h1 {
-        font-size: 14px; margin: 1.6em 0 0.8em;
+        font-size: 1.8em; margin: 1.6em 0 0.8em;
         padding-bottom: 0.4em;
         border-bottom: 1px solid color-mix(in srgb, var(--ctp-surface1) 50%, transparent);
       }
       #${panelId} .bsb-ai-md h1:first-child { margin-top: 0.15em; }
       #${panelId} .bsb-ai-md h2 {
-        font-size: 14px; margin: 1.55em 0 0.7em; color: var(--ctp-mauve);
+        font-size: 1.4em; margin: 1.55em 0 0.7em; color: var(--ctp-mauve);
       }
       #${panelId} .bsb-ai-md h3 {
-        font-size: 14px; margin: 1.4em 0 0.6em; color: var(--ctp-sapphire);
+        font-size: 1.18em; margin: 1.4em 0 0.6em; color: var(--ctp-sapphire);
       }
       #${panelId} .bsb-ai-md p {
         margin: 1.15em 0;
