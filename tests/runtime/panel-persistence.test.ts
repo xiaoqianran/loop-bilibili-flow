@@ -5,7 +5,7 @@ import type { WorkbenchUi } from "../../apps/userscript/src/runtime/workbench-st
 
 const options: panel.PanelPersistenceOptions = {
   viewportWidth: 1200, viewportHeight: 900,
-  defaultSizePreset: "medium", defaultFlavor: "mocha",
+  defaultSizePreset: "large", defaultFlavor: "mocha",
   noteFontDefault: 14, noteFontMin: 14, noteFontMax: 22,
   minWidth: 420, minHeight: 520, currentSizePreset: "",
   presetWidth: panelPresetWidth, highHeight: highPanelHeight,
@@ -16,8 +16,8 @@ const options: panel.PanelPersistenceOptions = {
 describe("typed workbench panel persistence", () => {
   it("constructs the default panel independently from browser storage", () => {
     const ui = panel.defaultUiGeometry(options);
-    expect(ui.sizePreset).toBe("medium");
-    expect(ui.w).toBe(panelPresetWidth("medium", 1200));
+    expect(ui.sizePreset).toBe("large");
+    expect(ui.w).toBe(panelPresetWidth("large", 1200));
     expect(ui.h).toBe(highPanelHeight(900));
     expect(ui).toMatchObject({
       x: Math.max(8, 1200 - ui.w - 16), view: "ai",
@@ -29,12 +29,12 @@ describe("typed workbench panel persistence", () => {
     expect(panel.loadUiGeometry("{broken json", options)).toEqual(ui);
   });
 
-  it("migrates old layout without size preset to the current medium/high layout", () => {
+  it("migrates old layout without size preset to the current large/high layout", () => {
     const saved = { x: 101, y: 45, w: 560, h: 820, dock: "left", noteFont: 17, knowledgeListW: 260 };
     const loaded = panel.loadUiGeometry(JSON.stringify(saved), options);
     expect(loaded).toMatchObject({
-      x: 101, y: 45, sizePreset: "medium", heightMode: "high",
-      w: panelPresetWidth("medium", 1200),
+      x: 101, y: 45, sizePreset: "large", heightMode: "high",
+      w: panelPresetWidth("large", 1200),
       h: highPanelHeight(900), dock: "left",
       dockExpanded: false, noteFont: 14,
     });

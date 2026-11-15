@@ -12,7 +12,7 @@ describe("panel shell geometry", () => {
     expect(panelPresetWidth("small", 1920)).toBe(560);
     expect(panelPresetWidth("medium", 1920)).toBe(820);
     expect(panelPresetWidth("large", 1920)).toBe(1180);
-    expect(panelPresetWidth("unknown", 1920)).toBe(820);
+    expect(panelPresetWidth("unknown", 1920)).toBe(1180);
     expect(isPanelSizePreset("custom")).toBe(false);
     expect(panelSizeClassFromWidth(800, 1920)).toBe("medium");
   });

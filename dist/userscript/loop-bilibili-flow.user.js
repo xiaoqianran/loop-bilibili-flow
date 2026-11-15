@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Bili SubBatch (loop-bilibili)
 // @namespace    https://github.com/loop-bilibili/bili-subbatch
-// @version      6.10.3
+// @version      6.10.4
 // @updateURL    https://raw.githubusercontent.com/xiaoqianran/loop-bilibili-flow/main/dist/userscript/loop-bilibili-flow.user.js
 // @downloadURL  https://raw.githubusercontent.com/xiaoqianran/loop-bilibili-flow/main/dist/userscript/loop-bilibili-flow.user.js
 // @description  B站 / YouTube 知识阅读工作台：字幕预处理、多产物后处理、Anchor 局部追问树与持久 Knowledge Workspace
@@ -41,7 +41,7 @@
 // @license      MIT
 // ==/UserScript==
 
-// SubBatch bundled application (6.10.3)
+// SubBatch bundled application (6.10.4)
 var SubBatch = (function(exports) {
   "use strict";
   function videoViewUrl(bvid) {
@@ -5729,7 +5729,7 @@ ${prompt2.userPromptTemplate}`
     medium: { viewportRatio: 0.48, min: 620, max: 820 },
     large: { viewportRatio: 0.68, min: 860, max: 1180 }
   };
-  const DEFAULT_PANEL_SIZE = "medium";
+  const DEFAULT_PANEL_SIZE = "large";
   const MIN_PANEL_WIDTH = 420;
   const MIN_PANEL_HEIGHT = 520;
   function isPanelSizePreset(value) {
@@ -11855,7 +11855,7 @@ ${prompt2.userPromptTemplate}`
     function isMermaidSetupError(value) {
       return !!value && typeof value === "object" && "mermaidSetup" in value && value.mermaidSetup === true;
     }
-    const SCRIPT_VERSION = typeof GM_info !== "undefined" && GM_info?.script?.version || "6.10.3";
+    const SCRIPT_VERSION = typeof GM_info !== "undefined" && GM_info?.script?.version || "6.10.4";
     const PANEL_ID = "bili-subbatch-panel";
     const UI_STORE_KEY = "bili-subbatch-ui-v2";
     const DEFAULT_CTP_FLAVOR = "mocha";
@@ -12093,7 +12093,7 @@ ${prompt2.userPromptTemplate}`
     const MIN_H = 520;
     const DOCK_EDGE_PX = 32;
     const DOCK_SNAP_PX = 36;
-    const DEFAULT_PANEL_SIZE2 = "medium";
+    const DEFAULT_PANEL_SIZE2 = "large";
     const PANEL_SIZE_PRESETS2 = Object.freeze({
       small: Object.freeze({ label: "小", viewportRatio: 0.32, min: 440, max: 560 }),
       medium: Object.freeze({ label: "中", viewportRatio: 0.48, min: 620, max: 820 }),
@@ -21562,7 +21562,7 @@ ${latest}`;
   const host = createUserscriptHost();
   const runtime = userscript.create(host);
   const SubBatchMonorepo = {
-    version: "6.10.3",
+    version: "6.10.4",
     runtime,
     core,
     bilibili,

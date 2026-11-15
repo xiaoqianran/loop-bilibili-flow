@@ -13,7 +13,7 @@ import { normalizeCachedSessionInput, applyRestoredRunOutput, restorePreprocessR
 import { resolveAiScrollState } from "../ui/workspaces/ai-scroll-state";
 // Full-feature workbench. Bundled by the composition root; no standalone compatibility script.
 /**
- * v6.10.3 — Video Carrier 抽象：festival/blackboard 仅在检测到真实 BV / active player 后启动完整工作台；修正 live-player helper bridge。
+ * v6.10.4 — Video Carrier 抽象：festival/blackboard 仅在检测到真实 BV / active player 后启动完整工作台；修正 live-player helper bridge。
  * v6.9.15 — 支持 B 站 /festival/* 专题页：复用 BV 路由与现有字幕链路，不引入专题页专用抓取分支。
  * v6.9.14 — 工作台可见文字默认统一 14px。
  * v6.9.13 — 单独安装 loop-bilibili-flow 时补齐 core 回退，避免字幕库渲染崩溃；打开页面先点开中文字幕。
@@ -140,7 +140,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
    */
 
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.10.3";
+    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.10.4";
   const PANEL_ID = "bili-subbatch-panel";
   const UI_STORE_KEY = "bili-subbatch-ui-v2";
   /** Catppuccin flavors — official palette https://catppuccin.com/palette/ */
@@ -302,7 +302,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
   const MIN_H = 520;
   const DOCK_EDGE_PX = 32;
   const DOCK_SNAP_PX = 36;
-  const DEFAULT_PANEL_SIZE = "medium";
+  const DEFAULT_PANEL_SIZE = "large";
   const PANEL_SIZE_PRESETS = Object.freeze({
     small: Object.freeze({ label: "小", viewportRatio: 0.32, min: 440, max: 560 }),
     medium: Object.freeze({ label: "中", viewportRatio: 0.48, min: 620, max: 820 }),

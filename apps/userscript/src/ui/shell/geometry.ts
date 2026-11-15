@@ -6,7 +6,7 @@ export const PANEL_SIZE_PRESETS = {
 } as const;
 
 export type PanelSizePreset = keyof typeof PANEL_SIZE_PRESETS;
-export const DEFAULT_PANEL_SIZE: PanelSizePreset = "medium";
+export const DEFAULT_PANEL_SIZE: PanelSizePreset = "large";
 export const MIN_PANEL_WIDTH = 420;
 export const MIN_PANEL_HEIGHT = 520;
 

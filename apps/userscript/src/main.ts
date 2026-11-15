@@ -25,7 +25,7 @@ const runtime = runtimeUserscript.create(host);
  * only wires modules together.
  */
 const SubBatchMonorepo = {
-  version: "6.10.3",
+  version: "6.10.4",
   runtime,
   core,
   bilibili,
