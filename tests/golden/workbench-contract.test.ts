@@ -671,10 +671,10 @@ describe("Bundled full-feature workbench source", () => {
     expect(maintainedSource).toContain("function paintStudioAnswer(");
     expect(maintainedSource).toContain("data-role=\"studio-answer\"");
     expect(renderAiStyles("bili-subbatch-panel")).toContain("align-self: flex-end");
-    expect(userscriptMetadata.version).toBe("6.10.9");
+    expect(userscriptMetadata.version).toBe("6.10.10");
     expect(userscriptMetadata.match).toContain("*://www.bilibili.com/festival/*");
     expect(userscriptMetadata.match).toContain("*://www.bilibili.com/blackboard/*");
-    expect(maintainedSource).toContain('|| "6.10.9"');
+    expect(maintainedSource).toContain('|| "6.10.10"');
     expect(maintainedSource).not.toContain("function isDeferredVideoCarrierPage(");
     expect(maintainedSource).toContain("function startUserscript(");
     const startSource = extractFunctionSource(maintainedSource, "startUserscript");
@@ -685,8 +685,12 @@ describe("Bundled full-feature workbench source", () => {
     expect(renderWorkspaceOverrides("bili-subbatch-panel")).toContain("font-size: var(--bsb-ui-font, 14px)");
     expect(renderWorkspaceOverrides("bili-subbatch-panel")).not.toContain("font-size: 14px !important");
     expect(renderAiStyles("bili-subbatch-panel")).toContain("align-self: stretch; width: 100%; min-width: 0");
-    expect(extractFunctionSource(maintainedSource, "ensureMermaid")).toContain("htmlLabels: false");
-    expect(extractFunctionSource(maintainedSource, "refreshMermaidTheme")).toContain("htmlLabels: false");
+    expect(maintainedSource).toContain('from "../ui/workspaces/mermaid-config"');
+    expect(extractFunctionSource(maintainedSource, "ensureMermaid")).toContain("mermaid.initialize(mermaidConfigForFlavor())");
+    expect(extractFunctionSource(maintainedSource, "refreshMermaidTheme")).toContain("mermaid.initialize(mermaidConfigForFlavor())");
+    expect(maintainedSource).not.toContain("mermaid.initialize({");
+    expect(extractFunctionSource(maintainedSource, "bindFolioToc")).toContain("bindFolioViewport(box, { onScroll, onResize })");
+    expect(extractFunctionSource(maintainedSource, "renderAiMarkdown")).toContain("releaseFolioViewport(box)");
     expect(maintainedSource).not.toContain("CORE_LOCAL_FALLBACKS");
     expect(maintainedSource).toContain("NOTE_FONT_DEFAULT = 14");
     expect(renderShellStyles("bili-subbatch-panel", 420, 520, 32)).toContain("--bsb-knowledge-font: 14px");

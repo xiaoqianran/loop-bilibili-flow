@@ -1,14 +1,13 @@
 /// <reference types="vite/client" />
 /**
- * Main userscript composition root.
- * Full workbench is included as an application module.
- * Pure laboratory mode exports only the API composition surface.
+ * Full userscript entry. The experimental API-only entry is main-pure.ts.
+ * Composition contracts live in composition.ts; this entry only mounts the workbench.
  */
 import { SubBatchMonorepo } from "./composition";
 import { mountWorkbench } from "./workbench/runtime";
 import { isWorkbenchHost } from "./workbench/host";
 
-if (import.meta.env.MODE !== "pure" && typeof location !== "undefined"
+if (typeof location !== "undefined"
   && isWorkbenchHost(location.hostname)) {
   mountWorkbench({ SubBatchMonorepo });
 }

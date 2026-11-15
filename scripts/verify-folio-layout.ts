@@ -31,11 +31,12 @@ async function verify() {
   new Function(...Object.keys(styleScope), `return ${styleScript}`)(...Object.values(styleScope))();
   const helpers = ["extractHtmlFolioSource", "sanitizeFolioHtml", "pruneFolioClasses", "slugFolioHeading", "collectFolioHeadings", "decorateFolioArticle", "folioOutlineFromHeadings", "makeFolioTocLink", "buildFolioToc", "setFolioTocCurrent", "scrollFolioTocLinkIntoNav", "syncFolioTocViewport", "updateFolioProgress", "bindFolioToc", "mountHtmlFolio"];
   const declarations = helpers.map(functionText).join("\n");
+  const folioViewportSource = readFileSync("apps/userscript/src/ui/workspaces/folio-viewport-controller.ts", "utf8").replace(/^export /gm, "");
   const core = readFileSync("packages/core/src/folio/index.ts", "utf8").replace(/^export /gm, "");
   const bridge = `const coreFn = name => coreApi[name]; const coreCall = (name, ...args) => coreApi[name](...args);`;
   // The core slug has the same name as the compatibility wrapper; namespace it.
   const coreScript = `const coreApi = (() => { ${core}; return { slugFolioHeading, buildFolioOutline, formatFolioChapterIndex, countFolioOutline, folioOutlineSummary }; })();`;
-  const setup = `const FOLIO_CLASS_ALLOW = new Set(["bsb-folio","kicker","lede","callout","steps","quote","meta"]); const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); const toTrustedHTML = s => s; ${coreScript} ${bridge} ${declarations}`;
+  const setup = `const FOLIO_CLASS_ALLOW = new Set(["bsb-folio","kicker","lede","callout","steps","quote","meta"]); const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); const toTrustedHTML = s => s; ${coreScript} ${bridge} ${folioViewportSource} ${declarations}`;
   const script = ts.transpileModule(setup, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
   const require = createRequire(resolve("apps/userscript/package.json"));
   const purifier = readFileSync(require.resolve("dompurify/dist/purify.min.js"), "utf8");
@@ -89,6 +90,29 @@ async function verify() {
         });
         await page.waitForFunction(() => getComputedStyle(document.querySelector(".bsb-folio-toc")!).position === "sticky");
         assert.equal(await page.locator(".bsb-folio-toc-scrim").isVisible(), false);
+      }
+      if (toc && width === 520) {
+        // A second postprocessing render must replace the old scroll/resize listeners.
+        const tracking = await page.evaluate(sourceHtml => {
+          const host = document.querySelector<HTMLElement>(".bsb-ai-content")!;
+          const box = document.querySelector<HTMLElement>(".bsb-ai-md")!;
+          const previous = host.querySelector<HTMLElement>(".bsb-folio-shell")!;
+          const previousBar = previous.querySelector<HTMLElement>('[data-role="folio-progress"]')!;
+          const before = previousBar.style.width;
+          (window as unknown as { mountHtmlFolio(host: Element, html: string, root: Element): void })
+            .mountHtmlFolio(host, sourceHtml, box);
+          box.scrollTop = Math.min(220, Math.max(0, box.scrollHeight - box.clientHeight));
+          box.dispatchEvent(new Event("scroll"));
+          window.dispatchEvent(new Event("resize"));
+          return {
+            before, after: previousBar.style.width,
+            mounted: host.querySelectorAll(".bsb-folio-shell").length,
+            current: host.querySelector<HTMLElement>('[data-role="folio-progress"]')?.style.width,
+          };
+        }, html);
+        assert.equal(tracking.after, tracking.before, `Old folio listener survived remount: ${JSON.stringify(tracking)}`);
+        assert.equal(tracking.mounted, 1, "Remount should keep one HTML reading page");
+        assert(tracking.current, "New folio scroll tracking should remain active");
       }
       console.log(`Folio layout verified: viewport=${viewport}, panel=${width}, toc=${toc}, text=${Math.round(metrics.width)}px`);
       await page.close();

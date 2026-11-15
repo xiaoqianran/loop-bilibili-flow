@@ -523,6 +523,10 @@ TEMPORARY
 - AI 会话缓存恢复已归入 `app/ai-session-hydration.ts`，校验缓存输入并保留当前凭据与运行身份。
 - 字幕阅读区的空状态、轨道选择、搜索高亮、行渲染和播放跟随已归入 `ui/workspaces/transcript-controller.ts`；工作台保留媒体事件接线、抓取和缓存编排。
 - Mermaid 图表卡片、缩放、适宽和全屏节点恢复已归入 `ui/workspaces/mermaid-presentation.ts`，通过 typed ports 获取面板和调度动画帧；工作台保留渲染队列、AI 修复和缓存写入。
+- Mermaid 初始化与主题切换共用 `ui/workspaces/mermaid-config.ts` 生成配置，**统一** `htmlLabels: false`、流程图布局和时序图选项；此模块只接收颜色数据，不接收工作台状态。
+- HTML 阅读页目录的滚动与缩放订阅由 `ui/workspaces/folio-viewport-controller.ts` 管理，按阅读容器单例绑定；重复挂载或切换回 Markdown 时释放 scroll/resize/ResizeObserver，避免旧目录对象被全局监听器长期引用。
+- 工作台仅以类型依赖 `src/composition.ts` 的组合契约，不反向依赖负责挂载它的 `src/main.ts`；Pure 构建使用独立入口 `src/main-pure.ts`，两个入口不再通过运行时模式分支混合。
+- 架构调整原则：优先抽取纯配置、DOM 生命周期和局部 controller，要求行为测试与浏览器回归可复现；不要将 10k 行 `mountWorkbench` 一次性机械拆分。
 - 后续按 `UI → Controllers → Application → Providers/Runtime` 边界继续拆分，补齐真实安装 Tampermonkey 的浏览器端到端回归，再继续缩减单体。
 - 浏览器侧需覆盖 Bilibili 字幕、AI PRE/POST、Studio、Knowledge、缓存、SPA 切换和 YouTube 隔离；单文件构建校验不能代替这些检查。
 

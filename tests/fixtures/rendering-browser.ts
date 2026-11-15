@@ -1,5 +1,6 @@
 import { DOMPurify, marked, katex, hljs, mermaid, installRenderingStyles } from "../../apps/userscript/src/runtime/rendering-libs";
 import { toTrustedHTML } from "../../apps/userscript/src/runtime/trusted-html";
+import { createMermaidConfig } from "../../apps/userscript/src/ui/workspaces/mermaid-config";
 
 async function run() {
   installRenderingStyles("katex");
@@ -12,7 +13,12 @@ async function run() {
   const math = document.createElement("div");
   math.innerHTML = toTrustedHTML(DOMPurify.sanitize(katex.renderToString("\\frac{a}{b}")));
   host.appendChild(math);
-  mermaid.initialize({ startOnLoad: false, securityLevel: "strict", htmlLabels: false, flowchart: { htmlLabels: false } });
+  mermaid.initialize(createMermaidConfig({
+    mantle: "#181825", surface0: "#313244", surface1: "#45475a",
+    surface2: "#585b70", base: "#1e1e2e", rosewater: "#f5e0dc",
+    blue: "#89b4fa", green: "#a6e3a1", mauve: "#cba6f7",
+    subtext1: "#bac2de", yellow: "#f9e2af", text: "#cdd6f4",
+  }, true));
   const { svg } = await mermaid.render("offline-graph", 'flowchart TD\nA["字幕"] --> B["阅读"]');
   const graph = document.createElement("div");
   graph.id = "diagram";

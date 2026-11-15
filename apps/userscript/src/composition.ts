@@ -15,7 +15,7 @@ const host = createUserscriptHost();
 const runtime = runtimeUserscript.create(host);
 
 export const SubBatchMonorepo = {
-  version: "6.10.9",
+  version: "6.10.10",
   runtime,
   core,
   bilibili,

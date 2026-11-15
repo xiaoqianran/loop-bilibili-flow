@@ -20,6 +20,10 @@ describe("Isolated pure userscript entry", () => {
     expect(composition).not.toMatch(/workbench\/runtime|rendering-libs/);
     expect(main).toContain('from "./composition"');
     expect(main).toContain('from "./workbench/runtime"');
+    expect(main).not.toContain("import.meta.env.MODE");
+    const workbench = source("apps/userscript/src/workbench/runtime.ts");
+    expect(workbench).toContain('import type { SubBatchMonorepo } from "../composition"');
+    expect(workbench).not.toContain('from "../main"');
   });
 
   it("rejects unbound require without rejecting guarded module.require probes", () => {

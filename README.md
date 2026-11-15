@@ -6,7 +6,9 @@ Bilibili / YouTube Userscript。**[点击安装 / 更新油猴脚本（Tampermon
 dist/userscript/loop-bilibili-flow.user.js
 ```
 
-**版本检查：** GitHub 正式构建与 Greasy Fork 站内发布并不自动同步。如果 Greasy Fork 仍显示旧版，请使用上方 GitHub 直链在 Tampermonkey 更新，并确认已安装版本为 **v6.10.9**；更新后刷新 YouTube 视频页，未展开面板时可按 `Ctrl+B` 召唤。
+**版本检查：** GitHub 正式构建与 Greasy Fork 站内发布并不自动同步。如果 Greasy Fork 仍显示旧版，请使用上方 GitHub 直链在 Tampermonkey 更新，并确认已安装版本为 **v6.10.10**；更新后刷新 YouTube 视频页，未展开面板时可按 `Ctrl+B` 召唤。
+
+v6.10.10 架构优化：Mermaid 初始绘制与切换主题共用一份安全渲染配置；HTML 阅读页重复生成、切换到 Markdown / 对话时清理旧目录的滚动、窗口与观察器监听，减少内存泄漏风险。
 
 v6.10.9 修复全 Mermaid 学习图谱的节点文字不可见（Mermaid 12 SVG 标签配置与安全净化兼容）；恢复后处理 Markdown / HTML 阅读页的字号调节和标题层级，修复重复章节 ID 的目录跳转，并使对话回复区域随 S/M/L 面板宽度自动伸展。
 

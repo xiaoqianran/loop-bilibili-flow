@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Bili SubBatch (loop-bilibili)
 // @namespace    https://github.com/loop-bilibili/bili-subbatch
-// @version      6.10.9
+// @version      6.10.10
 // @updateURL    https://raw.githubusercontent.com/xiaoqianran/loop-bilibili-flow/main/dist/userscript/loop-bilibili-flow.user.js
 // @downloadURL  https://raw.githubusercontent.com/xiaoqianran/loop-bilibili-flow/main/dist/userscript/loop-bilibili-flow.user.js
 // @description  B站 / YouTube 知识阅读工作台：字幕预处理、多产物后处理、Anchor 局部追问树与持久 Knowledge Workspace
@@ -41,7 +41,7 @@
 // @license      MIT
 // ==/UserScript==
 
-// SubBatch bundled application (6.10.9)
+// SubBatch bundled application (6.10.10)
 var SubBatch = (function(exports) {
   "use strict";var __defProp = Object.defineProperty;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
@@ -11324,7 +11324,7 @@ ${prompt2.userPromptTemplate}`
   const host = createUserscriptHost();
   const runtime = userscript.create(host);
   const SubBatchMonorepo = {
-    version: "6.10.9",
+    version: "6.10.10",
     runtime,
     core: core$3,
     bilibili,
@@ -73941,6 +73941,101 @@ ${lines.join("\n")}`);
     }).join("");
     return `<div class="bsb-transcript-reading${timeline ? " is-timeline" : ""}">${rows2}</div>`;
   }
+  function createMermaidConfig(t4, darkMode) {
+    return {
+      startOnLoad: false,
+      theme: "base",
+      securityLevel: "strict",
+      htmlLabels: false,
+      fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif',
+      suppressErrorRendering: true,
+      deterministicIds: false,
+      themeVariables: {
+        darkMode,
+        background: t4.mantle,
+        primaryColor: t4.surface0,
+        primaryTextColor: t4.rosewater,
+        primaryBorderColor: t4.blue,
+        secondaryColor: t4.surface1,
+        secondaryTextColor: t4.text,
+        secondaryBorderColor: t4.green,
+        tertiaryColor: t4.base,
+        tertiaryTextColor: t4.text,
+        tertiaryBorderColor: t4.mauve,
+        lineColor: t4.subtext1,
+        textColor: t4.text,
+        mainBkg: t4.surface0,
+        nodeBorder: t4.blue,
+        clusterBkg: t4.base,
+        clusterBorder: t4.surface2,
+        edgeLabelBackground: t4.mantle,
+        actorBkg: t4.surface0,
+        actorBorder: t4.blue,
+        actorTextColor: t4.rosewater,
+        signalColor: t4.subtext1,
+        signalTextColor: t4.text,
+        labelBoxBkgColor: t4.surface0,
+        labelBoxBorderColor: t4.blue,
+        labelTextColor: t4.rosewater,
+        loopTextColor: t4.text,
+        noteBkgColor: t4.surface1,
+        noteBorderColor: t4.yellow,
+        noteTextColor: t4.rosewater,
+        fontSize: "16px"
+      },
+      themeCSS: `
+          .nodeLabel, .edgeLabel, .label, text { font-size: 16px !important; }
+          .edgeLabel rect { fill: ${t4.mantle} !important; opacity: .96 !important; }
+          .flowchart-link { stroke-width: 2px !important; }
+          .marker { fill: ${t4.subtext1} !important; stroke: ${t4.subtext1} !important; }
+          .cluster rect { rx: 10px; ry: 10px; }
+        `,
+      flowchart: {
+        htmlLabels: false,
+        useMaxWidth: false,
+        curve: "basis",
+        nodeSpacing: 48,
+        rankSpacing: 64,
+        padding: 16
+      },
+      sequence: {
+        useMaxWidth: false,
+        wrap: true,
+        diagramMarginX: 32,
+        diagramMarginY: 24,
+        actorMargin: 72,
+        width: 180,
+        height: 72,
+        boxMargin: 12,
+        messageMargin: 42
+      }
+    };
+  }
+  const activeFolioViewportSubscriptions = /* @__PURE__ */ new WeakMap();
+  function releaseFolioViewport(box) {
+    if (!box) return;
+    activeFolioViewportSubscriptions.get(box)?.();
+  }
+  function bindFolioViewport(box, callbacks) {
+    releaseFolioViewport(box);
+    box.addEventListener("scroll", callbacks.onScroll, { passive: true });
+    window.addEventListener("resize", callbacks.onResize);
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(callbacks.onResize) : null;
+    observer?.observe(box);
+    let disposed = false;
+    const dispose = () => {
+      if (disposed) return;
+      disposed = true;
+      box.removeEventListener("scroll", callbacks.onScroll);
+      window.removeEventListener("resize", callbacks.onResize);
+      observer?.disconnect();
+      activeFolioViewportSubscriptions.delete(box);
+    };
+    activeFolioViewportSubscriptions.set(box, dispose);
+    callbacks.onResize();
+    callbacks.onScroll();
+    return dispose;
+  }
   function readSessionCache(storage, prefix, kind, key, ttlMs, now2 = Date.now()) {
     try {
       const fullKey = prefix + kind + ":" + key;
@@ -74252,7 +74347,7 @@ ${lines.join("\n")}`);
     function isMermaidSetupError(value2) {
       return !!value2 && typeof value2 === "object" && "mermaidSetup" in value2 && value2.mermaidSetup === true;
     }
-    const SCRIPT_VERSION = typeof GM_info !== "undefined" && GM_info?.script?.version || "6.10.9";
+    const SCRIPT_VERSION = typeof GM_info !== "undefined" && GM_info?.script?.version || "6.10.10";
     const PANEL_ID = "bili-subbatch-panel";
     const UI_STORE_KEY = "bili-subbatch-ui-v2";
     const DEFAULT_CTP_FLAVOR = "mocha";
@@ -77176,68 +77271,14 @@ ${lines.join("\n")}`);
       if (next2 === "appearance") renderAppearanceSettings(root2);
       if (!opts?.silent) saveUiGeom();
     }
-    function mermaidThemeVariablesForFlavor(flavor = state2.ui?.ctpFlavor) {
+    function mermaidConfigForFlavor(flavor = state2.ui?.ctpFlavor) {
       const id38 = normalizeCtpFlavor(flavor);
-      const t4 = getCtpPalette(id38);
-      return {
-        darkMode: id38 !== "latte",
-        background: t4.mantle,
-        primaryColor: t4.surface0,
-        primaryTextColor: t4.rosewater,
-        primaryBorderColor: t4.blue,
-        secondaryColor: t4.surface1,
-        secondaryTextColor: t4.text,
-        secondaryBorderColor: t4.green,
-        tertiaryColor: t4.base,
-        tertiaryTextColor: t4.text,
-        tertiaryBorderColor: t4.mauve,
-        lineColor: t4.subtext1,
-        textColor: t4.text,
-        mainBkg: t4.surface0,
-        nodeBorder: t4.blue,
-        clusterBkg: t4.base,
-        clusterBorder: t4.surface2,
-        edgeLabelBackground: t4.mantle,
-        actorBkg: t4.surface0,
-        actorBorder: t4.blue,
-        actorTextColor: t4.rosewater,
-        signalColor: t4.subtext1,
-        signalTextColor: t4.text,
-        labelBoxBkgColor: t4.surface0,
-        labelBoxBorderColor: t4.blue,
-        labelTextColor: t4.rosewater,
-        loopTextColor: t4.text,
-        noteBkgColor: t4.surface1,
-        noteBorderColor: t4.yellow,
-        noteTextColor: t4.rosewater,
-        fontSize: "16px"
-      };
-    }
-    function mermaidThemeCssForFlavor(flavor = state2.ui?.ctpFlavor) {
-      const t4 = getCtpPalette(flavor);
-      return `
-          .nodeLabel, .edgeLabel, .label, text { font-size: 16px !important; }
-          .edgeLabel rect { fill: ${t4.mantle} !important; opacity: .96 !important; }
-          .flowchart-link { stroke-width: 2px !important; }
-          .marker { fill: ${t4.subtext1} !important; stroke: ${t4.subtext1} !important; }
-          .cluster rect { rx: 10px; ry: 10px; }
-        `;
+      return createMermaidConfig(getCtpPalette(id38), id38 !== "latte");
     }
     function refreshMermaidTheme() {
       if (typeof mermaid_default === "undefined" || !state2.renderLibs?.mermaid) return;
       try {
-        mermaid_default.initialize({
-          startOnLoad: false,
-          theme: "base",
-          securityLevel: "strict",
-          htmlLabels: false,
-          // Mermaid 12 uses the root setting; flowchart.htmlLabels is deprecated.
-          fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif',
-          suppressErrorRendering: true,
-          deterministicIds: false,
-          themeVariables: mermaidThemeVariablesForFlavor(),
-          themeCSS: mermaidThemeCssForFlavor()
-        });
+        mermaid_default.initialize(mermaidConfigForFlavor());
       } catch (error2) {
         console.warn("[bili-subbatch] mermaid theme refresh", error2);
       }
@@ -80784,6 +80825,7 @@ ${memory}
     }
     async function renderPreprocessCanvas() {
       const root2 = ensurePanel();
+      releaseFolioViewport(root2.querySelector('[data-role="ai-md"]'));
       if (state2.ui) state2.ui.aiStage = "preprocess";
       const processed2 = currentInputPreviewText("processed");
       const raw = currentInputPreviewText("raw");
@@ -80855,6 +80897,7 @@ ${memory}
     }
     async function setAiWorkbenchStage(stage, opts = {}) {
       const next2 = stage === "postprocess" ? "postprocess" : stage === "chat" ? "chat" : "preprocess";
+      if (next2 !== "postprocess") releaseFolioViewport(document.getElementById(PANEL_ID)?.querySelector('[data-role="ai-md"]'));
       if (state2.ui) state2.ui.aiStage = next2;
       applyAiWorkbenchStageUi();
       if (!opts.silent) saveUiGeom();
@@ -81471,37 +81514,7 @@ ${coreCall("cuesToAiText", it2.data || [], it2.bvid, it2.page || 1)}`;
     async function ensureMermaid() {
       if (state2.renderLibs.mermaid) return;
       if (typeof mermaid_default !== "undefined") {
-        mermaid_default.initialize({
-          startOnLoad: false,
-          theme: "base",
-          securityLevel: "strict",
-          htmlLabels: false,
-          // Mermaid 12 uses the root setting; flowchart.htmlLabels is deprecated.
-          fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif',
-          suppressErrorRendering: true,
-          deterministicIds: false,
-          themeVariables: mermaidThemeVariablesForFlavor(),
-          themeCSS: mermaidThemeCssForFlavor(),
-          flowchart: {
-            htmlLabels: false,
-            useMaxWidth: false,
-            curve: "basis",
-            nodeSpacing: 48,
-            rankSpacing: 64,
-            padding: 16
-          },
-          sequence: {
-            useMaxWidth: false,
-            wrap: true,
-            diagramMarginX: 32,
-            diagramMarginY: 24,
-            actorMargin: 72,
-            width: 180,
-            height: 72,
-            boxMargin: 12,
-            messageMargin: 42
-          }
-        });
+        mermaid_default.initialize(mermaidConfigForFlavor());
       }
       state2.renderLibs.mermaid = true;
     }
@@ -82547,18 +82560,11 @@ ${message}`;
           }
           if (current?.id) setFolioTocCurrent(shell, current.id);
         };
-        box.addEventListener("scroll", onScroll, { passive: true });
         const onResize = () => {
           syncFolioTocViewport(shell, box);
           updateFolioProgress(shell, box);
         };
-        window.addEventListener("resize", onResize);
-        if (typeof ResizeObserver === "function") {
-          const ro = new ResizeObserver(onResize);
-          ro.observe(box);
-        }
-        onResize();
-        onScroll();
+        bindFolioViewport(box, { onScroll, onResize });
       }
     }
     function mountHtmlFolio(host2, sourceHtml, scrollRoot) {
@@ -82646,7 +82652,10 @@ body{padding:48px 20px 80px}
       const box = root2.querySelector('[data-role="ai-md"]');
       const host2 = root2.querySelector('[data-role="ai-content"]') || box;
       if (!host2) return;
-      if (streaming) return paintAiStreamText(md);
+      if (streaming) {
+        releaseFolioViewport(box);
+        return paintAiStreamText(md);
+      }
       closeMermaidFullscreen();
       if (state2.aiPaintTimer) {
         clearTimeout(state2.aiPaintTimer);
@@ -82693,6 +82702,7 @@ body{padding:48px 20px 80px}
         updateJumpLatestBtn();
         return;
       }
+      releaseFolioViewport(box);
       const needsMath = hasMathSyntax(source);
       const needsCode = hasCodeSyntax(source);
       const needsMermaid = hasMermaidSyntax(source);

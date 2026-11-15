@@ -1,7 +1,7 @@
 import { toTrustedHTML } from "../runtime/trusted-html";
 import type { WorkbenchSubtitleResult } from "../runtime/workbench-state";
 import type * as CoreModule from "@subbatch/core";
-import type { SubBatchMonorepo } from "../main";
+import type { SubBatchMonorepo } from "../composition";
 import type { createRepository as createKnowledgeRepository } from "../app/knowledge-repository";
 import type { createController as createKnowledgeController } from "../app/knowledge-controller";
 import type { BatchTask } from "../app/ai-batch-coordinator";
@@ -14,8 +14,11 @@ import { normalizeCachedSessionInput, applyRestoredRunOutput, restorePreprocessR
 import { resolveAiScrollState } from "../ui/workspaces/ai-scroll-state";
 import { marked, DOMPurify, katex, hljs, mermaid, installRenderingStyles } from "../runtime/rendering-libs";
 import { renderTranscriptReading, transcriptReadingText, transcriptTimestampPattern, transcriptTimestamps } from "../ui/workspaces/transcript-reading";
+import { createMermaidConfig } from "../ui/workspaces/mermaid-config";
+import { bindFolioViewport, releaseFolioViewport } from "../ui/workspaces/folio-viewport-controller";
 // Full-feature workbench. Bundled by the composition root; no standalone compatibility script.
 /**
+ * v6.10.10 — Mermaid 配置唯一来源，HTML 阅读目录滚动与 ResizeObserver 生命周期统一管理。
  * v6.10.9 — 修复 Mermaid 节点文字丢失、HTML/Markdown 字号与标题层级、目录重复 ID 和 SML 对话宽度。
  * v6.10.8 — HTML 阅读页按阅读区域宽度布局，无目录时正文占满空间，移除模型内联布局样式。
  * v6.10.7 — 内置 Markdown、净化、公式、高亮和图表依赖，移除运行时 CDN 加载。
@@ -148,7 +151,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
    */
 
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.10.9";
+    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.10.10";
   const PANEL_ID = "bili-subbatch-panel";
   const UI_STORE_KEY = "bili-subbatch-ui-v2";
   /** Catppuccin flavors — official palette https://catppuccin.com/palette/ */
@@ -3265,69 +3268,15 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     if (!opts?.silent) saveUiGeom();
   }
 
-  function mermaidThemeVariablesForFlavor(flavor = state.ui?.ctpFlavor) {
+  function mermaidConfigForFlavor(flavor = state.ui?.ctpFlavor) {
     const id = normalizeCtpFlavor(flavor);
-    const t = getCtpPalette(id);
-    return {
-      darkMode: id !== "latte",
-      background: t.mantle,
-      primaryColor: t.surface0,
-      primaryTextColor: t.rosewater,
-      primaryBorderColor: t.blue,
-      secondaryColor: t.surface1,
-      secondaryTextColor: t.text,
-      secondaryBorderColor: t.green,
-      tertiaryColor: t.base,
-      tertiaryTextColor: t.text,
-      tertiaryBorderColor: t.mauve,
-      lineColor: t.subtext1,
-      textColor: t.text,
-      mainBkg: t.surface0,
-      nodeBorder: t.blue,
-      clusterBkg: t.base,
-      clusterBorder: t.surface2,
-      edgeLabelBackground: t.mantle,
-      actorBkg: t.surface0,
-      actorBorder: t.blue,
-      actorTextColor: t.rosewater,
-      signalColor: t.subtext1,
-      signalTextColor: t.text,
-      labelBoxBkgColor: t.surface0,
-      labelBoxBorderColor: t.blue,
-      labelTextColor: t.rosewater,
-      loopTextColor: t.text,
-      noteBkgColor: t.surface1,
-      noteBorderColor: t.yellow,
-      noteTextColor: t.rosewater,
-      fontSize: "16px",
-    };
-  }
-
-  function mermaidThemeCssForFlavor(flavor = state.ui?.ctpFlavor) {
-    const t = getCtpPalette(flavor);
-    return `
-          .nodeLabel, .edgeLabel, .label, text { font-size: 16px !important; }
-          .edgeLabel rect { fill: ${t.mantle} !important; opacity: .96 !important; }
-          .flowchart-link { stroke-width: 2px !important; }
-          .marker { fill: ${t.subtext1} !important; stroke: ${t.subtext1} !important; }
-          .cluster rect { rx: 10px; ry: 10px; }
-        `;
+    return createMermaidConfig(getCtpPalette(id), id !== "latte");
   }
 
   function refreshMermaidTheme() {
     if (typeof mermaid === "undefined" || !state.renderLibs?.mermaid) return;
     try {
-      mermaid.initialize({
-        startOnLoad: false,
-        theme: "base",
-        securityLevel: "strict",
-        htmlLabels: false, // Mermaid 12 uses the root setting; flowchart.htmlLabels is deprecated.
-        fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif',
-        suppressErrorRendering: true,
-        deterministicIds: false,
-        themeVariables: mermaidThemeVariablesForFlavor(),
-        themeCSS: mermaidThemeCssForFlavor(),
-      });
+      mermaid.initialize(mermaidConfigForFlavor());
     } catch (error) {
       console.warn("[bili-subbatch] mermaid theme refresh", error);
     }
@@ -7022,6 +6971,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
 
   async function renderPreprocessCanvas() {
     const root = ensurePanel();
+    releaseFolioViewport(root.querySelector('[data-role="ai-md"]'));
     if (state.ui) state.ui.aiStage = "preprocess";
     const processed = currentInputPreviewText("processed");
     const raw = currentInputPreviewText("raw");
@@ -7100,6 +7050,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
 
   async function setAiWorkbenchStage(stage: string, opts: { silent?: boolean; render?: boolean } = {}) {
     const next = stage === "postprocess" ? "postprocess" : stage === "chat" ? "chat" : "preprocess";
+    if (next !== "postprocess") releaseFolioViewport(document.getElementById(PANEL_ID)?.querySelector('[data-role="ai-md"]'));
     if (state.ui) state.ui.aiStage = next;
     applyAiWorkbenchStageUi();
     if (!opts.silent) saveUiGeom();
@@ -7794,36 +7745,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
   async function ensureMermaid() {
     if (state.renderLibs.mermaid) return;
     if (typeof mermaid !== "undefined") {
-      mermaid.initialize({
-        startOnLoad: false,
-        theme: "base",
-        securityLevel: "strict",
-        htmlLabels: false, // Mermaid 12 uses the root setting; flowchart.htmlLabels is deprecated.
-        fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif',
-        suppressErrorRendering: true,
-        deterministicIds: false,
-        themeVariables: mermaidThemeVariablesForFlavor(),
-        themeCSS: mermaidThemeCssForFlavor(),
-        flowchart: {
-          htmlLabels: false,
-          useMaxWidth: false,
-          curve: "basis",
-          nodeSpacing: 48,
-          rankSpacing: 64,
-          padding: 16,
-        },
-        sequence: {
-          useMaxWidth: false,
-          wrap: true,
-          diagramMarginX: 32,
-          diagramMarginY: 24,
-          actorMargin: 72,
-          width: 180,
-          height: 72,
-          boxMargin: 12,
-          messageMargin: 42,
-        },
-      });
+      mermaid.initialize(mermaidConfigForFlavor());
     }
     state.renderLibs.mermaid = true;
   }
@@ -8926,18 +8848,11 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
         }
         if (current?.id) setFolioTocCurrent(shell, current.id);
       };
-      box.addEventListener("scroll", onScroll, { passive: true });
       const onResize = () => {
         syncFolioTocViewport(shell, box);
         updateFolioProgress(shell, box);
       };
-      window.addEventListener("resize", onResize);
-      if (typeof ResizeObserver === "function") {
-        const ro = new ResizeObserver(onResize);
-        ro.observe(box);
-      }
-      onResize();
-      onScroll();
+      bindFolioViewport(box, { onScroll, onResize });
     }
   }
 
@@ -9029,7 +8944,7 @@ body{padding:48px 20px 80px}
     const box = root.querySelector<HTMLElement>('[data-role="ai-md"]');
     const host = root.querySelector<HTMLElement>('[data-role="ai-content"]') || box;
     if (!host) return;
-    if (streaming) return paintAiStreamText(md);
+    if (streaming) { releaseFolioViewport(box); return paintAiStreamText(md); }
     closeMermaidFullscreen();
 
     // 防止最后一个流式定时绘制在增强渲染完成后反向覆盖 DOM。
@@ -9063,6 +8978,7 @@ body{padding:48px 20px 80px}
       return;
     }
 
+    releaseFolioViewport(box);
     const needsMath = hasMathSyntax(source);
     const needsCode = hasCodeSyntax(source);
     const needsMermaid = hasMermaidSyntax(source);
