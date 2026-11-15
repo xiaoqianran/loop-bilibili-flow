@@ -15,7 +15,7 @@ export const userscriptMetadata: UserscriptMetadata = {
   // Keep the historical identity so Tampermonkey upgrades the installed v6.0.2.
   name: "Bili SubBatch (loop-bilibili)",
   namespace: "https://github.com/loop-bilibili/bili-subbatch",
-  version: "6.10.1",
+  version: "6.10.2",
   description:
     "B站 / YouTube 知识阅读工作台：字幕预处理、多产物后处理、Anchor 局部追问树与持久 Knowledge Workspace",
   author: "loop-bilibili",
@@ -68,6 +68,8 @@ export function renderUserscriptMetadata(
     `// @name         ${metadata.name}`,
     `// @namespace    ${metadata.namespace}`,
     `// @version      ${metadata.version}`,
+    `// @updateURL    https://raw.githubusercontent.com/xiaoqianran/loop-bilibili-flow/main/dist/userscript/loop-bilibili-flow.user.js`,
+    `// @downloadURL  https://raw.githubusercontent.com/xiaoqianran/loop-bilibili-flow/main/dist/userscript/loop-bilibili-flow.user.js`,
     `// @description  ${metadata.description}`,
     `// @author       ${metadata.author}`,
     ...metadata.match.map((value) => `// @match        ${value}`),

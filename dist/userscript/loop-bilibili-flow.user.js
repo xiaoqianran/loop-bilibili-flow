@@ -1,7 +1,9 @@
 // ==UserScript==
 // @name         Bili SubBatch (loop-bilibili)
 // @namespace    https://github.com/loop-bilibili/bili-subbatch
-// @version      6.10.1
+// @version      6.10.2
+// @updateURL    https://raw.githubusercontent.com/xiaoqianran/loop-bilibili-flow/main/dist/userscript/loop-bilibili-flow.user.js
+// @downloadURL  https://raw.githubusercontent.com/xiaoqianran/loop-bilibili-flow/main/dist/userscript/loop-bilibili-flow.user.js
 // @description  B站 / YouTube 知识阅读工作台：字幕预处理、多产物后处理、Anchor 局部追问树与持久 Knowledge Workspace
 // @author       loop-bilibili
 // @match        *://www.bilibili.com/video/*
@@ -39,7 +41,7 @@
 // @license      MIT
 // ==/UserScript==
 
-// SubBatch bundled application (6.10.1)
+// SubBatch bundled application (6.10.2)
 var SubBatch = (function(exports) {
   "use strict";
   function videoViewUrl(bvid) {
@@ -11853,7 +11855,7 @@ ${prompt2.userPromptTemplate}`
     function isMermaidSetupError(value) {
       return !!value && typeof value === "object" && "mermaidSetup" in value && value.mermaidSetup === true;
     }
-    const SCRIPT_VERSION = typeof GM_info !== "undefined" && GM_info?.script?.version || "6.10.1";
+    const SCRIPT_VERSION = typeof GM_info !== "undefined" && GM_info?.script?.version || "6.10.2";
     const PANEL_ID = "bili-subbatch-panel";
     const UI_STORE_KEY = "bili-subbatch-ui-v2";
     const DEFAULT_CTP_FLAVOR = "mocha";
@@ -21562,7 +21564,7 @@ ${latest}`;
   const host = createUserscriptHost();
   const runtime = userscript.create(host);
   const SubBatchMonorepo = {
-    version: "6.10.1",
+    version: "6.10.2",
     runtime,
     core,
     bilibili,
