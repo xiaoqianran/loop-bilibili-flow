@@ -1,3 +1,4 @@
+import { toTrustedHTML } from "../../runtime/trusted-html";
 /** Subtitle reading UI, independent of workbench globals and acquisition I/O. */
 import { status } from "./library-controller";
 export interface TranscriptCue {
@@ -169,9 +170,9 @@ export function renderPanel(
       : `${item.bvid || ""}${page > 1 ? ` · P${page}` : ""} · ${value === "error" ? "抓取失败" : value === "empty" ? "无字幕" : "待抓取"}`;
     count.textContent = "";
     populateTrackSelect(select, null, state, ports.preferredTrack);
-    list.innerHTML = item
+    list.innerHTML = toTrustedHTML(item
       ? `<div class="bsb-transcript-empty">${value === "error" ? "字幕抓取失败，可点击右上角刷新重试。" : value === "empty" ? "这个视频没有可读取字幕。" : "该视频尚未抓取字幕，可勾选后点击左侧「抓取所选」。"}</div>`
-      : '<div class="bsb-transcript-empty">从左侧选择一个视频。<br>已有字幕的项目会直接显示全文。</div>';
+      : '<div class="bsb-transcript-empty">从左侧选择一个视频。<br>已有字幕的项目会直接显示全文。</div>');
     return false;
   }
   if (!state.transcriptItemKey) state.transcriptItemKey = ports.routeKey(item.bvid, item.page || 1);

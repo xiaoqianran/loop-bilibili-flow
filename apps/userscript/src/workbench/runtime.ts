@@ -1,3 +1,4 @@
+import { toTrustedHTML } from "../runtime/trusted-html";
 import type { WorkbenchSubtitleResult } from "../runtime/workbench-state";
 import type * as CoreModule from "@subbatch/core";
 import type { SubBatchMonorepo } from "../main";
@@ -13,6 +14,7 @@ import { normalizeCachedSessionInput, applyRestoredRunOutput, restorePreprocessR
 import { resolveAiScrollState } from "../ui/workspaces/ai-scroll-state";
 // Full-feature workbench. Bundled by the composition root; no standalone compatibility script.
 /**
+ * v6.10.6 — YouTube Trusted Types 隔离适配：修复面板与字幕 HTML 写入。
  * v6.10.5 — YouTube 全工作台入口、字幕与时间跳转适配。
  * v6.10.4 — Video Carrier 抽象：festival/blackboard 仅在检测到真实 BV / active player 后启动完整工作台；修正 live-player helper bridge。
  * v6.9.15 — 支持 B 站 /festival/* 专题页：复用 BV 路由与现有字幕链路，不引入专题页专用抓取分支。
@@ -141,7 +143,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
    */
 
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.10.5";
+    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.10.6";
   const PANEL_ID = "bili-subbatch-panel";
   const UI_STORE_KEY = "bili-subbatch-ui-v2";
   /** Catppuccin flavors — official palette https://catppuccin.com/palette/ */
@@ -2535,7 +2537,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     root = document.createElement("div") as WorkbenchPanelElement;
     root.id = PANEL_ID;
     root.setAttribute("data-ctp-flavor", normalizeCtpFlavor(state.ui?.ctpFlavor || DEFAULT_CTP_FLAVOR));
-    root.innerHTML = `
+    root.innerHTML = toTrustedHTML(`
       ${SubBatch.SubBatchMonorepo.ui.panelMarkup.renderPanelHeader(SCRIPT_VERSION)}
         <div class="bsb-body">
           <!-- AI 主画布 -->
@@ -2565,7 +2567,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
         </div>
       </div>
       <button type="button" class="bsb-fab" title="SubBatch 工作台" aria-expanded="false">CC</button>
-    `;
+    `);
     document.documentElement.appendChild(root);
     bindPanelChrome(root);
     bindKnowledgeLayoutInteractions(root);
@@ -3347,7 +3349,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     const host = root?.querySelector?.('[data-role="appearance-settings"]');
     if (!host) return;
     const current = normalizeCtpFlavor(state.ui?.ctpFlavor || DEFAULT_CTP_FLAVOR);
-    host.innerHTML = `
+    host.innerHTML = toTrustedHTML(`
       <div class="bsb-appearance-head">
         <strong>Catppuccin 主题</strong>
         <span>在 Latte / Frappé / Macchiato / Mocha 间切换。默认 Mocha，选择会保存在本机。</span>
@@ -3367,7 +3369,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
           </button>`;
         }).join("")}
       </div>
-    `;
+    `);
   }
 
   function panelIsVisiblyOpen() {
@@ -3526,11 +3528,11 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     }
     const context = root.querySelector<HTMLElement>('[data-role="prompt-stage-context"]');
     if (context) {
-      context.innerHTML = next === "preprocess"
+      context.innerHTML = toTrustedHTML(next === "preprocess"
         ? '<span>预处理 · 原始字幕 → 规范化简体中文字幕稿</span><span>PRE</span>'
         : next === "knowledge"
           ? '<span>Knowledge · 字幕锚点 → 独立追问树</span><span>DRILL</span>'
-          : '<span>后处理 · 规范化字幕稿 → Mermaid / 笔记 / 自测等产物</span><span>POST</span>';
+          : '<span>后处理 · 规范化字幕稿 → Mermaid / 笔记 / 自测等产物</span><span>POST</span>');
     }
     fillPromptConfigForm(root);
     if (!opts?.silent) saveUiGeom();
@@ -3755,9 +3757,9 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     if (hint) {
       const autoLabel = TYPE_LABEL[auto.type] || auto.type;
       if (state.mode === "auto") {
-        hint.innerHTML = `识别：<strong>${escapeHtml(autoLabel)}</strong>`;
+        hint.innerHTML = toTrustedHTML(`识别：<strong>${escapeHtml(autoLabel)}</strong>`);
       } else {
-        hint.innerHTML = `自动本会是：<strong>${escapeHtml(autoLabel)}</strong>（已手动覆盖）`;
+        hint.innerHTML = toTrustedHTML(`自动本会是：<strong>${escapeHtml(autoLabel)}</strong>（已手动覆盖）`);
       }
     }
   }
@@ -3858,13 +3860,13 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     if (visible) visible.textContent = `${entries.length} / ${state.items.length}`;
 
     if (!state.items.length) {
-      box.innerHTML = `<div class="bsb-empty"><div class="bsb-empty-ico">≡</div><strong>字幕库为空</strong><span>点击「＋ 采集视频」，或直接打开一个视频自动加入。</span></div>`;
+      box.innerHTML = toTrustedHTML(`<div class="bsb-empty"><div class="bsb-empty-ico">≡</div><strong>字幕库为空</strong><span>点击「＋ 采集视频」，或直接打开一个视频自动加入。</span></div>`);
       if (renderTranscript) renderTranscriptPanel();
       refreshAiChips();
       return;
     }
     if (!entries.length) {
-      box.innerHTML = `<div class="bsb-empty"><strong>没有匹配项</strong><span>调整搜索词或字幕状态筛选。</span></div>`;
+      box.innerHTML = toTrustedHTML(`<div class="bsb-empty"><strong>没有匹配项</strong><span>调整搜索词或字幕状态筛选。</span></div>`);
       if (renderTranscript) renderTranscriptPanel();
       refreshAiChips();
       return;
@@ -3882,7 +3884,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     if (!Array.isArray(nodes) || !nodes.length) {
       nodes = entries.map((entry) => ({ type: "item", entry, depth: 0 }));
     }
-    box.innerHTML = nodes.map((node) => libraryRenderNodeHtml(node, node.depth || 0)).join("");
+    box.innerHTML = toTrustedHTML(nodes.map((node) => libraryRenderNodeHtml(node, node.depth || 0)).join(""));
     // 部分选中：父级勾选消失（不显示半选），与「全选才勾上」一致。
     box.querySelectorAll<HTMLInputElement>('input[data-group-check][data-partial="1"]').forEach((el) => {
       el.checked = false;
@@ -4626,9 +4628,9 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     const host = root?.querySelector<HTMLElement>('[data-role="shortcut-settings"]');
     if (!host) return;
     const config = state.shortcutConfig || loadShortcutSettings();
-    host.innerHTML = `<div class="bsb-shortcut-page"><div class="bsb-shortcut-hero"><div><span class="bsb-shortcut-kicker">QUICK SUMMON</span><h3>快捷召唤</h3><p>快捷键只在 Bilibili 页面生效。正在输入文字时默认不触发，避免干扰搜索、弹幕和表单。</p></div><label class="bsb-flow-switch"><input type="checkbox" data-shortcut-pref="enabled" ${config.enabled ? "checked" : ""}><span class="bsb-flow-switch-track" aria-hidden="true"></span><span class="bsb-flow-switch-text">${config.enabled ? "已开启" : "已关闭"}</span></label></div>
+    host.innerHTML = toTrustedHTML(`<div class="bsb-shortcut-page"><div class="bsb-shortcut-hero"><div><span class="bsb-shortcut-kicker">QUICK SUMMON</span><h3>快捷召唤</h3><p>快捷键只在 Bilibili 页面生效。正在输入文字时默认不触发，避免干扰搜索、弹幕和表单。</p></div><label class="bsb-flow-switch"><input type="checkbox" data-shortcut-pref="enabled" ${config.enabled ? "checked" : ""}><span class="bsb-flow-switch-track" aria-hidden="true"></span><span class="bsb-flow-switch-text">${config.enabled ? "已开启" : "已关闭"}</span></label></div>
       <section class="bsb-shortcut-card"><div class="bsb-shortcut-section-title"><strong>召唤行为</strong><span>主快捷键打开面板时，决定它出现在哪里、先看什么。</span></div><div class="bsb-shortcut-prefs"><label><span>面板布局</span><div class="bsb-flow-select"><select data-shortcut-pref="summonLayout"><option value="remember"${config.summonLayout === "remember" ? " selected" : ""}>记住上次</option><option value="floating"${config.summonLayout === "floating" ? " selected" : ""}>悬浮</option><option value="right"${config.summonLayout === "right" ? " selected" : ""}>右侧靠边</option><option value="left"${config.summonLayout === "left" ? " selected" : ""}>左侧靠边</option></select><span class="bsb-flow-select-icon">⌄</span></div></label><label><span>默认内容</span><div class="bsb-flow-select"><select data-shortcut-pref="summonTarget"><option value="remember"${config.summonTarget === "remember" ? " selected" : ""}>记住上次</option><option value="processed"${config.summonTarget === "processed" ? " selected" : ""}>AI 处理字幕</option><option value="postprocess"${config.summonTarget === "postprocess" ? " selected" : ""}>后处理 · 上次产物/模型</option></select><span class="bsb-flow-select-icon">⌄</span></div></label><label><span>靠边方向</span><div class="bsb-flow-select"><select data-shortcut-pref="preferredDock"><option value="right"${config.preferredDock === "right" ? " selected" : ""}>右侧</option><option value="left"${config.preferredDock === "left" ? " selected" : ""}>左侧</option></select><span class="bsb-flow-select-icon">⌄</span></div></label></div></section>
-      <section class="bsb-shortcut-card"><div class="bsb-shortcut-section-title"><strong>命令快捷键</strong><span>点击快捷键框后直接按新的组合；Esc 取消，Backspace / Delete 清除。</span></div><div class="bsb-shortcut-list">${SHORTCUT_COMMANDS.map(shortcutCommandHtml).join("")}</div><div class="bsb-shortcut-foot"><span>建议使用 Ctrl + Alt + 字母/数字，避开 Chrome 与 B 站播放器常用键。</span><button type="button" class="bsb-btn ghost" data-shortcut-reset-all>恢复默认快捷键</button></div></section></div>`;
+      <section class="bsb-shortcut-card"><div class="bsb-shortcut-section-title"><strong>命令快捷键</strong><span>点击快捷键框后直接按新的组合；Esc 取消，Backspace / Delete 清除。</span></div><div class="bsb-shortcut-list">${SHORTCUT_COMMANDS.map(shortcutCommandHtml).join("")}</div><div class="bsb-shortcut-foot"><span>建议使用 Ctrl + Alt + 字母/数字，避开 Chrome 与 B 站播放器常用键。</span><button type="button" class="bsb-btn ghost" data-shortcut-reset-all>恢复默认快捷键</button></div></section></div>`);
   }
 
   function ensureBuiltinStagePrompts(prompts: PromptProfile[]) {
@@ -4949,7 +4951,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
   function decorateMarkdownHighlights(html: string) {
     if (typeof document === "undefined") return String(html || "");
     const tpl = document.createElement("template");
-    tpl.innerHTML = String(html || "");
+    tpl.innerHTML = toTrustedHTML(String(html || ""));
     const walker = document.createTreeWalker(tpl.content, NodeFilter.SHOW_TEXT);
     const nodes: Text[] = [];
     while (walker.nextNode()) {
@@ -5257,7 +5259,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     }
     const anchor = knowledgeAnchorById(state.knowledgeActiveAnchorId);
     if (!anchor) {
-      rail.innerHTML = '<button type="button" class="bsb-knowledge-rail-resize" data-role="knowledge-rail-resize" title="拖拽调整 Knowledge 宽度" aria-label="调整 Knowledge 宽度"></button><div class="bsb-knowledge-rail-empty"><span>✦</span><strong>Knowledge</strong><p>在 AI 处理字幕中选中文字，创建一个局部知识锚点。</p><button type="button" class="bsb-btn ghost" data-knowledge-close>关闭</button></div>';
+      rail.innerHTML = toTrustedHTML('<button type="button" class="bsb-knowledge-rail-resize" data-role="knowledge-rail-resize" title="拖拽调整 Knowledge 宽度" aria-label="调整 Knowledge 宽度"></button><div class="bsb-knowledge-rail-empty"><span>✦</span><strong>Knowledge</strong><p>在 AI 处理字幕中选中文字，创建一个局部知识锚点。</p><button type="button" class="bsb-btn ghost" data-knowledge-close>关闭</button></div>');
       return;
     }
     const nodes = knowledgeNodesForAnchor(anchor.id);
@@ -5272,12 +5274,12 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     } catch  {
       /* fall back to simple markdown */
     }
-    rail.innerHTML = `<button type="button" class="bsb-knowledge-rail-resize" data-role="knowledge-rail-resize" title="拖拽调整 Knowledge 宽度" aria-label="调整 Knowledge 宽度"></button>
+    rail.innerHTML = toTrustedHTML(`<button type="button" class="bsb-knowledge-rail-resize" data-role="knowledge-rail-resize" title="拖拽调整 Knowledge 宽度" aria-label="调整 Knowledge 宽度"></button>
       <div class="bsb-knowledge-rail-head">
         <div class="bsb-knowledge-anchor-title"><span class="bsb-knowledge-kicker">KNOWLEDGE ANCHOR</span><strong>${escapeHtml(anchor.selectedText)}</strong><small>${escapeHtml(anchor.title || anchor.bvid)} · ${anchor.timeStart != null ? coreCall("formatClock", anchor.timeStart) : "局部字幕"}${Number(anchor.timeEnd) > Number(anchor.timeStart) ? `–${coreCall("formatClock", anchor.timeEnd || 0)}` : ""}</small></div>
         <div class="bsb-knowledge-rail-actions">${state.knowledgeBusy ? '<button type="button" class="bsb-icon-btn" data-knowledge-stop title="停止回答">■</button>' : ''}<button type="button" class="bsb-icon-btn${anchor.starred ? " active" : ""}" data-knowledge-star-anchor title="${anchor.starred ? "取消收藏锚点" : "收藏锚点"}">${anchor.starred ? "★" : "☆"}</button><button type="button" class="bsb-icon-btn" data-knowledge-new-root title="新建独立根问题">＋</button><button type="button" class="bsb-icon-btn${state.knowledgeTreeOpen ? " active" : ""}" data-knowledge-tree-toggle title="${state.knowledgeTreeOpen ? "收起追问树" : "展开追问树（并排）"}">☷</button><button type="button" class="bsb-icon-btn" data-knowledge-open-workspace title="在 Knowledge 工作区打开">↗</button><button type="button" class="bsb-icon-btn" data-knowledge-close title="关闭">×</button></div>
       </div>
-      <div class="bsb-knowledge-rail-body">${knowledgeRailBodyHtml(anchor, activeNode)}</div>`;
+      <div class="bsb-knowledge-rail-body">${knowledgeRailBodyHtml(anchor, activeNode)}</div>`);
     const nextPanel = rail.querySelector<HTMLElement>('.bsb-knowledge-panel-main');
     if (nextPanel) nextPanel.scrollTop = oldScroll;
     await hydrateKnowledgeAnswerDom(rail.querySelector<HTMLElement>(".bsb-knowledge-rail-body") || rail, state.renderEpoch);
@@ -5691,7 +5693,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
           cursor = r.end;
         }
         html += escapeHtml(original.slice(cursor));
-        body.innerHTML = html;
+        body.innerHTML = toTrustedHTML(html);
       }
       if (article) article.classList.add("has-knowledge");
     }
@@ -5711,7 +5713,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     try {
       if (!state.knowledgeBusy) await knowledgeRefreshCache();
     } catch (error) {
-      detail.innerHTML = `<div class="bsb-empty"><strong>知识库不可用</strong><span>${escapeHtml(errorMessage(error))}</span></div>`;
+      detail.innerHTML = toTrustedHTML(`<div class="bsb-empty"><strong>知识库不可用</strong><span>${escapeHtml(errorMessage(error))}</span></div>`);
       return;
     }
     const anchors = SubBatch.SubBatchMonorepo.ui.knowledgeNavigation.filterAnchors(
@@ -5731,13 +5733,13 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     } catch  {
       /* fall back to simple markdown */
     }
-    list.innerHTML = knowledgeNavigatorHtml(anchors, state.knowledgeActiveAnchorId, state.knowledgeActiveNodeId);
+    list.innerHTML = toTrustedHTML(knowledgeNavigatorHtml(anchors, state.knowledgeActiveAnchorId, state.knowledgeActiveNodeId));
     workspace?.classList.toggle("detail-open", !!anchor);
     if (!anchor) {
-      detail.innerHTML = '<div class="bsb-empty"><div class="bsb-empty-ico">◇</div><strong>选择一个知识锚点</strong><span>左侧按视频组织锚点；当前锚点的追问树会直接展开在其下方。</span></div>';
+      detail.innerHTML = toTrustedHTML('<div class="bsb-empty"><div class="bsb-empty-ico">◇</div><strong>选择一个知识锚点</strong><span>左侧按视频组织锚点；当前锚点的追问树会直接展开在其下方。</span></div>');
       return;
     }
-    detail.innerHTML = knowledgeReaderHtml(anchor, activeNode, { isSmall });
+    detail.innerHTML = toTrustedHTML(knowledgeReaderHtml(anchor, activeNode, { isSmall }));
     const nextScroll = detail.querySelector<HTMLElement>('[data-role="knowledge-reader-scroll"]');
     if (nextScroll) nextScroll.scrollTop = oldScroll;
     await hydrateKnowledgeAnswerDom(detail, state.renderEpoch);
@@ -5943,18 +5945,18 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
 
     if (postSelect) {
       postSelect.disabled = !posts.length;
-      postSelect.innerHTML = posts.length
+      postSelect.innerHTML = toTrustedHTML(posts.length
         ? posts.map((p) => `<option value="${escapeAttr(p.id)}">${escapeHtml(p.name)}</option>`).join("")
-        : '<option value="">没有后处理 Prompt</option>';
+        : '<option value="">没有后处理 Prompt</option>');
       const active = posts.some((p) => p.id === state.activePromptId) ? state.activePromptId : (posts[0]?.id || "");
       state.activePromptId = active;
       postSelect.value = active;
     }
     if (preSelect) {
       preSelect.disabled = !pres.length || !state.preprocessEnabled;
-      preSelect.innerHTML = pres.length
+      preSelect.innerHTML = toTrustedHTML(pres.length
         ? pres.map((p) => `<option value="${escapeAttr(p.id)}">${escapeHtml(p.name)}</option>`).join("")
-        : '<option value="">没有预处理 Prompt</option>';
+        : '<option value="">没有预处理 Prompt</option>');
       const active = pres.some((p) => p.id === state.activePrePromptId) ? state.activePrePromptId : (pres[0]?.id || "");
       state.activePrePromptId = active;
       preSelect.value = active;
@@ -6032,9 +6034,9 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
       : prompts;
     const canReorder = !q && filtered.length > 1;
     host.dataset.reorderLocked = canReorder ? "0" : "1";
-    host.innerHTML = filtered.length
+    host.innerHTML = toTrustedHTML(filtered.length
       ? filtered.map((p) => promptListItemHtml(p, { draggable: canReorder })).join("")
-      : `<div class="bsb-config-list-empty">${prompts.length ? "没有匹配的 Prompt" : (stage === "preprocess" ? "还没有预处理 Prompt" : stage === "knowledge" ? "还没有 Knowledge Prompt" : "还没有后处理 Prompt")}</div>`;
+      : `<div class="bsb-config-list-empty">${prompts.length ? "没有匹配的 Prompt" : (stage === "preprocess" ? "还没有预处理 Prompt" : stage === "knowledge" ? "还没有 Knowledge Prompt" : "还没有后处理 Prompt")}</div>`);
   }
 
   function fillPromptConfigForm(root: HTMLElement) {
@@ -6052,7 +6054,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     const editorHost = root.querySelector<HTMLElement>('[data-role="prompt-editor"]');
     if (editorHost) {
       const index = library.prompts.findIndex((p: { id: string; }) => p.id === state.promptEditorId);
-      editorHost.innerHTML = promptEditorHtml(index >= 0 ? library.prompts[index] : null, Math.max(0, index));
+      editorHost.innerHTML = toTrustedHTML(promptEditorHtml(index >= 0 ? library.prompts[index] : null, Math.max(0, index)));
     }
     refreshPromptSelector(root);
   }
@@ -6216,14 +6218,14 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     const ready = profiles.filter((p) => p.apiKey && p.baseUrl && p.model);
     const fallback = ready.find((p) => p.enabled) || ready[0] || null;
     if (!ready.length) {
-      select.innerHTML = '<option value="">没有可用 LLM</option>';
+      select.innerHTML = toTrustedHTML('<option value="">没有可用 LLM</option>');
       select.value = "";
       select.disabled = true;
       state.preprocessModelId = "";
       return;
     }
     select.disabled = !state.preprocessEnabled;
-    select.innerHTML = ready.map((p) => `<option value="${escapeAttr(p.id)}">${escapeHtml(p.name || p.model)}</option>`).join("");
+    select.innerHTML = toTrustedHTML(ready.map((p) => `<option value="${escapeAttr(p.id)}">${escapeHtml(p.name || p.model)}</option>`).join(""));
     if (!ready.some((p: { id: string; }) => p.id === state.preprocessModelId)) {
       state.preprocessModelId = fallback?.id || "";
       storageSet(PREPROCESS_MODEL_STORE_KEY, state.preprocessModelId);
@@ -6326,9 +6328,9 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
       : profiles;
     const canReorder = !q && filtered.length > 1;
     host.dataset.reorderLocked = canReorder ? "0" : "1";
-    host.innerHTML = filtered.length
+    host.innerHTML = toTrustedHTML(filtered.length
       ? filtered.map((p) => aiListItemHtml(p, { draggable: canReorder })).join("")
-      : `<div class="bsb-config-list-empty">${profiles.length ? "没有匹配的 LLM" : "还没有 LLM 配置"}</div>`;
+      : `<div class="bsb-config-list-empty">${profiles.length ? "没有匹配的 LLM" : "还没有 LLM 配置"}</div>`);
   }
 
   function fillAiConfigForm(root: HTMLElement) {
@@ -6344,7 +6346,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     const host = root.querySelector<HTMLElement>('[data-role="ai-editor"]');
     if (!host) return;
     const index = state.aiProfiles.findIndex((p) => p.id === state.aiEditorId);
-    host.innerHTML = aiEditorHtml(index >= 0 ? state.aiProfiles[index] : null, Math.max(0, index));
+    host.innerHTML = toTrustedHTML(aiEditorHtml(index >= 0 ? state.aiProfiles[index] : null, Math.max(0, index)));
   }
 
   function readAiProfileCard(card: HTMLElement, index: number) {
@@ -6583,9 +6585,9 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     }
     if (state.studioSlashIndex >= items.length) state.studioSlashIndex = 0;
     menu.hidden = false;
-    menu.innerHTML = items.map((cmd, i) => (
+    menu.innerHTML = toTrustedHTML(items.map((cmd, i) => (
       `<button type="button" class="${i === state.studioSlashIndex ? "active" : ""}" data-studio-slash="${escapeAttr(cmd.id)}"><code>/${escapeHtml(cmd.aliases[0])}</code><span>${escapeHtml(cmd.hint)}</span></button>`
-    )).join("");
+    )).join(""));
   }
 
   function hideStudioSlashMenu() {
@@ -6613,9 +6615,9 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
   function paintStudioAnswer(msgId: string|undefined, text: string, streaming: boolean) {
     const cards = document.querySelector(`#${PANEL_ID} [data-studio-msg="${msgId}"] [data-role="studio-answer"]`);
     if (!cards) return false;
-    cards.innerHTML = String(text || "").trim()
+    cards.innerHTML = toTrustedHTML(String(text || "").trim()
       ? renderKnowledgeAnswerCards(text, { streaming: !!streaming })
-      : (streaming ? '<div class="bsb-knowledge-thinking">正在组织回答…</div>' : "<p></p>");
+      : (streaming ? '<div class="bsb-knowledge-thinking">正在组织回答…</div>' : "<p></p>"));
     return true;
   }
 
@@ -6635,7 +6637,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     if (meta) meta.textContent = bits.join(" · ");
     if (!host) return;
     if (!(state.studioMessages || []).length) {
-      host.innerHTML = `<div class="bsb-empty"><div class="bsb-empty-ico">◎</div><strong>对着这一期提问</strong><span>像聊天一样追问字幕。超长字幕会按问题压缩，旧对话会折进记忆。输入 <code>/</code> 可压缩、看记忆或清空。</span></div>`;
+      host.innerHTML = toTrustedHTML(`<div class="bsb-empty"><div class="bsb-empty-ico">◎</div><strong>对着这一期提问</strong><span>像聊天一样追问字幕。超长字幕会按问题压缩，旧对话会折进记忆。输入 <code>/</code> 可压缩、看记忆或清空。</span></div>`);
       return;
     }
     const joined = (state.studioMessages || []).map((m) => m.content || "").join("\n");
@@ -6643,7 +6645,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     if (currentAiWorkbenchStage() !== "chat") return;
     const box = root.querySelector<HTMLElement>('[data-role="ai-md"]');
     const prevTop = box?.scrollTop || 0;
-    host.innerHTML = `<div class="bsb-studio-thread">${state.studioMessages.map(studioMessageHtml).join("")}</div>`;
+    host.innerHTML = toTrustedHTML(`<div class="bsb-studio-thread">${state.studioMessages.map(studioMessageHtml).join("")}</div>`);
     try { linkifyTimestamps(host); } catch  { /* ignore */ }
     await hydrateKnowledgeAnswerDom(host, state.renderEpoch);
     if (box) {
@@ -7045,7 +7047,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     const content = root.querySelector<HTMLElement>('[data-role="ai-content"]');
     if (!content) return;
     if (kind === "processed" && state.preprocessRun?.busy) {
-      content.innerHTML = `<div class="bsb-empty"><div class="bsb-empty-ico">◌</div><strong>AI 正在处理字幕…</strong><span>${escapeHtml(state.preprocessRun.statusText || "正在规范化、翻译并整理字幕")}</span></div>`;
+      content.innerHTML = toTrustedHTML(`<div class="bsb-empty"><div class="bsb-empty-ico">◌</div><strong>AI 正在处理字幕…</strong><span>${escapeHtml(state.preprocessRun.statusText || "正在规范化、翻译并整理字幕")}</span></div>`);
     } else if (text) {
       if (kind === "processed") {
         try {
@@ -7053,18 +7055,18 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
         } catch  {
           /* simple markdown fallback */
         }
-        content.innerHTML = renderProcessedTranscriptCards(text);
+        content.innerHTML = toTrustedHTML(renderProcessedTranscriptCards(text));
         await decorateKnowledgeAnchors(content);
         await hydrateKnowledgeAnswerDom(content, state.renderEpoch);
       } else {
-        content.innerHTML = `<pre class="bsb-main-input-preview">${escapeHtml(text)}</pre>`;
+        content.innerHTML = toTrustedHTML(`<pre class="bsb-main-input-preview">${escapeHtml(text)}</pre>`);
       }
     } else {
       const title = kind === "processed" ? "还没有 AI 处理字幕" : "还没有原始字幕";
       const detail = kind === "processed"
         ? (state.preprocessEnabled ? "运行处理方案后，这里会显示规范化后的简体中文字幕。" : "当前预处理已关闭，可在“处理方案”中开启。")
         : "先在字幕库抓取当前视频字幕。";
-      content.innerHTML = `<div class="bsb-empty"><div class="bsb-empty-ico">◇</div><strong>${title}</strong><span>${detail}</span></div>`;
+      content.innerHTML = toTrustedHTML(`<div class="bsb-empty"><div class="bsb-empty-ico">◇</div><strong>${title}</strong><span>${detail}</span></div>`);
     }
     refreshAiChips();
     saveUiGeom();
@@ -7091,7 +7093,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     }
     const content = root.querySelector<HTMLElement>('[data-role="ai-content"]');
     if (meta) meta.textContent = "暂无后处理产物";
-    if (content) content.innerHTML = '<div class="bsb-empty"><div class="bsb-empty-ico">◇</div><strong>还没有后处理产物</strong><span>打开“处理方案”添加全 Mermaid 学习图谱或其他 POST Prompt。</span></div>';
+    if (content) content.innerHTML = toTrustedHTML('<div class="bsb-empty"><div class="bsb-empty-ico">◇</div><strong>还没有后处理产物</strong><span>打开“处理方案”添加全 Mermaid 学习图谱或其他 POST Prompt。</span></div>');
     saveUiGeom();
   }
 
@@ -7116,18 +7118,18 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     const tasks = currentPostTasks().filter((t) => t.enabled !== false);
     if (!tasks.some((t) => t.id === state.aiActiveTaskId)) state.aiActiveTaskId = tasks[0]?.id || "";
     if (!tasks.length) {
-      outputHost.innerHTML = '<span class="bsb-ai-result-empty">还没有输出产物 · 打开“处理方案”添加</span>';
-      modelHost.innerHTML = "";
+      outputHost.innerHTML = toTrustedHTML('<span class="bsb-ai-result-empty">还没有输出产物 · 打开“处理方案”添加</span>');
+      modelHost.innerHTML = toTrustedHTML("");
       return;
     }
 
-    outputHost.innerHTML = tasks.map((task) => {
+    outputHost.innerHTML = toTrustedHTML(tasks.map((task) => {
       const runs = state.aiRunOrder.map((id) => state.aiRuns.get(id)).filter((r): r is WorkbenchAiRun => !!r && r.taskId === task.id);
       const status = aggregateRunStatus(runs);
       const active = task.id === state.aiActiveTaskId ? " active" : "";
       const configuredModels = task.modelIds?.length || 0;
       return `<button type="button" class="bsb-output-tab ${escapeAttr(status)}${active}" data-ai-output-task="${escapeAttr(task.id)}" title="${escapeAttr(taskDisplayName(task))}"><span class="dot"></span><span class="name">${escapeHtml(taskDisplayName(task))}</span><span class="count">${runs.length || configuredModels}</span></button>`;
-    }).join("");
+    }).join(""));
 
     const activeTask = tasks.find((t) => t.id === state.aiActiveTaskId) || tasks[0];
     if (!activeTask) return;
@@ -7138,18 +7140,18 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
         state.aiActiveRunId = firstRun.id;
         syncActiveRunBridge(firstRun);
       }
-      modelHost.innerHTML = runs.map((run) => {
+      modelHost.innerHTML = toTrustedHTML(runs.map((run) => {
         const active = run.id === state.aiActiveRunId ? " active" : "";
         const status = run.status || (run.busy ? "running" : "queued");
         const name = run.config.name || run.config.model;
         return `<button type="button" class="bsb-model-tab ${escapeAttr(status)}${active}" data-ai-result-id="${escapeAttr(run.id)}" title="${escapeAttr(`${run.promptName} · ${name} · ${run.statusText || status}`)}"><span class="dot"></span><span>${escapeHtml(name)}</span></button>`;
-      }).join("");
+      }).join(""));
     } else {
       const profiles = state.aiProfiles?.length ? state.aiProfiles : loadAiProfiles();
       const modelNames = (activeTask.modelIds || []).map((id) => profiles.find((p: { id: unknown; }) => p.id === id)).filter((p): p is AiProfile => !!p);
-      modelHost.innerHTML = modelNames.length
+      modelHost.innerHTML = toTrustedHTML(modelNames.length
         ? modelNames.map((p) => `<span class="bsb-model-tab queued"><span class="dot"></span><span>${escapeHtml(p.name || p.model)}</span></span>`).join("")
-        : '<span class="bsb-ai-result-empty">这个产物还没有选择 LLM</span>';
+        : '<span class="bsb-ai-result-empty">这个产物还没有选择 LLM</span>');
     }
   }
 
@@ -7215,7 +7217,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
       `<option value="processed"${ctxPref === "processed" ? " selected" : ""}>规范化稿</option>`,
       `<option value="raw"${ctxPref === "raw" ? " selected" : ""}>原始字幕</option>`,
     ].join("");
-    host.innerHTML = `<div class="bsb-drawer-head"><div class="bsb-drawer-title"><strong>处理方案</strong><span>配置预处理、对话与后处理。这里只定义流程，不展示结果。</span></div><button type="button" class="bsb-icon-btn" data-act="ai-drawer-close" aria-label="关闭">×</button></div>
+    host.innerHTML = toTrustedHTML(`<div class="bsb-drawer-head"><div class="bsb-drawer-title"><strong>处理方案</strong><span>配置预处理、对话与后处理。这里只定义流程，不展示结果。</span></div><button type="button" class="bsb-icon-btn" data-act="ai-drawer-close" aria-label="关闭">×</button></div>
       <div class="bsb-drawer-body">
         <section class="bsb-flow-section">
           <div class="bsb-flow-section-head"><div><strong>预处理</strong><span>一次规范化，供对话与后处理复用</span></div><label class="bsb-flow-switch"><input type="checkbox" data-flow-preprocess-enabled ${state.preprocessEnabled ? "checked" : ""}><span class="bsb-flow-switch-track" aria-hidden="true"></span><span class="bsb-flow-switch-text">${state.preprocessEnabled ? "已开启" : "已关闭"}</span></label></div>
@@ -7248,7 +7250,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
           <div data-role="flow-task-list">${tasks.map((t, i) => flowTaskCardHtml(t, i, prompts, profiles)).join("") || '<div class="bsb-input-empty">还没有后处理产物。</div>'}</div>
         </section>
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span class="bsb-ai-result-empty">Prompt 与 LLM 的具体内容仍在“设置”中维护。</span><button type="button" class="bsb-btn" data-act="ai-reprocess" ${state.preprocessEnabled ? "" : "disabled"}>重做预处理</button></div>
-      </div>`;
+      </div>`);
   }
 
   function currentInputPreviewText(kind: string) {
@@ -7274,11 +7276,11 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     if (state.aiInputView === "processed" && !processed && raw) state.aiInputView = "raw";
     const text = state.aiInputView === "processed" ? processed : raw;
     const preLabel = state.preprocessEnabled ? (processed ? "已规范化" : "等待规范化") : "预处理关闭";
-    host.innerHTML = `<div class="bsb-drawer-head"><div class="bsb-drawer-title"><strong>输入</strong><span>${escapeHtml(preLabel)} · 这里用于核查 AI 真正读取的材料</span></div><button type="button" class="bsb-icon-btn" data-act="ai-drawer-close" aria-label="关闭">×</button></div>
+    host.innerHTML = toTrustedHTML(`<div class="bsb-drawer-head"><div class="bsb-drawer-title"><strong>输入</strong><span>${escapeHtml(preLabel)} · 这里用于核查 AI 真正读取的材料</span></div><button type="button" class="bsb-icon-btn" data-act="ai-drawer-close" aria-label="关闭">×</button></div>
       <div class="bsb-drawer-body">
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><div class="bsb-input-tabs"><button type="button" data-input-view="raw" class="${state.aiInputView === "raw" ? "active" : ""}">原始字幕</button><button type="button" data-input-view="processed" class="${state.aiInputView === "processed" ? "active" : ""}" ${processed ? "" : "disabled"}>规范化稿</button></div><button type="button" class="bsb-mini" data-act="ai-copy-input">复制当前输入</button></div>
         ${text ? `<pre class="bsb-input-preview">${escapeHtml(text)}</pre>` : '<div class="bsb-input-empty">当前没有可查看的输入。先在字幕库选择有字幕的视频，或运行一次处理方案。</div>'}
-      </div>`;
+      </div>`);
   }
 
   function setAiDrawer(kind = "") {
@@ -7309,7 +7311,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     else {
       const root = ensurePanel();
       const content = root.querySelector<HTMLElement>('[data-role="ai-content"]');
-      if (content) content.innerHTML = `<div class="bsb-empty"><div class="bsb-empty-ico">◇</div><strong>${escapeHtml(taskDisplayName(task))}</strong><span>这个产物还没有运行结果。点击“运行全部”按照当前处理方案生成。</span></div>`;
+      if (content) content.innerHTML = toTrustedHTML(`<div class="bsb-empty"><div class="bsb-empty-ico">◇</div><strong>${escapeHtml(taskDisplayName(task))}</strong><span>这个产物还没有运行结果。点击“运行全部”按照当前处理方案生成。</span></div>`);
     }
   }
 
@@ -7350,7 +7352,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     const content = root.querySelector<HTMLElement>('[data-role="ai-content"]');
     if (run.busy) {
       if (content && !run.raw) {
-        content.innerHTML = `<div class="bsb-empty"><div class="bsb-empty-ico">◌</div><strong>${escapeHtml(run.config.name || run.config.model)} 正在生成…</strong><span>${escapeHtml(run.statusText || "正在连接模型")}</span></div>`;
+        content.innerHTML = toTrustedHTML(`<div class="bsb-empty"><div class="bsb-empty-ico">◌</div><strong>${escapeHtml(run.config.name || run.config.model)} 正在生成…</strong><span>${escapeHtml(run.statusText || "正在连接模型")}</span></div>`);
       }
       paintAiStreamText(run.raw || "正在等待模型返回…");
       requestAnimationFrame(() => scrollAiToBottom(true));
@@ -7358,7 +7360,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
       await renderAiMarkdown(run.raw, { streaming: false });
       if (box) box.scrollTop = Math.max(0, Number(run.scrollTop) || 0);
     } else if (content) {
-      content.innerHTML = `<div class="bsb-empty"><div class="bsb-empty-ico">${run.status === "error" ? "!" : "◌"}</div><strong>${escapeHtml(run.config.name || run.config.model)}</strong><span>${escapeHtml(run.error || run.statusText || "暂无输出")}</span></div>`;
+      content.innerHTML = toTrustedHTML(`<div class="bsb-empty"><div class="bsb-empty-ico">${run.status === "error" ? "!" : "◌"}</div><strong>${escapeHtml(run.config.name || run.config.model)}</strong><span>${escapeHtml(run.error || run.statusText || "暂无输出")}</span></div>`);
     }
     setStatus(`${run.promptName || "产物"} · ${run.config.name || run.config.model} · ${run.statusText || run.status}`, run.status === "error" ? "err" : run.status === "done" ? "ok" : undefined);
   }
@@ -7938,7 +7940,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
 
   async function replaceHostInBatches(host: Element, html: string, epoch: number) {
     const tpl = document.createElement("template");
-    tpl.innerHTML = html;
+    tpl.innerHTML = toTrustedHTML(html);
     const nodes = Array.from(tpl.content.childNodes);
     host.replaceChildren();
     for (let i = 0; i < nodes.length; i += RENDER_BATCH_SIZE) {
@@ -8555,7 +8557,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     if (needsSetup || !resolved.readyProfiles.length) {
       const path = document.createElement("div");
       path.className = "bsb-mermaid-setup-path";
-      path.innerHTML = "<span>入口</span><b>设置</b><span>→</span><b>LLM</b><span>→</span><b>API Key</b>";
+      path.innerHTML = toTrustedHTML("<span>入口</span><b>设置</b><span>→</span><b>LLM</b><span>→</span><b>API Key</b>");
       setup.appendChild(path);
     }
 
@@ -8566,12 +8568,12 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
       label.textContent = "用这个模型修";
       const select = document.createElement("select");
       select.dataset.role = "mermaid-repair-model";
-      select.innerHTML = resolved.readyProfiles.map((p) => {
+      select.innerHTML = toTrustedHTML(resolved.readyProfiles.map((p) => {
         const id = String(p.id || "");
         const name = String(p.name || p.model || "未命名");
         const selected = id && id === (resolved.config?.id || "");
         return `<option value="${escapeAttr(id)}"${selected ? " selected" : ""}>${escapeHtml(name)}</option>`;
-      }).join("");
+      }).join(""));
       label.appendChild(select);
       const useBtn = document.createElement("button");
       useBtn.type = "button";
@@ -8585,11 +8587,11 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     if (!resolved.readyProfiles.length) {
       const grid = document.createElement("div");
       grid.className = "bsb-mermaid-setup-grid";
-      grid.innerHTML = `
+      grid.innerHTML = toTrustedHTML(`
         <label>Base URL（含 /v1）<input type="text" data-mermaid-field="baseUrl" value="${escapeAttr(resolved.config?.baseUrl || "")}" placeholder="https://api.example.com/v1" autocomplete="off"></label>
         <label>API Key<input type="password" data-mermaid-field="apiKey" value="" placeholder="就填在这里，不用去翻设置" autocomplete="off"></label>
         <label>Model<input type="text" data-mermaid-field="model" value="${escapeAttr(resolved.config?.model || "")}" placeholder="gpt-4o-mini" autocomplete="off"></label>
-      `;
+      `);
       setup.appendChild(grid);
     }
 
@@ -8670,7 +8672,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
             })
           : svg;
         const tpl = document.createElement("template");
-        tpl.innerHTML = safeSvg;
+        tpl.innerHTML = toTrustedHTML(safeSvg);
         const svgNode = tpl.content.querySelector("svg");
         if (!svgNode) throw new Error("Mermaid 未返回有效 SVG");
 
@@ -8829,7 +8831,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     aside.setAttribute("aria-label", "阅读大纲");
     const head = document.createElement("header");
     head.className = "bsb-folio-toc-head";
-    head.innerHTML = `<span class="bsb-folio-toc-kicker">目录</span><strong class="bsb-folio-toc-title">阅读大纲</strong><em class="bsb-folio-toc-meta">${escapeHtml(summary)}</em><span class="bsb-folio-toc-progress" aria-hidden="true"><i data-role="folio-progress"></i></span>`;
+    head.innerHTML = toTrustedHTML(`<span class="bsb-folio-toc-kicker">目录</span><strong class="bsb-folio-toc-title">阅读大纲</strong><em class="bsb-folio-toc-meta">${escapeHtml(summary)}</em><span class="bsb-folio-toc-progress" aria-hidden="true"><i data-role="folio-progress"></i></span>`);
     const nav = document.createElement("nav");
     nav.className = "bsb-folio-toc-nav";
     outline.forEach((chapter, index: number) => {
@@ -8965,7 +8967,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     const raw = extractHtmlFolioSource(sourceHtml) || String(sourceHtml || "");
     const safe = sanitizeFolioHtml(raw);
     const tpl = document.createElement("template");
-    tpl.innerHTML = safe;
+    tpl.innerHTML = toTrustedHTML(safe);
     let article = tpl.content.querySelector("article");
     if (!article) {
       article = document.createElement("article");
@@ -9090,7 +9092,7 @@ body{padding:48px 20px 80px}
       await ensureMarkdownCore();
       if (needsMath) await ensureKatex();
     } catch  {
-      host.innerHTML = simpleMarkdownFallback(source) + `<p style="color:var(--ctp-peach)">增强渲染库加载失败，已使用安全简易渲染。</p>`;
+      host.innerHTML = toTrustedHTML(simpleMarkdownFallback(source) + `<p style="color:var(--ctp-peach)">增强渲染库加载失败，已使用安全简易渲染。</p>`);
       if (box) box.scrollTop = 0;
       return;
     }
@@ -9236,7 +9238,7 @@ body{padding:48px 20px 80px}
     else if (text) await renderAiMarkdown(text, { streaming: false });
     else {
       const content = ensurePanel().querySelector<HTMLElement>('[data-role="ai-content"]');
-      if (content) content.innerHTML = `<div class="bsb-empty"><div class="bsb-empty-ico">◌</div><strong>预处理稿</strong><span>${escapeHtml(run.statusText || "暂无内容")}</span></div>`;
+      if (content) content.innerHTML = toTrustedHTML(`<div class="bsb-empty"><div class="bsb-empty-ico">◌</div><strong>预处理稿</strong><span>${escapeHtml(run.statusText || "暂无内容")}</span></div>`);
     }
     setStatus(`预处理 · ${run.promptName || "字幕规范化"} · ${run.statusText || run.status}`, run.status === "error" ? "err" : run.status === "done" ? "ok" : undefined);
   }
@@ -9491,7 +9493,7 @@ body{padding:48px 20px 80px}
 
     const contentHost = root.querySelector<HTMLElement>('[data-role="ai-content"]');
     if (contentHost && currentAiWorkbenchStage() === "postprocess") {
-      contentHost.innerHTML = `<div class="bsb-empty"><div class="bsb-empty-ico">◌</div><strong>正在准备后处理输入…</strong><span>${state.preprocessEnabled ? "字幕只规范化一次，然后共享给" : "原始字幕将直接发送给"} ${taskPlans.length} 个后处理产物</span></div>`;
+      contentHost.innerHTML = toTrustedHTML(`<div class="bsb-empty"><div class="bsb-empty-ico">◌</div><strong>正在准备后处理输入…</strong><span>${state.preprocessEnabled ? "字幕只规范化一次，然后共享给" : "原始字幕将直接发送给"} ${taskPlans.length} 个后处理产物</span></div>`);
     } else if (currentAiWorkbenchStage() === "preprocess") {
       await renderPreprocessCanvas();
     }
@@ -10172,7 +10174,7 @@ body{padding:48px 20px 80px}
     const root = document.getElementById(PANEL_ID);
     const content = root?.querySelector<HTMLElement>('[data-role="ai-content"]');
     if (content && currentAiWorkbenchStage() === "postprocess") {
-      content.innerHTML = `<div class="bsb-empty"><div class="bsb-empty-ico">◌</div><strong>当前视频已切换</strong><span>${nextRouteKey ? escapeHtml(nextRouteKey) + " · " : ""}正在读取当前字幕，旧视频 AI 结果已解除绑定</span></div>`;
+      content.innerHTML = toTrustedHTML(`<div class="bsb-empty"><div class="bsb-empty-ico">◌</div><strong>当前视频已切换</strong><span>${nextRouteKey ? escapeHtml(nextRouteKey) + " · " : ""}正在读取当前字幕，旧视频 AI 结果已解除绑定</span></div>`);
     }
   }
 

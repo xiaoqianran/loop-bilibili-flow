@@ -1,10 +1,12 @@
 # Content-Flow / SubBatch
 
-Bilibili Userscript。**[点击安装 / 更新油猴脚本（Tampermonkey）](https://raw.githubusercontent.com/xiaoqianran/loop-bilibili-flow/main/dist/userscript/loop-bilibili-flow.user.js)**。正式安装文件只有一个：
+Bilibili / YouTube Userscript。**[点击安装 / 更新油猴脚本（Tampermonkey）](https://raw.githubusercontent.com/xiaoqianran/loop-bilibili-flow/main/dist/userscript/loop-bilibili-flow.user.js)**。正式安装文件只有一个：
 
 ```text
 dist/userscript/loop-bilibili-flow.user.js
 ```
+
+**版本检查：** GitHub 正式构建与 Greasy Fork 站内发布并不自动同步。如果 Greasy Fork 仍显示旧版，请使用上方 GitHub 直链在 Tampermonkey 更新，并确认已安装版本为 **v6.10.6**；更新后刷新 YouTube 视频页，未展开面板时可按 `Ctrl+B` 召唤。
 
 ## 架构
 
