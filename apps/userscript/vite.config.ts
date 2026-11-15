@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import { renderingTrustedTypesPlugin } from "./build/rendering-trusted-types-plugin";
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [renderingTrustedTypesPlugin()],
   build: {
     emptyOutDir: false,
@@ -9,7 +9,7 @@ export default defineConfig({
     sourcemap: false,
     assetsInlineLimit: Infinity,
     lib: {
-      entry: "apps/userscript/src/main.ts",
+      entry: mode === "pure" ? "apps/userscript/src/main-pure.ts" : "apps/userscript/src/main.ts",
       formats: ["iife"],
       name: "SubBatch",
       fileName: () => "subbatch.bundle.js",
@@ -24,4 +24,4 @@ export default defineConfig({
     },
     outDir: "dist/userscript/.build",
   },
-});
+}));

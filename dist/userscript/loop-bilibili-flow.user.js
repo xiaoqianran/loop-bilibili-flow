@@ -11321,6 +11321,17 @@ ${prompt2.userPromptTemplate}`
       onNavigate
     };
   }
+  const host = createUserscriptHost();
+  const runtime = userscript.create(host);
+  const SubBatchMonorepo = {
+    version: "6.10.9",
+    runtime,
+    core: core$3,
+    bilibili,
+    youtube,
+    app,
+    ui
+  };
   function parseMermaidViewBox(svg2) {
     const raw = String(svg2?.getAttribute("viewBox") || "").trim();
     const [x2 = 0, y2 = 0, w2 = 0, h2 = 0] = raw.split(/[\s,]+/).map(Number);
@@ -83972,17 +83983,6 @@ ${latest}`;
   function isWorkbenchHost(hostname) {
     return /(^|\.)(?:bilibili|youtube)\.com$/i.test(hostname) || /(^|\.)youtu\.be$/i.test(hostname);
   }
-  const host = createUserscriptHost();
-  const runtime = userscript.create(host);
-  const SubBatchMonorepo = {
-    version: "6.10.9",
-    runtime,
-    core: core$3,
-    bilibili,
-    youtube,
-    app,
-    ui
-  };
   if (typeof location !== "undefined" && isWorkbenchHost(location.hostname)) {
     mountWorkbench({ SubBatchMonorepo });
   }
