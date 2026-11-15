@@ -5,6 +5,7 @@
   },
   "include": [
     "src/**/*.ts",
+    "build/**/*.ts",
     "metadata.ts",
     "vite.config.ts"
   ],

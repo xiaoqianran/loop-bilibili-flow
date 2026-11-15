@@ -23,6 +23,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    css: true,
     include: ["tests/**/*.test.ts", "packages/**/*.test.ts"],
     coverage: { reporter: ["text", "html"] },
   },

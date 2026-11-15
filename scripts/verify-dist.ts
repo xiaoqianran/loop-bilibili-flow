@@ -18,7 +18,7 @@ const workbenchSourcePath = resolve(
 );
 
 const requiredMetadata = [
-  "// @version      6.10.6",
+  "// @version      6.10.7",
   "// @run-at       document-idle",
   "// @match        *://www.bilibili.com/video/*",
   "// @match        *://www.bilibili.com/festival/*",
@@ -91,10 +91,18 @@ async function verify(): Promise<void> {
   for (const row of requiredMetadata) {
     if (!output.includes(row)) throw new Error(`Missing metadata row: ${row}`);
   }
-  if (/^\s*(?:import|export)\s/m.test(output) || /\brequire\s*\(/.test(output)) {
+  // Bundled libraries may contain guarded module.require probes for Node-only
+  // optimizations. Reject unbound require() calls, not those inactive probes.
+  if (/^\s*(?:import|export)\s/m.test(output) || /(?<![\w$.])require\s*\(/.test(output)) {
     throw new Error("Output contains a runtime module dependency");
   }
   new Script(output, { filename: "loop-bilibili-flow.user.js" });
+  if (/https:\/\/cdn\.jsdelivr\.net\/(?:npm\/(?:marked|dompurify|katex|mermaid)@|gh\/highlightjs\/)/.test(workbenchSource)) {
+    throw new Error("Workbench rendering must use bundled libraries instead of runtime CDN loading");
+  }
+  if (/url\([^)]*https:\/\/[^)]*\.(?:woff2?|ttf)/i.test(output)) {
+    throw new Error("Rendering fonts must be embedded instead of fetched remotely");
+  }
 
   if (output.includes(COMPAT_BODY_MARKER)) {
     throw new Error("Production userscript must not embed compatibility body marker");

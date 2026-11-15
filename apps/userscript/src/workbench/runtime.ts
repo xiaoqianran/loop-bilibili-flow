@@ -12,9 +12,11 @@ import { buildMermaidCard, getMermaidScale, setMermaidScale, fitMermaidToViewpor
 import type { MermaidElement } from "../ui/workspaces/mermaid-presentation";
 import { normalizeCachedSessionInput, applyRestoredRunOutput, restorePreprocessRun } from "../app/ai-session-hydration";
 import { resolveAiScrollState } from "../ui/workspaces/ai-scroll-state";
+import { marked, DOMPurify, katex, hljs, mermaid, installRenderingStyles } from "../runtime/rendering-libs";
 import { renderTranscriptReading, transcriptReadingText, transcriptTimestampPattern, transcriptTimestamps } from "../ui/workspaces/transcript-reading";
 // Full-feature workbench. Bundled by the composition root; no standalone compatibility script.
 /**
+ * v6.10.7 — 内置 Markdown、净化、公式、高亮和图表依赖，移除运行时 CDN 加载。
  * v6.10.6 — YouTube Trusted Types 隔离适配：修复面板与字幕 HTML 写入。
  * v6.10.5 — YouTube 全工作台入口、字幕与时间跳转适配。
  * v6.10.4 — Video Carrier 抽象：festival/blackboard 仅在检测到真实 BV / active player 后启动完整工作台；修正 live-player helper bridge。
@@ -144,7 +146,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
    */
 
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.10.6";
+    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.10.7";
   const PANEL_ID = "bili-subbatch-panel";
   const UI_STORE_KEY = "bili-subbatch-ui-v2";
   /** Catppuccin flavors — official palette https://catppuccin.com/palette/ */
@@ -7768,62 +7770,26 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
       .join("\n\n");
   }
 
-  function loadScriptOnce(src: string|undefined, globalCheck:()=>boolean) {
-    return new Promise<void>((resolve, reject) => {
-      if (!src) return reject(new Error("Missing script URL"));
-      if (globalCheck && globalCheck()) return resolve();
-      const existed = document.querySelector(`script[data-bsb-src="${src}"]`);
-      if (existed) {
-        if (globalCheck && globalCheck()) return resolve();
-        existed.addEventListener("load", () => resolve(), { once: true });
-        existed.addEventListener("error", () => reject(new Error("load " + src)), { once: true });
-        return;
-      }
-      const s = document.createElement("script");
-      s.src = src; s.async = true; s.dataset.bsbSrc = src;
-      s.onload = () => resolve();
-      s.onerror = () => reject(new Error("failed to load " + src));
-      (document.head || document.documentElement).appendChild(s);
-    });
-  }
-
-  function loadCssOnce(href: string|undefined) {
-    if (!href) return;
-    if (document.querySelector(`link[data-bsb-href="${href}"]`)) return;
-    const l = document.createElement("link");
-    l.rel = "stylesheet"; l.href = href; l.dataset.bsbHref = href;
-    (document.head || document.documentElement).appendChild(l);
-  }
-
   async function ensureMarkdownCore() {
     if (state.renderLibs.core) return;
-    await Promise.all([
-      loadScriptOnce("https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js", () => typeof marked !== "undefined"),
-      loadScriptOnce("https://cdn.jsdelivr.net/npm/dompurify@3.4.12/dist/purify.min.js", () => typeof DOMPurify !== "undefined"),
-    ]);
-    if (typeof marked !== "undefined") {
-      marked.setOptions({ gfm: true, breaks: true, mangle: false, headerIds: false });
-    }
+    if (typeof DOMPurify.sanitize !== "function") throw new Error("HTML sanitizer unavailable");
     state.renderLibs.core = true;
   }
 
   async function ensureHighlight() {
     if (state.renderLibs.highlight) return;
-    loadCssOnce("https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css");
-    await loadScriptOnce("https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js", () => typeof hljs !== "undefined");
+    installRenderingStyles("highlight");
     state.renderLibs.highlight = true;
   }
 
   async function ensureKatex() {
     if (state.renderLibs.katex) return;
-    loadCssOnce("https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css");
-    await loadScriptOnce("https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js", () => typeof katex !== "undefined");
+    installRenderingStyles("katex");
     state.renderLibs.katex = true;
   }
 
   async function ensureMermaid() {
     if (state.renderLibs.mermaid) return;
-    await loadScriptOnce("https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js", () => typeof mermaid !== "undefined");
     if (typeof mermaid !== "undefined") {
       mermaid.initialize({
         startOnLoad: false,
@@ -8020,7 +7986,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
   }
 
   async function enhanceCodeBlocks(host: Element, epoch: number) {
-    const blocks = Array.from(host.querySelectorAll("pre code"));
+    const blocks = Array.from(host.querySelectorAll<HTMLElement>("pre code"));
     if (!blocks.length) return;
     try { await ensureHighlight(); } catch (e) { console.warn("[bili-subbatch] highlight load", e); return; }
     for (let i = 0; i < blocks.length; i++) {
@@ -8740,6 +8706,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
       USE_PROFILES: { html: true },
       SANITIZE_NAMED_PROPS: true,
       FORBID_TAGS: ["script", "style", "iframe", "object", "embed", "form", "link", "meta", "svg", "img", "video", "audio", "base"],
+      FORBID_ATTR: ["style", "width", "height", "align"],
       ADD_TAGS: ["article", "header", "footer", "section", "aside", "figure", "figcaption", "mark", "nav"],
       ADD_ATTR: ["class", "id", "data-kind", "aria-label", "role"],
     });

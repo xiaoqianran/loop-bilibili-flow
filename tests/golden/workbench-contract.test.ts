@@ -188,7 +188,11 @@ describe("Bundled full-feature workbench source", () => {
     const retiredUnused = ["debounce", "knowledgeMarkdownHtml", "loadAiConfig", "requestJsonFast",
       "saveAiConfig", "saveAiConfigFromForm", "setBusy"];
     for (const name of retiredUnused) expect(maintainedSource).not.toMatch(new RegExp(`\\b${name}\\s*\\(`));
-    expect(missing).toEqual([...migrated, ...presentationOwners, ...retiredUnused].sort());
+    // Rendering now ships as local dependencies instead of page-injected CDN scripts.
+    const retiredNetworkLoaders = ["loadScriptOnce", "loadCssOnce"];
+    expect(maintainedSource).toContain('from "../runtime/rendering-libs"');
+    for (const name of retiredNetworkLoaders) expect(maintainedSource).not.toContain(`function ${name}(`);
+    expect(missing).toEqual([...migrated, ...presentationOwners, ...retiredUnused, ...retiredNetworkLoaders].sort());
     expect(maintainedSource).toContain("function boot()");
     expect(maintainedSource).toContain("scheduleAutoCapture(\"initial\", 180)");
   });
@@ -667,10 +671,10 @@ describe("Bundled full-feature workbench source", () => {
     expect(maintainedSource).toContain("function paintStudioAnswer(");
     expect(maintainedSource).toContain("data-role=\"studio-answer\"");
     expect(renderAiStyles("bili-subbatch-panel")).toContain("align-self: flex-end");
-    expect(userscriptMetadata.version).toBe("6.10.6");
+    expect(userscriptMetadata.version).toBe("6.10.7");
     expect(userscriptMetadata.match).toContain("*://www.bilibili.com/festival/*");
     expect(userscriptMetadata.match).toContain("*://www.bilibili.com/blackboard/*");
-    expect(maintainedSource).toContain('|| "6.10.6"');
+    expect(maintainedSource).toContain('|| "6.10.7"');
     expect(maintainedSource).not.toContain("function isDeferredVideoCarrierPage(");
     expect(maintainedSource).toContain("function startUserscript(");
     const startSource = extractFunctionSource(maintainedSource, "startUserscript");

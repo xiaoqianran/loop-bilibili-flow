@@ -5,9 +5,14 @@
   "type": "module",
   "dependencies": {
     "@subbatch/bilibili": "workspace:*",
-    "@subbatch/youtube": "workspace:*",
     "@subbatch/core": "workspace:*",
     "@subbatch/runtime": "workspace:*",
-    "@subbatch/schemas": "workspace:*"
+    "@subbatch/schemas": "workspace:*",
+    "@subbatch/youtube": "workspace:*",
+    "dompurify": "3.4.18",
+    "highlight.js": "11.12.0",
+    "katex": "0.19.1",
+    "marked": "18.2.0",
+    "mermaid": "12.3.0"
   }
 }

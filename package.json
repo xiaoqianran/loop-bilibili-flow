@@ -19,14 +19,17 @@
     "build:pure-userscript": "tsx scripts/build-userscript.ts --mode=pure && pnpm verify:pure-dist",
     "build": "pnpm build:userscript",
     "verify:dist": "tsx scripts/verify-dist.ts",
+    "verify:rendering": "tsx scripts/verify-rendering.ts",
     "verify:pure-dist": "tsx scripts/verify-pure-dist.ts",
     "audit:workbench-types": "tsx scripts/audit-workbench-types.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.33.0",
+    "@playwright/test": "1.65.1",
     "@types/node": "^24.2.1",
     "eslint": "^9.33.0",
     "globals": "^16.3.0",
+    "jsdom": "31.0.1",
     "tsx": "^4.20.3",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.39.0",

@@ -1,10 +1,13 @@
 import { defineConfig } from "vite";
+import { renderingTrustedTypesPlugin } from "./build/rendering-trusted-types-plugin";
 
 export default defineConfig({
+  plugins: [renderingTrustedTypesPlugin()],
   build: {
     emptyOutDir: false,
     minify: false,
     sourcemap: false,
+    assetsInlineLimit: Infinity,
     lib: {
       entry: "apps/userscript/src/main.ts",
       formats: ["iife"],
@@ -15,6 +18,8 @@ export default defineConfig({
       output: {
         // Expose the single SubBatchMonorepo composition object on the IIFE global.
         exports: "named",
+        // Mermaid's diagram modules and KaTeX fonts must ship in the same file.
+        inlineDynamicImports: true,
       },
     },
     outDir: "dist/userscript/.build",

@@ -46,27 +46,3 @@ declare const GM_download:
     }) => void)
   | undefined;
 declare const unsafeWindow: Window | undefined;
-
-/** CDN rendering APIs are optional at runtime; the workbench checks/lazily loads them. */
-interface MarkdownGlobal {
-  parse(markdown: string): string;
-  setOptions(config: Record<string, unknown>): void;
-}
-interface SvgSanitizer {
-  sanitize(html: string, options?: Record<string, unknown>): string;
-}
-interface MermaidGlobal {
-  initialize(options: Record<string, unknown>): void;
-  render(id: string, source: string): Promise<{ svg: string; bindFunctions?: (element: Element) => void }>;
-}
-interface KatexGlobal {
-  renderToString(math: string, options?: Record<string, unknown>): string;
-}
-interface SyntaxHighlighter {
-  highlightElement(element: Element): void;
-}
-declare const marked: MarkdownGlobal;
-declare const DOMPurify: SvgSanitizer;
-declare const mermaid: MermaidGlobal;
-declare const katex: KatexGlobal;
-declare const hljs: SyntaxHighlighter;
