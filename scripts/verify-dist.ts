@@ -18,7 +18,7 @@ const workbenchSourcePath = resolve(
 );
 
 const requiredMetadata = [
-  "// @version      6.10.4",
+  "// @version      6.10.5",
   "// @run-at       document-idle",
   "// @match        *://www.bilibili.com/video/*",
   "// @match        *://www.bilibili.com/festival/*",

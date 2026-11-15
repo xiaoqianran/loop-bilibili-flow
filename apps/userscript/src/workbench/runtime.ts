@@ -13,6 +13,7 @@ import { normalizeCachedSessionInput, applyRestoredRunOutput, restorePreprocessR
 import { resolveAiScrollState } from "../ui/workspaces/ai-scroll-state";
 // Full-feature workbench. Bundled by the composition root; no standalone compatibility script.
 /**
+ * v6.10.5 — YouTube 全工作台入口、字幕与时间跳转适配。
  * v6.10.4 — Video Carrier 抽象：festival/blackboard 仅在检测到真实 BV / active player 后启动完整工作台；修正 live-player helper bridge。
  * v6.9.15 — 支持 B 站 /festival/* 专题页：复用 BV 路由与现有字幕链路，不引入专题页专用抓取分支。
  * v6.9.14 — 工作台可见文字默认统一 14px。
@@ -140,7 +141,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
    */
 
   const SCRIPT_VERSION =
-    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.10.4";
+    (typeof GM_info !== "undefined" && GM_info?.script?.version) || "6.10.5";
   const PANEL_ID = "bili-subbatch-panel";
   const UI_STORE_KEY = "bili-subbatch-ui-v2";
   /** Catppuccin flavors — official palette https://catppuccin.com/palette/ */
@@ -1159,6 +1160,8 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
    * - 返回字段可被「手动模式」复用（mid/sid/bvid…）
    */
   function detectContext(href: string): ScanContext {
+    const yt = SubBatch.SubBatchMonorepo.youtube.extractVideoRef(href);
+    if (yt) return { type: "video", bvid: yt.videoId, page: 1, source: "youtube" };
     try {
       const pure =
         typeof SubBatch !== "undefined"
@@ -1580,6 +1583,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
   }
 
   function routeVideoKey(bvid: string|undefined, page: number) {
+    if (isYoutubePage()) return "youtube/" + String(bvid || "") + "/main";
     try {
       const pure =
         typeof SubBatch !== "undefined"
@@ -1597,7 +1601,17 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
    * 页面同样可能承载一个真实的 BV。AI 自动链路只认 BV+P 这个身份键。
    * 连播时 URL / __INITIAL_STATE__ 会落后于 player，优先走 monorepo 播放器身份。
    */
+  function isYoutubePage() {
+    return SubBatch.SubBatchMonorepo.youtube.matchesYoutubeUrl(location.href);
+  }
+
   function currentRouteVideoRef() {
+    if (isYoutubePage()) {
+      const resolved = appCall("content.resolve", location.href, pageWindow);
+      if (!resolved || resolved.ref.source !== "youtube") return null;
+      const bvid = resolved.ref.sourceId;
+      return { bvid, page: 1, key: routeVideoKey(bvid, 1), ctx: detectContext(location.href) };
+    }
     const resolved = appCall("video.resolve", location.href, pageWindow);
     if (resolved) return resolved;
     const ctx = detectContext(location.href);
@@ -1746,7 +1760,23 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
     return result;
   }
 
+  async function fetchYoutubeSubtitle(bvid: string, signal?: AbortSignal): Promise<SubtitleFetchResult> {
+    const resolved = appCall("content.resolve", location.href, pageWindow);
+    if (!resolved || resolved.ref.source !== "youtube" || resolved.ref.sourceId !== bvid) {
+      return { bvid, page: 1, status: "error", error: "YouTube video changed" };
+    }
+    const result = await appCall("transcript.acquireDetailed", location.href, pageWindow, runtimeNetwork(), signal);
+    if (result.status !== "ok") return { bvid, page: 1, status: result.status === "unavailable" ? "empty" : "error", error: result.status === "error" ? result.message : "No captions" };
+    const cues = coreCall("toCues", result.transcript.segments.map(segment => ({ from: segment.start, to: segment.end ?? segment.start, content: segment.text })));
+    const native = resolved.native as { title?: string; author?: string };
+    return { bvid, page: 1, status: "ok", data: cues, cue_count: cues.length,
+      title: native.title || document.title.replace(/ - YouTube$/i, ""), author: native.author || "",
+      lan: result.transcript.language || "", lan_doc: result.transcript.language || "",
+      source: result.transcript.origin || "youtube", cacheLevel: "YouTube Provider" };
+  }
+
   async function fetchCurrentSubtitleFast(bvid: string, page = 1, signal: AbortSignal, { forceNetwork = false } = {}): Promise<SubtitleFetchResult> {
+    if (isYoutubePage()) return fetchYoutubeSubtitle(bvid, signal);
     bvid = extractBvid(bvid) || String(bvid || "").trim();
     if (!bvid) throw new Error("empty bvid");
 
@@ -1794,6 +1824,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
   }
 
   async function fetchSubtitle(bvid: string, page = 1): Promise<SubtitleFetchResult> {
+    if (isYoutubePage()) return fetchYoutubeSubtitle(bvid);
     bvid = extractBvid(bvid) || String(bvid || "").trim();
     if (!bvid) return { bvid: "", status: "error", error: "empty bvid" };
 
@@ -3881,6 +3912,7 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
   }
 
   async function enablePlayerSubtitle(item: WorkbenchLibraryItem|null) {
+    if (isYoutubePage()) return;
     if (!state.autoEnablePlayerSubtitle) return;
     if (state.playerSubtitleOperation) return state.playerSubtitleOperation;
     state.playerSubtitleOperation = (async () => {
@@ -7947,6 +7979,12 @@ export function mountWorkbench(SubBatch: { SubBatchMonorepo: typeof SubBatchMono
 
   function seekToVideoTimestamp(seconds: unknown, bvid: string, page: number) {
     if (typeof seconds !== "number" || !Number.isFinite(seconds)) return;
+    if (isYoutubePage()) {
+      const current = SubBatch.SubBatchMonorepo.youtube.extractVideoRef(location.href);
+      if (current?.videoId === bvid) { const video = document.querySelector("video"); if (video) { video.currentTime = Math.max(0, seconds); return; } }
+      if (bvid) window.open("https://www.youtube.com/watch?v=" + encodeURIComponent(bvid) + "&t=" + Math.floor(seconds) + "s", "_blank", "noopener");
+      return;
+    }
     const currentBvid = extractBvid(location.href);
     let currentPage = 1;
     try { currentPage = Math.max(1, Number(new URL(location.href).searchParams.get("p")) || 1); } catch  { /* ignore */ }
@@ -9598,6 +9636,7 @@ body{padding:48px 20px 80px}
 
   /** IO: fetch view, then pure applyUgcSeasonToItems. */
   async function stampUgcSeasonGroupMeta<T extends LibraryGroupItem>(items: T[], bvid: string) {
+    if (isYoutubePage()) return items;
     const list = items || [];
     if (!list.length) return list;
     const id = bvid || list[0]?.bvid;
@@ -9614,6 +9653,10 @@ body{padding:48px 20px 80px}
   }
 
   async function doScan() {
+    if (isYoutubePage()) {
+      await autoCaptureCurrentVideo("manual-scan", { forceNetwork: true });
+      return;
+    }
     if (state.scanBusy) {
       state.cancelScan = true;
       state.pendingRescan = true;
@@ -10353,7 +10396,7 @@ body{padding:48px 20px 80px}
     const nextVideoKey = nextRef?.key || "";
     const hrefChanged = href !== lastHref;
     const changedFn = bilibiliFn("playingVideoChanged");
-    const videoChanged = typeof changedFn === "function"
+    const videoChanged = !isYoutubePage() && typeof changedFn === "function"
       ? changedFn(lastPlayingRef, nextRef)
       : nextVideoKey !== lastRouteVideoKey;
     if (!hrefChanged && !videoChanged) return;

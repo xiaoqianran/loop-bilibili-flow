@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Bili SubBatch (loop-bilibili)
 // @namespace    https://github.com/loop-bilibili/bili-subbatch
-// @version      6.10.4
+// @version      6.10.5
 // @updateURL    https://raw.githubusercontent.com/xiaoqianran/loop-bilibili-flow/main/dist/userscript/loop-bilibili-flow.user.js
 // @downloadURL  https://raw.githubusercontent.com/xiaoqianran/loop-bilibili-flow/main/dist/userscript/loop-bilibili-flow.user.js
 // @description  B站 / YouTube 知识阅读工作台：字幕预处理、多产物后处理、Anchor 局部追问树与持久 Knowledge Workspace
@@ -41,7 +41,7 @@
 // @license      MIT
 // ==/UserScript==
 
-// SubBatch bundled application (6.10.4)
+// SubBatch bundled application (6.10.5)
 var SubBatch = (function(exports) {
   "use strict";
   function videoViewUrl(bvid) {
@@ -11855,7 +11855,7 @@ ${prompt2.userPromptTemplate}`
     function isMermaidSetupError(value) {
       return !!value && typeof value === "object" && "mermaidSetup" in value && value.mermaidSetup === true;
     }
-    const SCRIPT_VERSION = typeof GM_info !== "undefined" && GM_info?.script?.version || "6.10.4";
+    const SCRIPT_VERSION = typeof GM_info !== "undefined" && GM_info?.script?.version || "6.10.5";
     const PANEL_ID = "bili-subbatch-panel";
     const UI_STORE_KEY = "bili-subbatch-ui-v2";
     const DEFAULT_CTP_FLAVOR = "mocha";
@@ -12806,6 +12806,8 @@ ${prompt2.userPromptTemplate}`
       return new Promise((r) => setTimeout(r, ms));
     }
     function detectContext2(href) {
+      const yt = SubBatch2.SubBatchMonorepo.youtube.extractVideoRef(href);
+      if (yt) return { type: "video", bvid: yt.videoId, page: 1, source: "youtube" };
       try {
         const pure = typeof SubBatch2 !== "undefined" ? SubBatch2?.SubBatchMonorepo?.bilibili?.detectContext : null;
         if (typeof pure === "function") {
@@ -13141,6 +13143,7 @@ ${prompt2.userPromptTemplate}`
       }
     }
     function routeVideoKey2(bvid, page) {
+      if (isYoutubePage()) return "youtube/" + String(bvid || "") + "/main";
       try {
         const pure = typeof SubBatch2 !== "undefined" ? SubBatch2?.SubBatchMonorepo?.bilibili?.routeVideoKey : null;
         if (typeof pure === "function") return pure(bvid, page);
@@ -13148,7 +13151,16 @@ ${prompt2.userPromptTemplate}`
       }
       return `${String(bvid || "").toUpperCase()}:P${Math.max(1, Number(page) || 1)}`;
     }
+    function isYoutubePage() {
+      return SubBatch2.SubBatchMonorepo.youtube.matchesYoutubeUrl(location.href);
+    }
     function currentRouteVideoRef() {
+      if (isYoutubePage()) {
+        const resolved2 = appCall("content.resolve", location.href, pageWindow);
+        if (!resolved2 || resolved2.ref.source !== "youtube") return null;
+        const bvid2 = resolved2.ref.sourceId;
+        return { bvid: bvid2, page: 1, key: routeVideoKey2(bvid2, 1), ctx: detectContext2(location.href) };
+      }
       const resolved = appCall("video.resolve", location.href, pageWindow);
       if (resolved) return resolved;
       const ctx = detectContext2(location.href);
@@ -13292,7 +13304,31 @@ ${prompt2.userPromptTemplate}`
       });
       return result;
     }
+    async function fetchYoutubeSubtitle(bvid, signal) {
+      const resolved = appCall("content.resolve", location.href, pageWindow);
+      if (!resolved || resolved.ref.source !== "youtube" || resolved.ref.sourceId !== bvid) {
+        return { bvid, page: 1, status: "error", error: "YouTube video changed" };
+      }
+      const result = await appCall("transcript.acquireDetailed", location.href, pageWindow, runtimeNetwork(), signal);
+      if (result.status !== "ok") return { bvid, page: 1, status: result.status === "unavailable" ? "empty" : "error", error: result.status === "error" ? result.message : "No captions" };
+      const cues = coreCall("toCues", result.transcript.segments.map((segment) => ({ from: segment.start, to: segment.end ?? segment.start, content: segment.text })));
+      const native = resolved.native;
+      return {
+        bvid,
+        page: 1,
+        status: "ok",
+        data: cues,
+        cue_count: cues.length,
+        title: native.title || document.title.replace(/ - YouTube$/i, ""),
+        author: native.author || "",
+        lan: result.transcript.language || "",
+        lan_doc: result.transcript.language || "",
+        source: result.transcript.origin || "youtube",
+        cacheLevel: "YouTube Provider"
+      };
+    }
     async function fetchCurrentSubtitleFast(bvid, page = 1, signal, { forceNetwork = false } = {}) {
+      if (isYoutubePage()) return fetchYoutubeSubtitle(bvid, signal);
       bvid = extractBvid2(bvid) || String(bvid || "").trim();
       if (!bvid) throw new Error("empty bvid");
       const viewHit = await fetchVideoViewFast(bvid, signal, { forceNetwork });
@@ -13336,6 +13372,7 @@ ${prompt2.userPromptTemplate}`
       return finalResult;
     }
     async function fetchSubtitle(bvid, page = 1) {
+      if (isYoutubePage()) return fetchYoutubeSubtitle(bvid);
       bvid = extractBvid2(bvid) || String(bvid || "").trim();
       if (!bvid) return { bvid: "", status: "error", error: "empty bvid" };
       let detail;
@@ -15346,6 +15383,7 @@ ${prompt2.userPromptTemplate}`
       });
     }
     async function enablePlayerSubtitle(item) {
+      if (isYoutubePage()) return;
       if (!state2.autoEnablePlayerSubtitle) return;
       if (state2.playerSubtitleOperation) return state2.playerSubtitleOperation;
       state2.playerSubtitleOperation = (async () => {
@@ -19230,6 +19268,18 @@ ${coreCall("cuesToAiText", it.data || [], it.bvid, it.page || 1)}`;
     }
     function seekToVideoTimestamp(seconds, bvid, page) {
       if (typeof seconds !== "number" || !Number.isFinite(seconds)) return;
+      if (isYoutubePage()) {
+        const current = SubBatch2.SubBatchMonorepo.youtube.extractVideoRef(location.href);
+        if (current?.videoId === bvid) {
+          const video22 = document.querySelector("video");
+          if (video22) {
+            video22.currentTime = Math.max(0, seconds);
+            return;
+          }
+        }
+        if (bvid) window.open("https://www.youtube.com/watch?v=" + encodeURIComponent(bvid) + "&t=" + Math.floor(seconds) + "s", "_blank", "noopener");
+        return;
+      }
       const currentBvid = extractBvid2(location.href);
       let currentPage = 1;
       try {
@@ -20839,6 +20889,7 @@ ${latest}`;
       return ctx;
     }
     async function stampUgcSeasonGroupMeta(items, bvid) {
+      if (isYoutubePage()) return items;
       const list = items || [];
       if (!list.length) return list;
       const id = bvid || list[0]?.bvid;
@@ -20854,6 +20905,10 @@ ${latest}`;
       }
     }
     async function doScan() {
+      if (isYoutubePage()) {
+        await autoCaptureCurrentVideo("manual-scan", { forceNetwork: true });
+        return;
+      }
       if (state2.scanBusy) {
         state2.cancelScan = true;
         state2.pendingRescan = true;
@@ -21482,7 +21537,7 @@ ${latest}`;
       const nextVideoKey = nextRef?.key || "";
       const hrefChanged = href !== lastHref;
       const changedFn = bilibiliFn("playingVideoChanged");
-      const videoChanged = typeof changedFn === "function" ? changedFn(lastPlayingRef, nextRef) : nextVideoKey !== lastRouteVideoKey;
+      const videoChanged = !isYoutubePage() && typeof changedFn === "function" ? changedFn(lastPlayingRef, nextRef) : nextVideoKey !== lastRouteVideoKey;
       if (!hrefChanged && !videoChanged) return;
       lastHref = href;
       lastPlayingRef = nextRef;
@@ -21557,12 +21612,12 @@ ${latest}`;
     }
   }
   function isWorkbenchHost(hostname) {
-    return /(^|\.)bilibili\.com$/i.test(hostname);
+    return /(^|\.)(?:bilibili|youtube)\.com$/i.test(hostname) || /(^|\.)youtu\.be$/i.test(hostname);
   }
   const host = createUserscriptHost();
   const runtime = userscript.create(host);
   const SubBatchMonorepo = {
-    version: "6.10.4",
+    version: "6.10.5",
     runtime,
     core,
     bilibili,

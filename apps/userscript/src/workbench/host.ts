@@ -1,4 +1,4 @@
-/** Domain boundary for the Bilibili-only full workbench. */
+/** Domain boundary for the Bilibili and YouTube full workbench. */
 export function isWorkbenchHost(hostname: string): boolean {
-  return /(^|\.)bilibili\.com$/i.test(hostname);
+  return /(^|\.)(?:bilibili|youtube)\.com$/i.test(hostname) || /(^|\.)youtu\.be$/i.test(hostname);
 }
