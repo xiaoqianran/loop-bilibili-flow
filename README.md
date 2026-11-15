@@ -1,6 +1,6 @@
 # Content-Flow / SubBatch
 
-Bilibili Userscript。正式安装文件只有一个：
+Bilibili Userscript。**[点击安装 / 更新油猴脚本（Tampermonkey）](https://raw.githubusercontent.com/xiaoqianran/loop-bilibili-flow/main/dist/userscript/loop-bilibili-flow.user.js)**。正式安装文件只有一个：
 
 ```text
 dist/userscript/loop-bilibili-flow.user.js
